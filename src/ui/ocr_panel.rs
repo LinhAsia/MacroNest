@@ -314,6 +314,7 @@ impl CrosshairApp {
                     false,
                     true,
                     false,
+                    None,
                 );
 
                 if changed {

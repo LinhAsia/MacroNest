@@ -1280,6 +1280,8 @@ impl CrosshairApp {
                                 preset.source_width,
                                 preset.source_height,
                             ))
+                        } else if let Some(p) = preview.as_ref() {
+                            Some((0, 0, p.logical_width, p.logical_height))
                         } else {
                             None
                         },
@@ -1291,6 +1293,7 @@ impl CrosshairApp {
                         false,
                         true,
                         true,
+                        Some((preset.flip_horizontal, preset.flip_vertical, preset.rotation_degrees)),
                     );
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -1403,6 +1406,7 @@ impl CrosshairApp {
                         true,
                         preset.preview_enabled,
                         true,
+                        None,
                     );
                     if crop_changed {
                         preset.source_crop_initialized = true;
@@ -2015,6 +2019,7 @@ impl CrosshairApp {
         use_preview_local_coordinates: bool,
         show_preview_image: bool,
         allow_wheel_zoom: bool,
+        transform_spec: Option<(bool, bool, f32)>,
     ) -> bool {
         let mut changed = false;
         ui.label(RichText::new(label).strong());
@@ -2424,12 +2429,57 @@ impl CrosshairApp {
             } else {
                 ui.painter().clone()
             };
-            painter.image(
-                preview_frame.texture.id(),
-                preview_content_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            let texture = preview_frame
+                .filtered_texture
+                .as_ref()
+                .unwrap_or(&preview_frame.texture);
+            if use_preview_local_coordinates && transform_spec.is_some() {
+                let (flip_h, flip_v, rot_deg) = transform_spec.unwrap_or((false, false, 0.0));
+                let (u_min, u_max) = if flip_h { (1.0, 0.0) } else { (0.0, 1.0) };
+                let (v_min, v_max) = if flip_v { (1.0, 0.0) } else { (0.0, 1.0) };
+                if rot_deg.abs() > 0.001 || flip_h || flip_v {
+                    let center = preview_content_rect.center();
+                    let rad = rot_deg.to_radians();
+                    let (sin_a, cos_a) = rad.sin_cos();
+                    let rotate_point = |p: egui::Pos2| -> egui::Pos2 {
+                        let dx = p.x - center.x;
+                        let dy = p.y - center.y;
+                        egui::pos2(
+                            center.x + dx * cos_a - dy * sin_a,
+                            center.y + dx * sin_a + dy * cos_a,
+                        )
+                    };
+                    let p0 = rotate_point(preview_content_rect.left_top());
+                    let p1 = rotate_point(preview_content_rect.right_top());
+                    let p2 = rotate_point(preview_content_rect.right_bottom());
+                    let p3 = rotate_point(preview_content_rect.left_bottom());
+
+                    let mut mesh = egui::Mesh::with_texture(texture.id());
+                    mesh.reserve_triangles(2);
+                    mesh.reserve_vertices(4);
+                    mesh.vertices.push(egui::epaint::Vertex { pos: p0, uv: egui::pos2(u_min, v_min), color: Color32::WHITE });
+                    mesh.vertices.push(egui::epaint::Vertex { pos: p1, uv: egui::pos2(u_max, v_min), color: Color32::WHITE });
+                    mesh.vertices.push(egui::epaint::Vertex { pos: p2, uv: egui::pos2(u_max, v_max), color: Color32::WHITE });
+                    mesh.vertices.push(egui::epaint::Vertex { pos: p3, uv: egui::pos2(u_min, v_max), color: Color32::WHITE });
+                    mesh.add_triangle(0, 1, 2);
+                    mesh.add_triangle(0, 2, 3);
+                    painter.add(egui::Shape::mesh(mesh));
+                } else {
+                    painter.image(
+                        texture.id(),
+                        preview_content_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+            } else {
+                painter.image(
+                    texture.id(),
+                    preview_content_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
             painter.text(
                 preview_content_rect.left_top() + vec2(8.0, 8.0),
                 egui::Align2::LEFT_TOP,
@@ -2924,24 +2974,73 @@ impl CrosshairApp {
         if let (Some(preview_frame), Some((src_x, src_y, src_w, src_h))) =
             (preview, target_preview_source)
         {
-            let uv = egui::Rect::from_min_max(
-                egui::pos2(
-                    (src_x as f32 / preview_frame.logical_width.max(1) as f32).clamp(0.0, 1.0),
-                    (src_y as f32 / preview_frame.logical_height.max(1) as f32).clamp(0.0, 1.0),
-                ),
-                egui::pos2(
-                    ((src_x + src_w) as f32 / preview_frame.logical_width.max(1) as f32)
-                        .clamp(0.0, 1.0),
-                    ((src_y + src_h) as f32 / preview_frame.logical_height.max(1) as f32)
-                        .clamp(0.0, 1.0),
-                ),
-            );
-            if uv.width() > 0.0 && uv.height() > 0.0 {
+            let u0 = (src_x as f32 / preview_frame.logical_width.max(1) as f32).clamp(0.0, 1.0);
+            let v0 = (src_y as f32 / preview_frame.logical_height.max(1) as f32).clamp(0.0, 1.0);
+            let u1 = ((src_x + src_w) as f32 / preview_frame.logical_width.max(1) as f32).clamp(0.0, 1.0);
+            let v1 = ((src_y + src_h) as f32 / preview_frame.logical_height.max(1) as f32).clamp(0.0, 1.0);
+
+            if (u1 - u0).abs() > 0.0 && (v1 - v0).abs() > 0.0 {
                 let texture = preview_frame
                     .filtered_texture
                     .as_ref()
                     .unwrap_or(&preview_frame.texture);
-                selection_painter.image(texture.id(), rect, uv, Color32::WHITE);
+
+                let (flip_h, flip_v, rot_deg) = transform_spec.unwrap_or((false, false, 0.0));
+                let (u_min, u_max) = if flip_h { (u1, u0) } else { (u0, u1) };
+                let (v_min, v_max) = if flip_v { (v1, v0) } else { (v0, v1) };
+
+                if rot_deg.abs() > 0.001 || flip_h || flip_v {
+                    let center = rect.center();
+                    let rad = rot_deg.to_radians();
+                    let (sin_a, cos_a) = rad.sin_cos();
+                    let rotate_point = |p: egui::Pos2| -> egui::Pos2 {
+                        let dx = p.x - center.x;
+                        let dy = p.y - center.y;
+                        egui::pos2(
+                            center.x + dx * cos_a - dy * sin_a,
+                            center.y + dx * sin_a + dy * cos_a,
+                        )
+                    };
+
+                    let p0 = rotate_point(rect.left_top());
+                    let p1 = rotate_point(rect.right_top());
+                    let p2 = rotate_point(rect.right_bottom());
+                    let p3 = rotate_point(rect.left_bottom());
+
+                    let mut mesh = egui::Mesh::with_texture(texture.id());
+                    mesh.reserve_triangles(2);
+                    mesh.reserve_vertices(4);
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: p0,
+                        uv: egui::pos2(u_min, v_min),
+                        color: Color32::WHITE,
+                    });
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: p1,
+                        uv: egui::pos2(u_max, v_min),
+                        color: Color32::WHITE,
+                    });
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: p2,
+                        uv: egui::pos2(u_max, v_max),
+                        color: Color32::WHITE,
+                    });
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: p3,
+                        uv: egui::pos2(u_min, v_max),
+                        color: Color32::WHITE,
+                    });
+                    mesh.add_triangle(0, 1, 2);
+                    mesh.add_triangle(0, 2, 3);
+                    selection_painter.add(egui::Shape::mesh(mesh));
+                } else {
+                    selection_painter.image(
+                        texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::pos2(u0, v0), egui::pos2(u1, v1)),
+                        Color32::WHITE,
+                    );
+                }
             }
         }
 

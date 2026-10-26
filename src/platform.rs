@@ -672,17 +672,36 @@ mod windows_platform {
                 windows.push(next);
                 previous = next;
             }
+
+            let start_btn = FindWindowW(w!("Button"), w!("Start"))
+                .unwrap_or(HWND(std::ptr::null_mut()));
+            if !start_btn.0.is_null() {
+                windows.push(start_btn);
+            }
         }
         windows
     }
 
     pub fn hide_taskbar() -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        };
+
         let windows = taskbar_windows();
         if windows.is_empty() {
             return false;
         }
         for hwnd in windows {
             unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
@@ -690,12 +709,25 @@ mod windows_platform {
     }
 
     pub fn show_taskbar() -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        };
+
         let windows = taskbar_windows();
         if windows.is_empty() {
             return false;
         }
         for hwnd in windows {
             unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
                 let _ = ShowWindow(hwnd, SW_SHOWNA);
             }
         }

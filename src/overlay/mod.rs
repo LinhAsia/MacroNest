@@ -20827,11 +20827,7 @@ mod windows_overlay {
 
                 let mut buffer_rgba = vec![0u8; crop_w * crop_h * 4];
 
-                let needs_custom_render = preset.binary_filter
-            || preset.flip_horizontal
-            || preset.flip_vertical
-            || preset.rotation_degrees.abs() > 0.001;
-        if needs_custom_render {
+                if preset.binary_filter {
                     let threshold = preset.binary_threshold;
                     let threshold_sq = (threshold as i32).pow(2);
                     let binary_mode = preset.binary_mode;
@@ -20922,6 +20918,11 @@ mod windows_overlay {
                 } else {
                     let binarized = renderer_ref.binarized_mut(crop_w * crop_h * 4);
                     binarized.copy_from_slice(&buffer_rgba);
+                    if !preset.binary_filter {
+                        for pixel in binarized.chunks_exact_mut(4) {
+                            pixel.swap(0, 2);
+                        }
+                    }
                     unsafe { renderer_ref.present(pin_hwnd, &preset, crop_w, crop_h) }
                 };
 
@@ -20991,7 +20992,12 @@ mod windows_overlay {
             }
         }
 
-        if preset.binary_filter {
+        let needs_custom_render = preset.binary_filter
+            || preset.flip_horizontal
+            || preset.flip_vertical
+            || preset.rotation_degrees.abs() > 0.001;
+
+        if needs_custom_render {
             unsafe {
                 if let Some(active) = runtime.active_pin_thumbnail.take()
                     && let Some(thumbnail_id) = active.thumbnail_id

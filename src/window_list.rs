@@ -1615,6 +1615,11 @@ mod windows_impl {
                 d3d_context.Unmap(read_tex, 0);
             }
 
+            // WGC textures use B8G8R8A8; convert to standard RGBA so all downstream previews and overlays match.
+            for pixel in buffer.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+
             self.write_idx = 1 - write_idx;
             Ok(true)
         }
