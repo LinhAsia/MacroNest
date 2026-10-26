@@ -20723,6 +20723,89 @@ mod windows_overlay {
         Some(bgra)
     }
 
+    #[inline(always)]
+    pub(crate) fn flip_into_bgra(
+        src: &[u8],
+        dst: &mut [u8],
+        w: usize,
+        h: usize,
+        flip_h: bool,
+        flip_v: bool,
+    ) {
+        if src.len() < w * h * 4 || dst.len() < w * h * 4 {
+            return;
+        }
+
+        #[inline(always)]
+        fn swap_rb(p: u32) -> u32 {
+            (p & 0xFF00FF00) | ((p & 0x000000FF) << 16) | ((p & 0x00FF0000) >> 16)
+        }
+
+        let src_ptr = src.as_ptr();
+        let dst_ptr = dst.as_mut_ptr();
+
+        match (flip_h, flip_v) {
+            (false, false) => {
+                for i in 0..(w * h) {
+                    unsafe {
+                        let p = std::ptr::read_unaligned(src_ptr.add(i * 4) as *const u32);
+                        std::ptr::write_unaligned(dst_ptr.add(i * 4) as *mut u32, swap_rb(p));
+                    }
+                }
+            }
+            (true, false) => {
+                for y in 0..h {
+                    let y_offset = y * w;
+                    for x in 0..w {
+                        unsafe {
+                            let p = std::ptr::read_unaligned(
+                                src_ptr.add((y_offset + w - 1 - x) * 4) as *const u32,
+                            );
+                            std::ptr::write_unaligned(
+                                dst_ptr.add((y_offset + x) * 4) as *mut u32,
+                                swap_rb(p),
+                            );
+                        }
+                    }
+                }
+            }
+            (false, true) => {
+                for y in 0..h {
+                    let src_y_offset = (h - 1 - y) * w;
+                    let dst_y_offset = y * w;
+                    for x in 0..w {
+                        unsafe {
+                            let p = std::ptr::read_unaligned(
+                                src_ptr.add((src_y_offset + x) * 4) as *const u32,
+                            );
+                            std::ptr::write_unaligned(
+                                dst_ptr.add((dst_y_offset + x) * 4) as *mut u32,
+                                swap_rb(p),
+                            );
+                        }
+                    }
+                }
+            }
+            (true, true) => {
+                for y in 0..h {
+                    let src_y_offset = (h - 1 - y) * w;
+                    let dst_y_offset = y * w;
+                    for x in 0..w {
+                        unsafe {
+                            let p = std::ptr::read_unaligned(
+                                src_ptr.add((src_y_offset + w - 1 - x) * 4) as *const u32,
+                            );
+                            std::ptr::write_unaligned(
+                                dst_ptr.add((dst_y_offset + x) * 4) as *mut u32,
+                                swap_rb(p),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn spawn_bin_pin_thread(preset_id: u32, raw_source_hwnd: HWND, raw_pin_hwnd: HWND) {
         let previous = ACTIVE_BIN_PIN_STOP.lock().take();
         if let Some(stop_flag) = previous {
@@ -20740,11 +20823,15 @@ mod windows_overlay {
         let pin_hwnd_val = raw_pin_hwnd.0 as isize;
 
         let handle = thread::spawn(move || {
+            unsafe {
+                let _ = timeBeginPeriod(1);
+            }
             let source_hwnd = HWND(source_hwnd_val as *mut c_void);
             let pin_hwnd = HWND(pin_hwnd_val as *mut c_void);
             let mut last_run = Instant::now();
-            let loop_interval = Duration::from_millis(33);
+            let loop_interval = Duration::from_millis(16);
             let mut renderer: Option<BinPinFrameRenderer> = None;
+            let mut buffer_rgba = Vec::new();
 
             while !stop_flag.load(Ordering::Relaxed) {
                 let elapsed = last_run.elapsed();
@@ -20825,7 +20912,7 @@ mod windows_overlay {
                     renderer.insert(created)
                 };
 
-                let mut buffer_rgba = vec![0u8; crop_w * crop_h * 4];
+                buffer_rgba.resize(crop_w * crop_h * 4, 0);
 
                 if preset.binary_filter {
                     let threshold = preset.binary_threshold;
@@ -20896,11 +20983,9 @@ mod windows_overlay {
                     }
                 }
 
-                let needs_transform = preset.flip_horizontal
-                    || preset.flip_vertical
-                    || preset.rotation_degrees.abs() > 0.001;
+                let has_rotation = preset.rotation_degrees.abs() > 0.001;
 
-                let presented = if needs_transform {
+                let presented = if has_rotation {
                     if let Some(bgra) = render_transformed_pin_pixels(
                         &buffer_rgba,
                         crop_w,
@@ -20917,12 +21002,14 @@ mod windows_overlay {
                     }
                 } else {
                     let binarized = renderer_ref.binarized_mut(crop_w * crop_h * 4);
-                    binarized.copy_from_slice(&buffer_rgba);
-                    if !preset.binary_filter {
-                        for pixel in binarized.chunks_exact_mut(4) {
-                            pixel.swap(0, 2);
-                        }
-                    }
+                    flip_into_bgra(
+                        &buffer_rgba,
+                        binarized,
+                        crop_w,
+                        crop_h,
+                        preset.flip_horizontal,
+                        preset.flip_vertical,
+                    );
                     unsafe { renderer_ref.present(pin_hwnd, &preset, crop_w, crop_h) }
                 };
 
@@ -20931,6 +21018,9 @@ mod windows_overlay {
                 }
             }
 
+            unsafe {
+                let _ = timeEndPeriod(1);
+            }
             ACTIVE_BIN_PIN_PRESET_ID.store(0, Ordering::Relaxed);
             ACTIVE_BIN_PIN_HWND.store(0, Ordering::Relaxed);
         });
@@ -25512,6 +25602,7 @@ mod windows_overlay {
     #[link(name = "winmm")]
     unsafe extern "system" {
         fn timeBeginPeriod(uPeriod: u32) -> u32;
+        fn timeEndPeriod(uPeriod: u32) -> u32;
     }
 
     fn start_esp_worker(generation: u64) {
@@ -41373,6 +41464,54 @@ mod tests {
         assert_eq!(&rot180_bgra[0..4], &[0, 255, 255, 255]);
         // Bottom-right should now be Red [0, 0, 255, 255]
         assert_eq!(&rot180_bgra[12..16], &[0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn test_flip_into_bgra() {
+        use super::windows_overlay::flip_into_bgra;
+
+        // 2x2 test image:
+        // Top-left: Red (255, 0, 0, 255)
+        // Top-right: Green (0, 255, 0, 255)
+        // Bottom-left: Blue (0, 0, 255, 255)
+        // Bottom-right: Yellow (255, 255, 0, 255)
+        let src_rgba = vec![
+            255, 0, 0, 255,    0, 255, 0, 255,
+            0, 0, 255, 255,    255, 255, 0, 255,
+        ];
+
+        // 1. Identity (no flip)
+        let mut id_bgra = vec![0u8; 16];
+        flip_into_bgra(&src_rgba, &mut id_bgra, 2, 2, false, false);
+        // In BGRA: Red is [0, 0, 255, 255]
+        assert_eq!(&id_bgra[0..4], &[0, 0, 255, 255]);
+        assert_eq!(&id_bgra[4..8], &[0, 255, 0, 255]);
+        assert_eq!(&id_bgra[8..12], &[255, 0, 0, 255]);
+        assert_eq!(&id_bgra[12..16], &[0, 255, 255, 255]);
+
+        // 2. Flip horizontal
+        let mut flip_h_bgra = vec![0u8; 16];
+        flip_into_bgra(&src_rgba, &mut flip_h_bgra, 2, 2, true, false);
+        assert_eq!(&flip_h_bgra[0..4], &[0, 255, 0, 255]); // top-left is Green
+        assert_eq!(&flip_h_bgra[4..8], &[0, 0, 255, 255]); // top-right is Red
+        assert_eq!(&flip_h_bgra[8..12], &[0, 255, 255, 255]); // bottom-left is Yellow
+        assert_eq!(&flip_h_bgra[12..16], &[255, 0, 0, 255]); // bottom-right is Blue
+
+        // 3. Flip vertical
+        let mut flip_v_bgra = vec![0u8; 16];
+        flip_into_bgra(&src_rgba, &mut flip_v_bgra, 2, 2, false, true);
+        assert_eq!(&flip_v_bgra[0..4], &[255, 0, 0, 255]); // top-left is Blue
+        assert_eq!(&flip_v_bgra[4..8], &[0, 255, 255, 255]); // top-right is Yellow
+        assert_eq!(&flip_v_bgra[8..12], &[0, 0, 255, 255]); // bottom-left is Red
+        assert_eq!(&flip_v_bgra[12..16], &[0, 255, 0, 255]); // bottom-right is Green
+
+        // 4. Flip both
+        let mut flip_hv_bgra = vec![0u8; 16];
+        flip_into_bgra(&src_rgba, &mut flip_hv_bgra, 2, 2, true, true);
+        assert_eq!(&flip_hv_bgra[0..4], &[0, 255, 255, 255]); // top-left is Yellow
+        assert_eq!(&flip_hv_bgra[4..8], &[255, 0, 0, 255]); // top-right is Blue
+        assert_eq!(&flip_hv_bgra[8..12], &[0, 255, 0, 255]); // bottom-left is Green
+        assert_eq!(&flip_hv_bgra[12..16], &[0, 0, 255, 255]); // bottom-right is Red
     }
 
     #[test]

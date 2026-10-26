@@ -17291,6 +17291,18 @@ impl eframe::App for CrosshairApp {
         }
 
         if self.state.active_panel != self.last_active_panel {
+            {
+                let mut hook_state = crate::overlay::HOOK_STATE.lock();
+                if !hook_state.vision_capture_preview_regions.is_empty()
+                    || hook_state.vision_preview_source.is_some()
+                {
+                    hook_state.vision_capture_preview_regions.clear();
+                    hook_state.vision_preview_source = None;
+                    let _ = self
+                        .overlay_tx
+                        .send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            }
             if Self::active_panel_needs_open_windows(self.state.active_panel) {
                 self.ensure_open_windows_ready(false);
             }
@@ -17306,6 +17318,18 @@ impl eframe::App for CrosshairApp {
         }
 
         let viewport_focused = ctx.input(|input| input.viewport().focused != Some(false));
+        if !viewport_focused {
+            let mut hook_state = crate::overlay::HOOK_STATE.lock();
+            if !hook_state.vision_capture_preview_regions.is_empty()
+                || hook_state.vision_preview_source.is_some()
+            {
+                hook_state.vision_capture_preview_regions.clear();
+                hook_state.vision_preview_source = None;
+                let _ = self
+                    .overlay_tx
+                    .send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+            }
+        }
         let keep_pin_preview = viewport_focused && self.state.active_panel == AppPanel::Pin;
         if !keep_pin_preview && self.disable_pin_preview_modes() {
             self.persist();

@@ -1628,7 +1628,7 @@ mod windows_impl {
             let mut rect = RECT::default();
             let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
             let mut buf = Vec::new();
-            for _ in 0..100 {
+            for _ in 0..16 {
                 if self.poll_into_buffer(&mut buf, 0, 0)? {
                     let (_, w, h) = self.staging_textures.as_ref().unwrap();
                     return Ok(ScreenCaptureFrame {
@@ -1639,7 +1639,7 @@ mod windows_impl {
                         rgba: buf,
                     });
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
             anyhow::bail!("No frame available from WGC pool")
         }
@@ -1670,7 +1670,11 @@ mod windows_impl {
         match session.get_next_frame() {
             Ok(frame) => Some(frame),
             Err(_) => {
-                *manager = None;
+                unsafe {
+                    if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
+                        *manager = None;
+                    }
+                }
                 None
             }
         }
