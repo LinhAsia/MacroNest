@@ -121,6 +121,7 @@ impl Default for WindowFocusPreset {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WindowLayoutCell {
+    pub id: u32,
     pub row: usize,
     pub col: usize,
     pub row_span: usize,
@@ -137,6 +138,7 @@ pub struct WindowLayoutCell {
 impl Default for WindowLayoutCell {
     fn default() -> Self {
         Self {
+            id: 0,
             row: 0,
             col: 0,
             row_span: 1,

@@ -3315,7 +3315,14 @@ impl CrosshairApp {
             }
         }
 
+        let mut next_cell_id = layout.cells.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+        let mut seen_cell_ids = std::collections::HashSet::new();
         for cell in &mut layout.cells {
+            if cell.id == 0 || !seen_cell_ids.insert(cell.id) {
+                cell.id = next_cell_id;
+                next_cell_id += 1;
+                seen_cell_ids.insert(cell.id);
+            }
             cell.row = cell.row.min(rows - 1);
             cell.col = cell.col.min(cols - 1);
             cell.row_span = cell.row_span.max(1).min(rows - cell.row);
@@ -3447,15 +3454,49 @@ impl CrosshairApp {
             }
         }
 
-        // Write back adjustments
+        // Write back adjustments and re-anchor row/col to actual visual placement
         for (cell, (cl, ct, cr, cb)) in layout.cells.iter_mut().zip(boxes) {
-            let end_c = (cell.col + cell.col_span).min(cols);
-            let end_r = (cell.row + cell.row_span).min(rows);
+            let closest_c = (0..cols)
+                .min_by(|&a, &b| {
+                    let da = (col_starts[a] - cl).abs();
+                    let db = (col_starts[b] - cl).abs();
+                    da.total_cmp(&db)
+                })
+                .unwrap_or(0);
+            let closest_end_c = (closest_c + 1..=cols)
+                .min_by(|&a, &b| {
+                    let da = (col_starts[a] - cr).abs();
+                    let db = (col_starts[b] - cr).abs();
+                    da.total_cmp(&db)
+                })
+                .unwrap_or(cols);
+            let closest_r = (0..rows)
+                .min_by(|&a, &b| {
+                    let da = (row_starts[a] - ct).abs();
+                    let db = (row_starts[b] - ct).abs();
+                    da.total_cmp(&db)
+                })
+                .unwrap_or(0);
+            let closest_end_r = (closest_r + 1..=rows)
+                .min_by(|&a, &b| {
+                    let da = (row_starts[a] - cb).abs();
+                    let db = (row_starts[b] - cb).abs();
+                    da.total_cmp(&db)
+                })
+                .unwrap_or(rows);
 
-            let mut adj_l = cl - col_starts[cell.col];
-            let mut adj_r = cr - col_starts[end_c];
-            let mut adj_t = ct - row_starts[cell.row];
-            let mut adj_b = cb - row_starts[end_r];
+            let actual_col = closest_c;
+            let actual_col_span = (closest_end_c - closest_c).clamp(1, cols - closest_c);
+            let actual_row = closest_r;
+            let actual_row_span = (closest_end_r - closest_r).clamp(1, rows - closest_r);
+
+            let actual_end_c = actual_col + actual_col_span;
+            let actual_end_r = actual_row + actual_row_span;
+
+            let mut adj_l = cl - col_starts[actual_col];
+            let mut adj_r = cr - col_starts[actual_end_c];
+            let mut adj_t = ct - row_starts[actual_row];
+            let mut adj_b = cb - row_starts[actual_end_r];
 
             if adj_l.abs() < 0.0005 {
                 adj_l = 0.0;
@@ -3470,6 +3511,10 @@ impl CrosshairApp {
                 adj_b = 0.0;
             }
 
+            cell.col = actual_col;
+            cell.col_span = actual_col_span;
+            cell.row = actual_row;
+            cell.row_span = actual_row_span;
             cell.adjust_left = adj_l;
             cell.adjust_right = adj_r;
             cell.adjust_top = adj_t;
@@ -3768,6 +3813,7 @@ impl CrosshairApp {
             layout.cells[cell_idx].col_span = half;
             cell_b.col = col + half;
             cell_b.col_span = col_span - half;
+            cell_b.id = 0;
             cell_b.target_window_title = None;
             cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
@@ -3822,6 +3868,7 @@ impl CrosshairApp {
             layout.cells[cell_idx].adjust_right = actual_mid - new_split_base;
             cell_b.adjust_left = actual_mid - new_split_base;
             cell_b.adjust_right = actual_right - new_starts[split_col + 2];
+            cell_b.id = 0;
             cell_b.target_window_title = None;
             cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
@@ -3854,6 +3901,7 @@ impl CrosshairApp {
             layout.cells[cell_idx].row_span = half;
             cell_b.row = row + half;
             cell_b.row_span = row_span - half;
+            cell_b.id = 0;
             cell_b.target_window_title = None;
             cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
@@ -3908,6 +3956,7 @@ impl CrosshairApp {
             layout.cells[cell_idx].adjust_bottom = actual_mid - new_split_base;
             cell_b.adjust_top = actual_mid - new_split_base;
             cell_b.adjust_bottom = actual_bottom - new_starts[split_row + 2];
+            cell_b.id = 0;
             cell_b.target_window_title = None;
             cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
@@ -4192,6 +4241,7 @@ impl CrosshairApp {
         }
 
         layout.cells.push(WindowLayoutCell {
+            id: 0,
             row: r1,
             col: c1,
             row_span: new_row_span,
@@ -4934,7 +4984,7 @@ impl CrosshairApp {
                                 let cell_rect = raw_cell_rect.shrink(2.0);
 
                                 let is_selected = self.selected_layout_cell
-                                    == Some((layout.id, cell.row, cell.col));
+                                    == Some((layout.id, cell.id));
                                 let is_merge_source = self.drag_start_layout_cell
                                     == Some((layout.id, cell.row, cell.col))
                                     && ui.input(|input| input.pointer.primary_down());
@@ -5659,12 +5709,12 @@ impl CrosshairApp {
 
                                 if cell_resp.clicked() && !controls_active {
                                     if self.selected_layout_cell
-                                        == Some((layout.id, cell.row, cell.col))
+                                        == Some((layout.id, cell.id))
                                     {
                                         self.selected_layout_cell = None;
                                     } else {
                                         self.selected_layout_cell =
-                                            Some((layout.id, cell.row, cell.col));
+                                            Some((layout.id, cell.id));
                                     }
                                 }
 
@@ -5852,7 +5902,9 @@ impl CrosshairApp {
                                 if adj_t.abs() < 0.002 { adj_t = 0.0; }
                                 if adj_b.abs() < 0.002 { adj_b = 0.0; }
 
+                                let new_cell_id = layout.cells.iter().map(|c| c.id).max().unwrap_or(0) + 1;
                                 layout.cells.push(WindowLayoutCell {
+                                    id: new_cell_id,
                                     row: new_row,
                                     col: new_col,
                                     row_span: new_row_span,
@@ -5866,7 +5918,7 @@ impl CrosshairApp {
                                     adjust_bottom: adj_b,
                                 });
                                 Self::sanitize_layout(layout);
-                                self.selected_layout_cell = Some((layout.id, new_row, new_col));
+                                self.selected_layout_cell = Some((layout.id, new_cell_id));
                                 live_sync = true;
                             }
 
@@ -5874,7 +5926,8 @@ impl CrosshairApp {
                                 if let Some((r, c)) = Self::merge_layout_cells(
                                     layout, start_row, start_col, end_row, end_col,
                                 ) {
-                                    self.selected_layout_cell = Some((layout.id, r, c));
+                                    let merged_id = layout.cells.iter().find(|cell| cell.row == r && cell.col == c).map(|cell| cell.id);
+                                    self.selected_layout_cell = merged_id.map(|id| (layout.id, id));
                                     live_sync = true;
                                 }
                             }
@@ -5882,13 +5935,16 @@ impl CrosshairApp {
                         ui.end_row();
                     });
 
-                if let Some((sel_layout_id, sel_row, sel_col)) = self.selected_layout_cell {
+                if let Some((sel_layout_id, sel_cell_id)) = self.selected_layout_cell {
                     if sel_layout_id == layout.id {
                         if let Some(cell_idx) = layout
                             .cells
                             .iter()
-                            .position(|c| c.row == sel_row && c.col == sel_col)
+                            .position(|c| c.id == sel_cell_id)
                         {
+                            let cell = &layout.cells[cell_idx];
+                            let sel_row = cell.row;
+                            let sel_col = cell.col;
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 ui.label(
@@ -5911,7 +5967,7 @@ impl CrosshairApp {
                             let mut match_duplicate_window_titles =
                                 layout.cells[cell_idx].match_duplicate_window_titles;
 
-                            egui::Grid::new((layout.id, "cell-settings-grid", sel_row, sel_col))
+                            egui::Grid::new((layout.id, "cell-settings-grid", sel_cell_id))
                                 .num_columns(2)
                                 .spacing([14.0, 8.0])
                                 .show(ui, |ui| {
@@ -5951,7 +6007,7 @@ impl CrosshairApp {
                                         Self::render_multi_window_targets_with_duplicate_mode(
                                             ui,
                                             language,
-                                            (layout.id, "cell-target-picker", sel_row, sel_col),
+                                            (layout.id, "cell-target-picker", sel_cell_id),
                                             Self::tr_lang(language, "Focus", "Focus"),
                                             &mut target_window_title,
                                             &mut extra_target_window_titles,
@@ -6159,7 +6215,7 @@ impl CrosshairApp {
         if let Some(id) = remove_id {
             self.state.window_layouts.retain(|l| l.id != id);
             self.persist_window_layouts();
-            if let Some((sel_layout_id, _, _)) = self.selected_layout_cell {
+            if let Some((sel_layout_id, _)) = self.selected_layout_cell {
                 if sel_layout_id == id {
                     self.selected_layout_cell = None;
                 }
@@ -6788,5 +6844,53 @@ mod tests {
         CrosshairApp::split_cell_horizontal(&mut layout, 0);
         assert_eq!(layout.rows, 2);
         assert_eq!(layout.cells.len(), 3);
+    }
+    #[test]
+    fn test_cells_with_duplicate_row_col_get_unique_ids_and_reanchored() {
+        // Replicate user screenshot scenario:
+        // Layout 6x6. Two cells both had row=0, col=3, but one is at [0.5, 0.75] and the other is at [0.75, 1.0].
+        let mut layout = WindowLayout {
+            id: 100,
+            rows: 6,
+            cols: 6,
+            row_ratios: vec![1.0; 6],
+            col_ratios: vec![1.0; 6],
+            cells: vec![
+                WindowLayoutCell {
+                    id: 0,
+                    row: 0,
+                    col: 3,
+                    row_span: 6,
+                    col_span: 2,
+                    adjust_left: 0.0,
+                    adjust_right: -0.0833, // ends at 0.75
+                    target_window_title: None,
+                    ..Default::default()
+                },
+                WindowLayoutCell {
+                    id: 0,
+                    row: 0,
+                    col: 3, // duplicated col!
+                    row_span: 6,
+                    col_span: 2,
+                    adjust_left: 0.25, // starts at 0.75
+                    adjust_right: 0.1667, // ends at 1.0
+                    target_window_title: Some("Android Device-1...".to_string()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        CrosshairApp::sanitize_layout(&mut layout);
+
+        // 1. Both cells must have unique non-zero IDs
+        assert_ne!(layout.cells[0].id, 0);
+        assert_ne!(layout.cells[1].id, 0);
+        assert_ne!(layout.cells[0].id, layout.cells[1].id);
+
+        // 2. The second cell must be re-anchored to its true column (>= 4), not 3!
+        assert_eq!(layout.cells[0].col, 3);
+        assert!(layout.cells[1].col >= 4);
     }
 }

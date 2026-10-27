@@ -975,7 +975,7 @@ pub struct CrosshairApp {
     mouse_input_normal_open: bool,
     mouse_input_arduino_open: bool,
     mouse_input_interception_open: bool,
-    selected_layout_cell: Option<(u32, usize, usize)>,
+    selected_layout_cell: Option<(u32, u32)>,
     drag_start_layout_cell: Option<(u32, usize, usize)>,
     protractor_picking_active: bool,
     protractor_calibration_points: Option<Vec<(i32, i32)>>,
