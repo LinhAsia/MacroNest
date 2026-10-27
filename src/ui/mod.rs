@@ -18251,15 +18251,24 @@ impl eframe::App for CrosshairApp {
             {
                 self.settings_popup_open = false;
             } else {
-                self.render_modal_backdrop(ctx, true);
+                let backdrop_clicked = self.render_modal_backdrop(ctx, true);
                 let (panel_size, panel_pos) =
                     Self::centered_modal_placement(ctx, vec2(600.0, 620.0), vec2(500.0, 500.0));
+                let modal_rect = egui::Rect::from_min_size(panel_pos, panel_size);
+                let mut close_request = false;
+                if backdrop_clicked {
+                    let clicked_outside = ctx.input(|i| {
+                        i.pointer.interact_pos().map_or(true, |pos| !modal_rect.contains(pos))
+                    });
+                    if clicked_outside {
+                        close_request = true;
+                    }
+                }
                 let settings_inner_margin = 20.0;
                 let settings_content_size = vec2(
                     (panel_size.x - settings_inner_margin * 2.0).max(0.0),
                     (panel_size.y - settings_inner_margin * 2.0).max(0.0),
                 );
-                let mut close_request = false;
                 egui::Area::new(egui::Id::new("settings_popup_modal"))
                     .order(Order::Foreground)
                     .fixed_pos(panel_pos)
@@ -18449,10 +18458,20 @@ impl eframe::App for CrosshairApp {
             {
                 self.titlebar_resource_monitor_open = false;
             } else {
-                self.render_modal_backdrop(ctx, true);
+                let backdrop_clicked = self.render_modal_backdrop(ctx, true);
                 let (panel_size, panel_pos) =
-                    Self::centered_modal_placement(ctx, vec2(460.0, 420.0), vec2(400.0, 360.0));
-                let inner_margin = 16.0;
+                    Self::centered_modal_placement(ctx, vec2(500.0, 500.0), vec2(440.0, 440.0));
+                let modal_rect = egui::Rect::from_min_size(panel_pos, panel_size);
+                let mut close_request = false;
+                if backdrop_clicked {
+                    let clicked_outside = ctx.input(|i| {
+                        i.pointer.interact_pos().map_or(true, |pos| !modal_rect.contains(pos))
+                    });
+                    if clicked_outside {
+                        close_request = true;
+                    }
+                }
+                let inner_margin = 20.0;
                 let content_size = vec2(
                     (panel_size.x - inner_margin * 2.0).max(0.0),
                     (panel_size.y - inner_margin * 2.0).max(0.0),
@@ -18478,18 +18497,63 @@ impl eframe::App for CrosshairApp {
                                 spread: 0,
                                 color: Color32::from_rgba_premultiplied(12, 12, 16, 72),
                             })
-                            .corner_radius(16.0)
+                            .corner_radius(24.0)
                             .inner_margin(Margin::same(inner_margin as i8))
                             .show(ui, |ui| {
                                 ui.set_min_size(content_size);
-                                ui.set_max_size(content_size);
                                 ui.set_width(content_size.x);
                                 ui.set_max_width(content_size.x);
-                                ui.set_height(content_size.y);
-                                ui.set_max_height(content_size.y);
-                                self.render_resource_monitor_content(ui);
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Resource Monitor",
+                                                "Giám sát tài nguyên",
+                                            ))
+                                            .strong()
+                                            .size(16.0),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if ui
+                                                    .add_sized(
+                                                        [34.0, 28.0],
+                                                        Button::new(Self::material_icon_text(
+                                                            0xe5cd, 18.0,
+                                                        )),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    close_request = true;
+                                                }
+
+                                                let stats = self.resource_monitor_tracker.last_stats();
+                                                let hours = stats.uptime_secs / 3600;
+                                                let mins = (stats.uptime_secs % 3600) / 60;
+                                                let secs = stats.uptime_secs % 60;
+                                                let uptime_str = if hours > 0 {
+                                                    format!("Uptime: {:02}h {:02}m {:02}s", hours, mins, secs)
+                                                } else {
+                                                    format!("Uptime: {:02}m {:02}s", mins, secs)
+                                                };
+                                                ui.label(
+                                                    RichText::new(uptime_str)
+                                                        .size(11.0)
+                                                        .color(Color32::from_rgb(148, 163, 184)),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    ui.separator();
+                                    self.render_resource_monitor_content(ui);
+                                });
                             });
                     });
+                if close_request {
+                    self.titlebar_resource_monitor_open = false;
+                }
             }
         }
 
@@ -18554,269 +18618,303 @@ impl CrosshairApp {
         let language = self.state.ui_language;
         let stats = self.resource_monitor_tracker.last_stats().clone();
 
-        ui.vertical(|ui| {
-            // Header
-            ui.horizontal(|ui| {
-                ui.label(Self::material_icon_text(0xe422, 22.0));
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Resource Monitor",
-                        "Giám sát tài nguyên",
-                    ))
-                    .strong()
-                    .size(17.0),
-                );
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let close_btn = ui.add(
-                        egui::Button::new(Self::material_icon_text(0xe5cd, 14.0))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::NONE),
-                    );
-                    if close_btn.clicked() {
-                        self.titlebar_resource_monitor_open = false;
-                    }
-
-                    // Uptime badge
-                    let hours = stats.uptime_secs / 3600;
-                    let mins = (stats.uptime_secs % 3600) / 60;
-                    let secs = stats.uptime_secs % 60;
-                    let uptime_str = if hours > 0 {
-                        format!("Uptime: {:02}h {:02}m {:02}s", hours, mins, secs)
-                    } else {
-                        format!("Uptime: {:02}m {:02}s", mins, secs)
-                    };
-                    ui.label(
-                        RichText::new(uptime_str)
-                            .size(11.0)
-                            .color(Color32::from_rgb(148, 163, 184)),
-                    );
-                });
-            });
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(8.0);
-
-            let card_fill = if self.state.ui_theme == UiThemeMode::Dark {
-                Color32::from_rgba_premultiplied(30, 36, 48, 180)
+        let card_fill = if self.state.ui_theme == UiThemeMode::Dark {
+            Color32::from_rgba_premultiplied(30, 36, 48, 180)
+        } else {
+            Color32::from_rgba_premultiplied(235, 240, 248, 220)
+        };
+        let card_stroke = egui::Stroke::new(
+            1.0,
+            if self.state.ui_theme == UiThemeMode::Dark {
+                Color32::from_rgba_premultiplied(60, 72, 92, 160)
             } else {
-                Color32::from_rgba_premultiplied(235, 240, 248, 220)
-            };
-            let card_stroke = egui::Stroke::new(
-                1.0,
-                if self.state.ui_theme == UiThemeMode::Dark {
-                    Color32::from_rgba_premultiplied(60, 72, 92, 160)
-                } else {
-                    Color32::from_rgba_premultiplied(200, 210, 225, 180)
-                },
-            );
+                Color32::from_rgba_premultiplied(200, 210, 225, 180)
+            },
+        );
 
-            // 2x2 Grid of Resource Cards
-            egui::Grid::new("resource_monitor_cards_grid")
-                .num_columns(2)
-                .spacing([12.0, 12.0])
+        ui.vertical(|ui| {
+            ui.add_space(2.0);
+
+            // Card 1: CPU Usage
+            egui::Frame::new()
+                .fill(card_fill)
+                .stroke(card_stroke)
+                .corner_radius(10.0)
+                .inner_margin(egui::Margin::symmetric(14, 10))
                 .show(ui, |ui| {
-                    // Card 1: CPU Usage
-                    egui::Frame::new()
-                        .fill(card_fill)
-                        .stroke(card_stroke)
-                        .corner_radius(10.0)
-                        .inner_margin(egui::Margin::symmetric(14, 12))
-                        .show(ui, |ui| {
-                            ui.set_width(200.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "⚡ CPU Usage",
-                                        "⚡ Mức sử dụng CPU",
-                                    ))
-                                    .size(12.0)
-                                    .color(Color32::from_rgb(148, 163, 184)),
-                                );
-                                ui.add_space(2.0);
-                                let cpu_val_color = if stats.cpu_usage_pct > 50.0 {
-                                    Color32::from_rgb(248, 113, 113)
-                                } else if stats.cpu_usage_pct > 20.0 {
-                                    Color32::from_rgb(251, 191, 36)
-                                } else {
-                                    Color32::from_rgb(56, 189, 248)
-                                };
-                                ui.label(
-                                    RichText::new(format!("{:.1}%", stats.cpu_usage_pct))
-                                        .size(24.0)
-                                        .strong()
-                                        .color(cpu_val_color),
-                                );
-                                ui.add(
-                                    egui::ProgressBar::new(stats.cpu_usage_pct / 100.0)
-                                        .desired_width(190.0)
-                                        .show_percentage(),
-                                );
-                                ui.add_space(2.0);
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{} logical cores",
-                                        stats.num_cpus
-                                    ))
-                                    .size(10.5)
-                                    .color(Color32::from_rgb(100, 116, 139)),
-                                );
-                            });
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(Self::tr_lang(language, "CPU", "CPU"))
+                                .strong()
+                                .size(13.0)
+                                .color(Color32::from_rgb(148, 163, 184)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} {}",
+                                    stats.num_cpus,
+                                    Self::tr_lang(language, "logical cores", "nhân logic")
+                                ))
+                                .size(11.0)
+                                .color(Color32::from_rgb(100, 116, 139)),
+                            );
                         });
+                    });
 
-                    // Card 2: RAM Memory
-                    egui::Frame::new()
-                        .fill(card_fill)
-                        .stroke(card_stroke)
-                        .corner_radius(10.0)
-                        .inner_margin(egui::Margin::symmetric(14, 12))
-                        .show(ui, |ui| {
-                            ui.set_width(200.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "💾 RAM Usage",
-                                        "💾 Bộ nhớ RAM",
-                                    ))
-                                    .size(12.0)
-                                    .color(Color32::from_rgb(148, 163, 184)),
-                                );
-                                ui.add_space(2.0);
-                                ui.label(
-                                    RichText::new(format!("{:.1} MB", stats.ram_working_set_mb))
-                                        .size(24.0)
-                                        .strong()
-                                        .color(Color32::from_rgb(52, 211, 153)),
-                                );
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Commit: {:.1} MB",
-                                        stats.ram_commit_mb
-                                    ))
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        // Left: App CPU
+                        ui.vertical(|ui| {
+                            let cpu_val_color = if stats.cpu_usage_pct > 50.0 {
+                                Color32::from_rgb(248, 113, 113)
+                            } else if stats.cpu_usage_pct > 20.0 {
+                                Color32::from_rgb(251, 191, 36)
+                            } else {
+                                Color32::from_rgb(56, 189, 248)
+                            };
+                            ui.label(
+                                RichText::new(format!("{:.1}%", stats.cpu_usage_pct))
+                                    .size(24.0)
+                                    .strong()
+                                    .color(cpu_val_color),
+                            );
+                            ui.label(
+                                RichText::new(Self::tr_lang(language, "App CPU", "CPU MacroNest"))
                                     .size(11.0)
                                     .color(Color32::from_rgb(148, 163, 184)),
-                                );
-                                ui.add_space(2.0);
+                            );
+                        });
+
+                        ui.add_space(24.0);
+
+                        // Right: System CPU & Bar
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new("Physical Working Set")
-                                        .size(10.5)
-                                        .color(Color32::from_rgb(100, 116, 139)),
+                                    RichText::new(Self::tr_lang(language, "Total System CPU:", "Tổng CPU hệ thống:"))
+                                        .size(11.5)
+                                        .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.label(
+                                    RichText::new(format!("{:.1}%", stats.system_cpu_usage_pct))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(if stats.system_cpu_usage_pct > 70.0 {
+                                            Color32::from_rgb(248, 113, 113)
+                                        } else {
+                                            Color32::from_rgb(203, 213, 225)
+                                        }),
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::ProgressBar::new(stats.cpu_usage_pct / 100.0)
+                                    .desired_width(ui.available_width() - 8.0)
+                                    .show_percentage(),
+                            );
+                        });
+                    });
+                });
+
+            ui.add_space(6.0);
+
+            // Card 2: RAM Memory & Trim Action
+            egui::Frame::new()
+                .fill(card_fill)
+                .stroke(card_stroke)
+                .corner_radius(10.0)
+                .inner_margin(egui::Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(Self::tr_lang(language, "RAM (Memory)", "Bộ nhớ RAM"))
+                                .strong()
+                                .size(13.0)
+                                .color(Color32::from_rgb(148, 163, 184)),
+                        );
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .button(
+                                    RichText::new(Self::tr_lang(language, "Trim RAM", "Tối ưu RAM"))
+                                        .size(11.0),
+                                )
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Reclaim unused physical memory pages immediately (SetProcessWorkingSetSize)",
+                                    "Giải phóng ngay các trang bộ nhớ vật lý chưa dùng",
+                                ))
+                                .clicked()
+                            {
+                                self.resource_monitor_tracker.trim_memory();
+                            }
+                        });
+                    });
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        // Left: Working Set
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(format!("{:.1} MB", stats.ram_working_set_mb))
+                                    .size(24.0)
+                                    .strong()
+                                    .color(Color32::from_rgb(52, 211, 153)),
+                            );
+                            ui.label(
+                                RichText::new("Working Set (Physical)")
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                            );
+                        });
+
+                        ui.add_space(24.0);
+
+                        // Right: Peak, Commit & System RAM
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Peak:")
+                                        .size(11.0)
+                                        .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.label(
+                                    RichText::new(format!("{:.1} MB", stats.ram_peak_working_set_mb))
+                                        .size(11.0)
+                                        .strong(),
+                                );
+                                ui.add_space(10.0);
+                                ui.label(
+                                    RichText::new("Commit:")
+                                        .size(11.0)
+                                        .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.label(
+                                    RichText::new(format!("{:.1} MB", stats.ram_commit_mb))
+                                        .size(11.0)
+                                        .strong(),
+                                );
+                            });
+                            ui.add_space(3.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(language, "System RAM:", "RAM hệ thống:"))
+                                        .size(11.0)
+                                        .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{:.1} / {:.1} GB ({:.0}%)",
+                                        stats.system_ram_used_gb,
+                                        stats.system_ram_total_gb,
+                                        stats.system_ram_pct
+                                    ))
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(203, 213, 225)),
                                 );
                             });
                         });
-                    ui.end_row();
+                    });
+                });
 
-                    // Card 3: Threads & Processes
-                    egui::Frame::new()
-                        .fill(card_fill)
-                        .stroke(card_stroke)
-                        .corner_radius(10.0)
-                        .inner_margin(egui::Margin::symmetric(14, 12))
-                        .show(ui, |ui| {
-                            ui.set_width(200.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "🧵 Threads",
-                                        "🧵 Luồng xử lý",
-                                    ))
-                                    .size(12.0)
+            ui.add_space(6.0);
+
+            // Card 3: Process & Macro Engine (2 columns)
+            ui.columns(2, |cols| {
+                // Col 0: Process
+                egui::Frame::new()
+                    .fill(card_fill)
+                    .stroke(card_stroke)
+                    .corner_radius(10.0)
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(&mut cols[0], |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(language, "Process", "Tiến trình"))
+                                    .strong()
+                                    .size(13.0)
                                     .color(Color32::from_rgb(148, 163, 184)),
-                                );
-                                ui.add_space(2.0);
+                            );
+                            ui.add_space(2.0);
+                            ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(format!("{}", stats.thread_count))
-                                        .size(24.0)
+                                        .size(20.0)
                                         .strong()
                                         .color(Color32::from_rgb(167, 139, 250)),
                                 );
                                 ui.label(
-                                    RichText::new(format!("PID: {}", stats.pid))
+                                    RichText::new(Self::tr_lang(language, "Threads", "Luồng"))
                                         .size(11.0)
                                         .color(Color32::from_rgb(148, 163, 184)),
                                 );
-                                ui.add_space(2.0);
-                                ui.label(
-                                    RichText::new("Active OS Threads")
-                                        .size(10.5)
-                                        .color(Color32::from_rgb(100, 116, 139)),
-                                );
                             });
-                        });
-
-                    // Card 4: Macro Engine
-                    egui::Frame::new()
-                        .fill(card_fill)
-                        .stroke(card_stroke)
-                        .corner_radius(10.0)
-                        .inner_margin(egui::Margin::symmetric(14, 12))
-                        .show(ui, |ui| {
-                            ui.set_width(200.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "🎯 Macro Engine",
-                                        "🎯 Trình chạy Macro",
-                                    ))
-                                    .size(12.0)
-                                    .color(Color32::from_rgb(148, 163, 184)),
-                                );
-                                ui.add_space(2.0);
-                                let (status_str, status_color) = if !stats.macros_master_enabled {
-                                    (
-                                        Self::tr_lang(language, "Paused", "Tạm dừng"),
-                                        Color32::from_rgb(251, 146, 60),
-                                    )
-                                } else if stats.active_macros_count > 0 {
-                                    (
-                                        Self::tr_lang(language, "Running", "Đang chạy"),
-                                        Color32::from_rgb(74, 222, 128),
-                                    )
-                                } else {
-                                    (
-                                        Self::tr_lang(language, "Idle", "Chờ kích hoạt"),
-                                        Color32::from_rgb(148, 163, 184),
-                                    )
-                                };
-                                ui.label(
-                                    RichText::new(status_str)
-                                        .size(24.0)
-                                        .strong()
-                                        .color(status_color),
-                                );
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{} active macro(s)",
-                                        stats.active_macros_count
-                                    ))
-                                    .size(11.0)
-                                    .color(Color32::from_rgb(148, 163, 184)),
-                                );
-                                ui.add_space(2.0);
-                                ui.label(
-                                    RichText::new(if stats.macros_master_enabled {
-                                        "Master Switch: ON"
-                                    } else {
-                                        "Master Switch: OFF"
-                                    })
+                            ui.label(
+                                RichText::new(format!("Handles: {}  |  PID: {}", stats.handle_count, stats.pid))
                                     .size(10.5)
                                     .color(Color32::from_rgb(100, 116, 139)),
-                                );
-                            });
+                            );
                         });
-                    ui.end_row();
-                });
+                    });
 
-            ui.add_space(10.0);
+                // Col 1: Macro Engine
+                egui::Frame::new()
+                    .fill(card_fill)
+                    .stroke(card_stroke)
+                    .corner_radius(10.0)
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(&mut cols[1], |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("Macro Engine")
+                                    .strong()
+                                    .size(13.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                            );
+                            ui.add_space(2.0);
+                            let (status_str, status_color) = if !stats.macros_master_enabled {
+                                (
+                                    Self::tr_lang(language, "Paused (OFF)", "Tạm dừng (TẮT)"),
+                                    Color32::from_rgb(251, 146, 60),
+                                )
+                            } else if stats.active_macros_count > 0 {
+                                (
+                                    Self::tr_lang(language, "Running", "Đang chạy"),
+                                    Color32::from_rgb(74, 222, 128),
+                                )
+                            } else {
+                                (
+                                    Self::tr_lang(language, "Idle", "Chờ kích hoạt"),
+                                    Color32::from_rgb(148, 163, 184),
+                                )
+                            };
+                            ui.label(
+                                RichText::new(status_str)
+                                    .size(18.0)
+                                    .strong()
+                                    .color(status_color),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} {}",
+                                    stats.active_macros_count,
+                                    Self::tr_lang(language, "active macro(s)", "macro đang chạy")
+                                ))
+                                .size(10.5)
+                                .color(Color32::from_rgb(100, 116, 139)),
+                            );
+                        });
+                    });
+            });
+
+            ui.add_space(8.0);
             ui.separator();
-            ui.add_space(6.0);
+            ui.add_space(4.0);
 
             // Overlay Checkbox & controls
             let chk = ui.checkbox(
@@ -18835,10 +18933,10 @@ impl CrosshairApp {
             ui.label(
                 RichText::new(Self::tr_lang(
                     language,
-                    "Displays real-time CPU %, RAM, active threads and macro counters on screen to verify performance.",
-                    "Hiển thị widget CPU %, RAM, số luồng và macro trực tiếp trên màn hình để kiểm tra độ tối ưu tài nguyên.",
+                    "Displays real-time CPU %, RAM, active threads and macro counters on screen.",
+                    "Hiển thị widget CPU %, RAM, số luồng và macro trực tiếp trên màn hình.",
                 ))
-                .size(11.0)
+                .size(10.5)
                 .color(Color32::from_rgb(148, 163, 184)),
             );
         });

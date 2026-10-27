@@ -99,9 +99,9 @@ impl CrosshairApp {
         outcome
     }
 
-    pub(crate) fn render_modal_backdrop(&self, ctx: &egui::Context, open: bool) {
+    pub(crate) fn render_modal_backdrop(&self, ctx: &egui::Context, open: bool) -> bool {
         if !open {
-            return;
+            return false;
         }
 
         let rect = ctx.content_rect();
@@ -110,13 +110,15 @@ impl CrosshairApp {
             .fixed_pos(rect.min)
             .interactable(true)
             .show(ctx, |ui| {
-                let (backdrop_rect, _) =
+                let (backdrop_rect, response) =
                     ui.allocate_exact_size(rect.size(), Sense::click_and_drag());
                 ui.painter().rect_filled(
                     backdrop_rect,
                     egui::CornerRadius::ZERO,
                     Color32::from_rgba_premultiplied(18, 18, 24, 150),
                 );
-            });
+                response.clicked()
+            })
+            .inner
     }
 }

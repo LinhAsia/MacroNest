@@ -2156,55 +2156,61 @@ impl CrosshairApp {
                     let focus_key = box_id.with("focus");
                     let has_focus = ui.memory(|mem| mem.data.get_temp::<bool>(focus_key)).unwrap_or(false);
                     let target_w = if has_focus { exp_w } else { base_w };
-                    let anim_w = ui.ctx().animate_value_with_time(box_id.with("anim_w"), target_w, 0.18);
+                    let anim_w = ui.ctx().animate_value_with_time(box_id.with("anim_w"), target_w, 0.15);
+                    let effective_w = if anim_w < base_w * 0.85 { target_w } else { anim_w };
+                    if (anim_w - target_w).abs() > 0.5 {
+                        ui.ctx().request_repaint();
+                    }
                     let prev_override = ui.visuals().override_text_color;
                     ui.visuals_mut().override_text_color = None;
-                    let resp = ui.add(egui::TextEdit::singleline(val).hint_text(hint).desired_width(anim_w));
+                    let resp = ui.add(egui::TextEdit::singleline(val).hint_text(hint).desired_width(effective_w));
                     ui.visuals_mut().override_text_color = prev_override;
                     Self::apply_vietnamese_input_if_changed(&resp, vietnamese_input_enabled, vietnamese_input_mode, val);
                     let now_focus = resp.has_focus();
                     if now_focus != has_focus {
                         ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focus));
+                        ui.ctx().request_repaint();
                     }
                     *live_sync |= resp.changed();
                     resp
                 };
 
                 if is_pixel {
-                    ui.set_min_width(280.0);
+                    ui.set_min_width(320.0);
                     egui::Grid::new(ui.auto_id_with("vision_outputs_grid_pixel"))
                         .num_columns(2)
                         .spacing([10.0, 6.0])
                         .show(ui, |ui| {
-                            ui.label("Found:");
-                            render_expanding_box(ui, "pixel_found", &mut step.vision_found_var, "found_var", 160.0, 220.0);
+                            ui.label(egui::RichText::new("Found:").strong());
+                            render_expanding_box(ui, "pixel_found", &mut step.vision_found_var, "found_var", 180.0, 250.0);
                             ui.end_row();
 
-                            ui.label(Self::tr_lang(language, "Count Var:", "Count Var:"));
-                            render_expanding_box(ui, "pixel_count", &mut step.if_variable_name, "count_var", 160.0, 220.0);
+                            ui.label(egui::RichText::new(Self::tr_lang(language, "Count Var:", "Count Var:")).strong());
+                            render_expanding_box(ui, "pixel_count", &mut step.if_variable_name, "count_var", 180.0, 250.0);
                             ui.end_row();
                         });
                     return;
                 }
 
-                ui.set_min_width(420.0);
-                egui::Grid::new(ui.auto_id_with("vision_outputs_grid"))
+                ui.set_min_width(470.0);
+
+                ui.horizontal(|ui| {
+                    ui.add_sized([58.0, 20.0], egui::Label::new(egui::RichText::new("Found:").strong()));
+                    render_expanding_box(ui, "target_found", &mut step.vision_found_var, "found_var", 220.0, 300.0);
+                });
+
+                ui.add_space(4.0);
+
+                egui::Grid::new(ui.auto_id_with("vision_target_grid"))
                     .num_columns(5)
                     .spacing([10.0, 6.0])
                     .show(ui, |ui| {
-                        ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new("Found:").strong()));
-                        render_expanding_box(ui, "target_found", &mut step.vision_found_var, "found_var", 180.0, 260.0);
-                        ui.label("");
-                        ui.label("");
-                        ui.label("");
-                        ui.end_row();
-
                         ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(Self::tr_lang(language, "Target:", "Tâm:")).strong()));
                         ui.label("X:");
-                        render_expanding_box(ui, "target_x", &mut step.vision_pos_var_x, "target_x", 110.0, 180.0);
+                        render_expanding_box(ui, "target_x", &mut step.vision_pos_var_x, "target_x", 135.0, 195.0);
 
                         ui.label("Y:");
-                        render_expanding_box(ui, "target_y", &mut step.vision_pos_var_y, "target_y", 110.0, 180.0);
+                        render_expanding_box(ui, "target_y", &mut step.vision_pos_var_y, "target_y", 135.0, 195.0);
                         ui.end_row();
                     });
 
@@ -2227,10 +2233,10 @@ impl CrosshairApp {
                         let mut render_dir_row = |ui: &mut egui::Ui, label: &str, def_x: &'static str, def_y: &'static str, var_x: &mut String, var_y: &mut String| {
                             ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(label).strong()));
                             ui.label("X:");
-                            render_expanding_box(ui, def_x, var_x, def_x, 110.0, 180.0);
+                            render_expanding_box(ui, def_x, var_x, def_x, 135.0, 195.0);
 
                             ui.label("Y:");
-                            render_expanding_box(ui, def_y, var_y, def_y, 110.0, 180.0);
+                            render_expanding_box(ui, def_y, var_y, def_y, 135.0, 195.0);
                             ui.end_row();
                         };
 

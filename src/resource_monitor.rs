@@ -3,9 +3,15 @@ use std::time::Instant;
 #[derive(Clone, Debug, Default)]
 pub struct ProcessResourceStats {
     pub cpu_usage_pct: f32,
+    pub system_cpu_usage_pct: f32,
     pub ram_working_set_mb: f64,
+    pub ram_peak_working_set_mb: f64,
     pub ram_commit_mb: f64,
+    pub system_ram_used_gb: f64,
+    pub system_ram_total_gb: f64,
+    pub system_ram_pct: u32,
     pub thread_count: u32,
+    pub handle_count: u32,
     pub active_macros_count: usize,
     pub macros_master_enabled: bool,
     pub uptime_secs: u64,
@@ -39,6 +45,21 @@ struct FILETIME {
 }
 
 #[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct MEMORYSTATUSEX {
+    dw_length: u32,
+    dw_memory_load: u32,
+    ull_total_phys: u64,
+    ull_avail_phys: u64,
+    ull_total_page_file: u64,
+    ull_avail_page_file: u64,
+    ull_total_virtual: u64,
+    ull_avail_virtual: u64,
+    ull_avail_extended_virtual: u64,
+}
+
+#[cfg(windows)]
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn K32GetProcessMemoryInfo(
@@ -53,6 +74,13 @@ unsafe extern "system" {
         lpkerneltime: *mut FILETIME,
         lpusertime: *mut FILETIME,
     ) -> i32;
+    fn GetSystemTimes(
+        lpidletime: *mut FILETIME,
+        lpkerneltime: *mut FILETIME,
+        lpusertime: *mut FILETIME,
+    ) -> i32;
+    fn GlobalMemoryStatusEx(lpbuffer: *mut MEMORYSTATUSEX) -> i32;
+    fn GetProcessHandleCount(hprocess: isize, pdwhandlecount: *mut u32) -> i32;
     fn GetCurrentProcess() -> isize;
     fn GetCurrentProcessId() -> u32;
 }
@@ -86,6 +114,13 @@ fn get_process_thread_count(pid: u32) -> u32 {
     }
 }
 
+pub fn trim_memory() {
+    #[cfg(windows)]
+    {
+        crate::platform::trim_working_set();
+    }
+}
+
 pub struct ResourceMonitorTracker {
     start_time: Instant,
     last_sample_time: Instant,
@@ -93,6 +128,12 @@ pub struct ResourceMonitorTracker {
     last_kernel_time: u64,
     #[cfg(windows)]
     last_user_time: u64,
+    #[cfg(windows)]
+    last_sys_idle: u64,
+    #[cfg(windows)]
+    last_sys_kernel: u64,
+    #[cfg(windows)]
+    last_sys_user: u64,
     num_cpus: usize,
     cached_stats: ProcessResourceStats,
 }
@@ -117,6 +158,12 @@ impl ResourceMonitorTracker {
             last_kernel_time: 0,
             #[cfg(windows)]
             last_user_time: 0,
+            #[cfg(windows)]
+            last_sys_idle: 0,
+            #[cfg(windows)]
+            last_sys_kernel: 0,
+            #[cfg(windows)]
+            last_sys_user: 0,
             num_cpus,
             cached_stats: ProcessResourceStats {
                 num_cpus,
@@ -128,6 +175,15 @@ impl ResourceMonitorTracker {
             let (k, u) = tracker.sample_times();
             tracker.last_kernel_time = k;
             tracker.last_user_time = u;
+
+            let mut sys_idle = FILETIME::default();
+            let mut sys_kernel = FILETIME::default();
+            let mut sys_user = FILETIME::default();
+            if unsafe { GetSystemTimes(&mut sys_idle, &mut sys_kernel, &mut sys_user) } != 0 {
+                tracker.last_sys_idle = ((sys_idle.dw_high_date_time as u64) << 32) | (sys_idle.dw_low_date_time as u64);
+                tracker.last_sys_kernel = ((sys_kernel.dw_high_date_time as u64) << 32) | (sys_kernel.dw_low_date_time as u64);
+                tracker.last_sys_user = ((sys_user.dw_high_date_time as u64) << 32) | (sys_user.dw_low_date_time as u64);
+            }
         }
         tracker
     }
@@ -170,23 +226,62 @@ impl ResourceMonitorTracker {
                 }
                 self.last_kernel_time = k;
                 self.last_user_time = u;
+
+                // System CPU %
+                let mut sys_idle = FILETIME::default();
+                let mut sys_kernel = FILETIME::default();
+                let mut sys_user = FILETIME::default();
+                if unsafe { GetSystemTimes(&mut sys_idle, &mut sys_kernel, &mut sys_user) } != 0 {
+                    let i = ((sys_idle.dw_high_date_time as u64) << 32) | (sys_idle.dw_low_date_time as u64);
+                    let sk = ((sys_kernel.dw_high_date_time as u64) << 32) | (sys_kernel.dw_low_date_time as u64);
+                    let su = ((sys_user.dw_high_date_time as u64) << 32) | (sys_user.dw_low_date_time as u64);
+                    if self.last_sys_kernel > 0 || self.last_sys_user > 0 {
+                        let d_idle = i.saturating_sub(self.last_sys_idle);
+                        let d_kern = sk.saturating_sub(self.last_sys_kernel);
+                        let d_user = su.saturating_sub(self.last_sys_user);
+                        let total = d_kern + d_user;
+                        if total > 0 {
+                            let pct = (1.0 - (d_idle as f64 / total as f64)) * 100.0;
+                            self.cached_stats.system_cpu_usage_pct = (pct as f32).clamp(0.0, 100.0);
+                        }
+                    }
+                    self.last_sys_idle = i;
+                    self.last_sys_kernel = sk;
+                    self.last_sys_user = su;
+                }
+
                 self.last_sample_time = now;
 
                 // Memory
                 let mut mem = PROCESS_MEMORY_COUNTERS_EX::default();
                 mem.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
-                unsafe {
-                    let proc = GetCurrentProcess();
-                    if K32GetProcessMemoryInfo(proc, &mut mem, mem.cb) != 0 {
-                        self.cached_stats.ram_working_set_mb = (mem.working_set_size as f64) / (1024.0 * 1024.0);
-                        self.cached_stats.ram_commit_mb = (mem.private_usage as f64) / (1024.0 * 1024.0);
-                    }
+                let proc = unsafe { GetCurrentProcess() };
+                if unsafe { K32GetProcessMemoryInfo(proc, &mut mem, mem.cb) } != 0 {
+                    self.cached_stats.ram_working_set_mb = (mem.working_set_size as f64) / (1024.0 * 1024.0);
+                    self.cached_stats.ram_peak_working_set_mb = (mem.peak_working_set_size as f64) / (1024.0 * 1024.0);
+                    self.cached_stats.ram_commit_mb = (mem.private_usage as f64) / (1024.0 * 1024.0);
                 }
 
-                // Threads
+                // System RAM status
+                let mut mem_status = MEMORYSTATUSEX::default();
+                mem_status.dw_length = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+                if unsafe { GlobalMemoryStatusEx(&mut mem_status) } != 0 {
+                    let total_gb = (mem_status.ull_total_phys as f64) / (1024.0 * 1024.0 * 1024.0);
+                    let avail_gb = (mem_status.ull_avail_phys as f64) / (1024.0 * 1024.0 * 1024.0);
+                    self.cached_stats.system_ram_total_gb = total_gb;
+                    self.cached_stats.system_ram_used_gb = (total_gb - avail_gb).max(0.0);
+                    self.cached_stats.system_ram_pct = mem_status.dw_memory_load;
+                }
+
+                // Threads & Handles
                 let pid = unsafe { GetCurrentProcessId() };
                 self.cached_stats.pid = pid;
                 self.cached_stats.thread_count = get_process_thread_count(pid);
+
+                let mut handle_count = 0u32;
+                if unsafe { GetProcessHandleCount(proc, &mut handle_count) } != 0 {
+                    self.cached_stats.handle_count = handle_count;
+                }
             }
         }
 
@@ -199,6 +294,14 @@ impl ResourceMonitorTracker {
 
     pub fn last_stats(&self) -> &ProcessResourceStats {
         &self.cached_stats
+    }
+
+    pub fn trim_memory(&mut self) {
+        trim_memory();
+        self.sample(
+            self.cached_stats.active_macros_count,
+            self.cached_stats.macros_master_enabled,
+        );
     }
 }
 

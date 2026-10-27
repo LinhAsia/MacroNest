@@ -28,7 +28,6 @@ pub fn text_has_cjk(text: &str) -> bool {
 fn add_windows_symbol_fallback_fonts(fonts: &mut FontDefinitions) {
     for (font_key, path) in [
         ("win_symbol", "C:\\Windows\\Fonts\\seguisym.ttf"),
-        ("win_emoji", "C:\\Windows\\Fonts\\seguiemj.ttf"),
     ] {
         if let Ok(font_bytes) = std::fs::read(path) {
             fonts.font_data.insert(
