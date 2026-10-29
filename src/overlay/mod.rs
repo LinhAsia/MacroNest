@@ -1800,7 +1800,7 @@ mod windows_overlay {
         };
 
         let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);
-        let badge_w = 210;
+        let badge_w = 236;
         let badge_h = 48;
         let margin = 16;
         let badge_x = (screen_w - badge_w - margin).max(0);
@@ -1833,7 +1833,7 @@ mod windows_overlay {
         };
 
         let line1 = format!(
-            "CPU: {:>4.1}%  |  RAM: {:.0} MB",
+            "MacroNest | CPU: {:>4.1}%  RAM: {:.0} MB",
             stats.cpu_usage_pct, stats.ram_working_set_mb
         );
         shapes.push(GeometryRenderShape {

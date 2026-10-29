@@ -982,6 +982,9 @@ pub struct CrosshairApp {
     distance_measurement_active: bool,
     native_capture_in_progress: bool,
     startup_ram_trimmed: bool,
+    last_user_activity: Instant,
+    last_idle_ram_trim: Instant,
+    startup_instant: Instant,
     pub action_search_text: String,
 }
 
@@ -1158,6 +1161,9 @@ impl CrosshairApp {
             distance_measurement_active: false,
             native_capture_in_progress: false,
             startup_ram_trimmed: false,
+            last_user_activity: Instant::now(),
+            last_idle_ram_trim: Instant::now(),
+            startup_instant: Instant::now(),
             vision_capture_anchor: None,
             vision_capture_current: None,
             vision_capture_screen_region_preview: None,
@@ -1376,6 +1382,8 @@ impl CrosshairApp {
             }
         }
         app.sync_custom_tables_to_overlay();
+        app.state.resource_monitor_overlay_enabled = false;
+        app.last_resource_monitor_overlay_enabled = false;
         app
     }
 
@@ -15958,6 +15966,33 @@ impl eframe::App for CrosshairApp {
             .resource_monitor_tracker
             .sample(active_macro_count, self.state.macros_master_enabled);
 
+        let now = Instant::now();
+        let user_interacting = ctx.input(|i| !i.events.is_empty() || i.pointer.any_down() || i.pointer.delta() != egui::Vec2::ZERO);
+        if user_interacting {
+            self.last_user_activity = now;
+        }
+
+        // Automatic lean memory management:
+        // 1. One-time startup trim 2 seconds after launch once fonts, textures, and initial layout settle
+        if !self.startup_ram_trimmed && self.startup_instant.elapsed() >= Duration::from_millis(2000) {
+            self.startup_ram_trimmed = true;
+            crate::platform::trim_working_set();
+            self.last_idle_ram_trim = now;
+        }
+
+        // 2. Periodic idle / afk trim: when no macro is running and user has been idle for >= 10s (or window unfocused)
+        if self.startup_ram_trimmed && active_macro_count == 0 {
+            let is_unfocused = ctx.input(|i| !i.focused);
+            let idle_duration = now.duration_since(self.last_user_activity);
+            let since_last_trim = now.duration_since(self.last_idle_ram_trim);
+            if (is_unfocused && since_last_trim >= Duration::from_secs(20))
+                || (idle_duration >= Duration::from_secs(10) && since_last_trim >= Duration::from_secs(45))
+            {
+                crate::platform::trim_working_set();
+                self.last_idle_ram_trim = now;
+            }
+        }
+
         if self.state.resource_monitor_overlay_enabled {
             crate::overlay::update_resource_monitor_overlay(Some(&stats));
             self.last_resource_monitor_overlay_enabled = true;
@@ -17900,8 +17935,8 @@ impl eframe::App for CrosshairApp {
                             show_icon_tooltips,
                             Self::tr_lang(
                                 self.state.ui_language,
-                                "Resource Monitor",
-                                "Giám sát tài nguyên",
+                                "MacroNest Resource Monitor",
+                                "Giám sát tài nguyên MacroNest",
                             ),
                         );
                         if self.state.resource_monitor_overlay_enabled {
@@ -18459,8 +18494,9 @@ impl eframe::App for CrosshairApp {
                 self.titlebar_resource_monitor_open = false;
             } else {
                 let backdrop_clicked = self.render_modal_backdrop(ctx, true);
+                let inner_margin = 16.0;
                 let (panel_size, panel_pos) =
-                    Self::centered_modal_placement(ctx, vec2(500.0, 500.0), vec2(440.0, 440.0));
+                    Self::centered_modal_placement(ctx, vec2(480.0, 345.0), vec2(420.0, 300.0));
                 let modal_rect = egui::Rect::from_min_size(panel_pos, panel_size);
                 let mut close_request = false;
                 if backdrop_clicked {
@@ -18471,7 +18507,6 @@ impl eframe::App for CrosshairApp {
                         close_request = true;
                     }
                 }
-                let inner_margin = 20.0;
                 let content_size = vec2(
                     (panel_size.x - inner_margin * 2.0).max(0.0),
                     (panel_size.y - inner_margin * 2.0).max(0.0),
@@ -18497,10 +18532,9 @@ impl eframe::App for CrosshairApp {
                                 spread: 0,
                                 color: Color32::from_rgba_premultiplied(12, 12, 16, 72),
                             })
-                            .corner_radius(24.0)
+                            .corner_radius(20.0)
                             .inner_margin(Margin::same(inner_margin as i8))
                             .show(ui, |ui| {
-                                ui.set_min_size(content_size);
                                 ui.set_width(content_size.x);
                                 ui.set_max_width(content_size.x);
                                 ui.vertical(|ui| {
@@ -18508,8 +18542,8 @@ impl eframe::App for CrosshairApp {
                                         ui.label(
                                             RichText::new(Self::tr_lang(
                                                 self.state.ui_language,
-                                                "Resource Monitor",
-                                                "Giám sát tài nguyên",
+                                                "MacroNest Resource Monitor",
+                                                "Giám sát tài nguyên MacroNest",
                                             ))
                                             .strong()
                                             .size(16.0),
@@ -18720,7 +18754,7 @@ impl CrosshairApp {
 
             ui.add_space(6.0);
 
-            // Card 2: RAM Memory & Trim Action
+            // Card 2: RAM Memory
             egui::Frame::new()
                 .fill(card_fill)
                 .stroke(card_stroke)
@@ -18728,31 +18762,12 @@ impl CrosshairApp {
                 .inner_margin(egui::Margin::symmetric(14, 10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(Self::tr_lang(language, "RAM (Memory)", "Bộ nhớ RAM"))
-                                .strong()
-                                .size(13.0)
-                                .color(Color32::from_rgb(148, 163, 184)),
-                        );
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .button(
-                                    RichText::new(Self::tr_lang(language, "Trim RAM", "Tối ưu RAM"))
-                                        .size(11.0),
-                                )
-                                .on_hover_text(Self::tr_lang(
-                                    language,
-                                    "Reclaim unused physical memory pages immediately (SetProcessWorkingSetSize)",
-                                    "Giải phóng ngay các trang bộ nhớ vật lý chưa dùng",
-                                ))
-                                .clicked()
-                            {
-                                self.resource_monitor_tracker.trim_memory();
-                            }
-                        });
-                    });
+                    ui.label(
+                        RichText::new(Self::tr_lang(language, "RAM (Memory)", "Bộ nhớ RAM"))
+                            .strong()
+                            .size(13.0)
+                            .color(Color32::from_rgb(148, 163, 184)),
+                    );
 
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
@@ -18912,32 +18927,19 @@ impl CrosshairApp {
                     });
             });
 
-            ui.add_space(8.0);
+            ui.add_space(6.0);
             ui.separator();
             ui.add_space(4.0);
 
-            // Overlay Checkbox & controls
-            let chk = ui.checkbox(
+            // Overlay Checkbox (transient)
+            ui.checkbox(
                 &mut self.state.resource_monitor_overlay_enabled,
                 RichText::new(Self::tr_lang(
                     language,
-                    "Show stats overlay on top-right of screen",
-                    "Hiển thị overlay thông số ở góc trên bên phải màn hình",
+                    "Show overlay",
+                    "Hiển thị overlay",
                 ))
                 .strong(),
-            );
-            if chk.changed() {
-                self.persist_dirty = true;
-            }
-
-            ui.label(
-                RichText::new(Self::tr_lang(
-                    language,
-                    "Displays real-time CPU %, RAM, active threads and macro counters on screen.",
-                    "Hiển thị widget CPU %, RAM, số luồng và macro trực tiếp trên màn hình.",
-                ))
-                .size(10.5)
-                .color(Color32::from_rgb(148, 163, 184)),
             );
         });
     }

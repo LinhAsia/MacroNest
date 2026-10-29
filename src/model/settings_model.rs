@@ -971,7 +971,7 @@ pub struct AppState {
     pub quick_actions_copy_color: bool,
     #[serde(default = "default_true")]
     pub quick_actions_copy_ruler: bool,
-    #[serde(default)]
+    #[serde(skip)]
     pub resource_monitor_overlay_enabled: bool,
     #[serde(default)]
     pub quick_key_display_enabled: bool,

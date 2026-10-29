@@ -641,6 +641,10 @@ impl CrosshairApp {
             self.state.protractor_enabled = false;
             changed = true;
         }
+        if self.state.resource_monitor_overlay_enabled {
+            self.state.resource_monitor_overlay_enabled = false;
+            changed = true;
+        }
         changed
     }
 
