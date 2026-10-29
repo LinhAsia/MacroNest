@@ -11177,7 +11177,7 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn refresh_hud(runtime: &mut Runtime) -> Result<()> {
+    pub(crate) fn direct_refresh_hud() {
         let display = {
             let mut preview_guard = HUD_PREVIEW_DISPLAY.lock();
             if let Some(active) = preview_guard.as_ref()
@@ -11203,8 +11203,7 @@ mod windows_overlay {
         };
         let Some(mut display) = display else {
             set_gpu_overlay_layer_shapes(OverlayLayer::Hud, Vec::new());
-            runtime.hud_display = None;
-            return Ok(());
+            return;
         };
         display.text = resolve_variables_in_text(&display.text);
 
@@ -11246,7 +11245,42 @@ mod windows_overlay {
         });
 
         set_gpu_overlay_layer_shapes(OverlayLayer::Hud, shapes);
-        runtime.hud_display = Some(display);
+    }
+
+    pub(crate) fn update_hud_preview_presets_direct(presets: Vec<HudPreset>) {
+        *HUD_PREVIEW_DISPLAY.lock() = presets
+            .into_iter()
+            .next()
+            .map(toolbox_preview_display_from_preset);
+        direct_refresh_hud();
+    }
+
+    fn refresh_hud(runtime: &mut Runtime) -> Result<()> {
+        let display = {
+            let mut preview_guard = HUD_PREVIEW_DISPLAY.lock();
+            if let Some(active) = preview_guard.as_ref()
+                && let Some(expires_at) = active.expires_at
+                && Instant::now() >= expires_at
+            {
+                *preview_guard = None;
+            }
+
+            if let Some(preview) = preview_guard.clone() {
+                Some(preview)
+            } else {
+                let mut guard = HUD_DISPLAY.lock();
+                if let Some(active) = guard.as_ref()
+                    && let Some(expires_at) = active.expires_at
+                    && Instant::now() >= expires_at
+                {
+                    *guard = None;
+                }
+
+                guard.clone()
+            }
+        };
+        direct_refresh_hud();
+        runtime.hud_display = display;
         Ok(())
     }
 
@@ -18262,7 +18296,7 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn refresh_search_area_overlay(_runtime: &mut Runtime) -> Result<()> {
+    pub(crate) fn direct_refresh_search_area_overlay() {
         let (
             regions,
             preview_regions,
@@ -18361,7 +18395,10 @@ mod windows_overlay {
             capture_region_preview_active,
         );
         set_gpu_overlay_layer_shapes(OverlayLayer::VisionSearchArea, search_shapes);
+    }
 
+    fn refresh_search_area_overlay(_runtime: &mut Runtime) -> Result<()> {
+        direct_refresh_search_area_overlay();
         Ok(())
     }
 
@@ -25694,7 +25731,7 @@ mod windows_overlay {
         unsafe {
             let _ = timeBeginPeriod(1);
         }
-        let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<EspRenderPreset>>(1);
+        let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<EspRenderPreset>>(8);
         *GPU_OVERLAY_RENDER_SENDER.lock() = Some(render_tx.clone());
         thread::spawn(move || {
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
@@ -25714,7 +25751,11 @@ mod windows_overlay {
                 let has_pending_motion = animations
                     .values()
                     .any(|a| a.smoothing_ms > 1 && a.current != a.target);
-                let wait_timeout = if has_pending_motion {
+                let has_extra = {
+                    let guard = GPU_OVERLAY_EXTRA_SHAPES.lock();
+                    guard.values().any(|v| !v.is_empty())
+                };
+                let wait_timeout = if has_pending_motion || has_extra || paint_cooldown_frames > 0 {
                     Duration::from_millis(8)
                 } else {
                     Duration::from_millis(50)
@@ -25723,7 +25764,9 @@ mod windows_overlay {
                     Ok(mut frames) => {
                         last_sample_at = Instant::now();
                         while let Ok(newer) = render_rx.try_recv() {
-                            frames = newer;
+                            if !newer.is_empty() {
+                                frames = newer;
+                            }
                         }
                         let active_ids =
                             frames.iter().map(|frame| frame.id).collect::<HashSet<_>>();
@@ -41350,6 +41393,9 @@ mod fallback {
     }
     pub fn send_ui_command(_command: UiCommand) {}
     pub(crate) fn update_resource_monitor_overlay(_stats: Option<&crate::resource_monitor::ProcessResourceStats>) {}
+    pub(crate) fn direct_refresh_search_area_overlay() {}
+    pub(crate) fn direct_refresh_hud() {}
+    pub(crate) fn update_hud_preview_presets_direct(_presets: Vec<HudPreset>) {}
 }
 
 #[cfg(all(test, windows))]

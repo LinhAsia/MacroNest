@@ -1075,14 +1075,14 @@ impl CrosshairApp {
                     hook_state.vision_capture_preview_regions = regions;
                     hook_state.vision_preview_source = Some((pid, VISION_PANEL_TAG));
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             } else if let Some((_, tag)) = hook_state.vision_preview_source {
                 if tag == VISION_PANEL_TAG {
                     hook_state.vision_capture_preview_regions.clear();
                     hook_state.vision_preview_source = None;
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             }
         }

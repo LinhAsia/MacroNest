@@ -564,14 +564,14 @@ impl CrosshairApp {
                     hook_state.vision_capture_preview_regions = regions;
                     hook_state.vision_preview_source = Some((pid, WINDOW_PANEL_TAG));
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             } else if let Some((_, tag)) = hook_state.vision_preview_source {
                 if tag == WINDOW_PANEL_TAG {
                     hook_state.vision_capture_preview_regions.clear();
                     hook_state.vision_preview_source = None;
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             }
         }
@@ -1532,14 +1532,14 @@ impl CrosshairApp {
                     hook_state.vision_capture_preview_regions = regions;
                     hook_state.vision_preview_source = Some((pid, PIN_PANEL_TAG));
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             } else if let Some((_, tag)) = hook_state.vision_preview_source {
                 if tag == PIN_PANEL_TAG {
                     hook_state.vision_capture_preview_regions.clear();
                     hook_state.vision_preview_source = None;
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             }
         }
@@ -2738,6 +2738,7 @@ impl CrosshairApp {
                 };
 
                 changed = true;
+                ui.ctx().request_repaint();
 
                 let mut target_pos = pointer_pos - drag_offset;
 
@@ -6170,14 +6171,14 @@ impl CrosshairApp {
                     hook_state.vision_capture_preview_regions = regions;
                     hook_state.vision_preview_source = Some((pid, LAYOUT_PANEL_TAG));
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             } else if let Some((_, tag)) = hook_state.vision_preview_source {
                 if tag == LAYOUT_PANEL_TAG {
                     hook_state.vision_capture_preview_regions.clear();
                     hook_state.vision_preview_source = None;
                     drop(hook_state);
-                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             }
         }
@@ -6228,9 +6229,7 @@ impl CrosshairApp {
 
     pub(crate) fn sync_hud_preview_presets(&mut self, presets: Vec<HudPreset>) {
         self.active_hud_preview_preset_id = presets.first().map(|preset| preset.id);
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::PreviewHudPreset(presets));
+        crate::overlay::update_hud_preview_presets_direct(presets);
     }
 
     pub(crate) fn sync_hud_preview(&mut self, preset: Option<&HudPreset>) {

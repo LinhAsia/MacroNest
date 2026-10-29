@@ -17358,9 +17358,8 @@ impl eframe::App for CrosshairApp {
                 {
                     hook_state.vision_capture_preview_regions.clear();
                     hook_state.vision_preview_source = None;
-                    let _ = self
-                        .overlay_tx
-                        .send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                    drop(hook_state);
+                    crate::overlay::direct_refresh_search_area_overlay();
                 }
             }
             if Self::active_panel_needs_open_windows(self.state.active_panel) {
@@ -17385,9 +17384,8 @@ impl eframe::App for CrosshairApp {
             {
                 hook_state.vision_capture_preview_regions.clear();
                 hook_state.vision_preview_source = None;
-                let _ = self
-                    .overlay_tx
-                    .send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                drop(hook_state);
+                crate::overlay::direct_refresh_search_area_overlay();
             }
         }
         let keep_pin_preview = viewport_focused && self.state.active_panel == AppPanel::Pin;

@@ -17861,9 +17861,8 @@ if supports_move_mouse || show_detection_tuning {
                                     {
                                         hook_state.vision_capture_preview_regions = regions;
                                         hook_state.vision_preview_source = Some(source);
-                                        let _ = self
-                                            .overlay_tx
-                                            .send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                                        drop(hook_state);
+                                        crate::overlay::direct_refresh_search_area_overlay();
                                     }
                                 } else {
                                     let matches_this_preset = hook_state
@@ -17875,9 +17874,8 @@ if supports_move_mouse || show_detection_tuning {
                                     if matches_this_preset || is_foreign_source {
                                         hook_state.vision_capture_preview_regions.clear();
                                         hook_state.vision_preview_source = None;
-                                        let _ = self
-                                            .overlay_tx
-                                            .send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                                        drop(hook_state);
+                                        crate::overlay::direct_refresh_search_area_overlay();
                                     }
                                 }
                             }
