@@ -1057,15 +1057,16 @@ impl CrosshairApp {
                 }
 
                 ui.separator();
-                // ponytail: tab choice lives in egui temp memory (resets to "Targets" on restart); persist in EspPreset if users ask.
+                // ponytail: tab choice lives in egui temp memory; 2 consolidated tabs for dense, full-width editing.
                 let tab_id = egui::Id::new(("esp_tab", preset.id));
                 let mut tab: u8 = ui.data_mut(|d| *d.get_temp_mut_or(tab_id, 0u8));
+                if tab > 1 {
+                    tab = 0;
+                }
                 ui.horizontal(|ui| {
                     for (i, (label, hint)) in [
-                        ("1. Visuals (User)", "Game window, box marker styling, color, tracer, distance, and sound alert."),
-                        ("2. Target Memory", "Entity memory pointers, XYZ coordinate offsets, and auto-scan hooks."),
-                        ("3. Camera", "Camera position/rotation addresses and projection format."),
-                        ("4. Calibration", "3D alignment tuning, axis inversion, and debug matrix."),
+                        ("1. Target & Visuals", "Target game, entity memory pointers, scanning, marker styling, colors, tracers, and alerts."),
+                        ("2. Camera & Calibration", "Camera position/angles, FOV, 3D projection tuning, axis inversion, and calibration."),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1076,147 +1077,411 @@ impl CrosshairApp {
                 });
                 ui.data_mut(|d| d.insert_temp(tab_id, tab));
                 ui.add_space(4.0);
-                let col1_max_width = (card_width - 140.0).max(120.0);
+
                 if tab == 0 {
-                    section(ui, "Target Game", Color32::from_rgb(100, 200, 255), |ui| {
-                        Grid::new(("esp_game_window", preset.id))
-                            .num_columns(2)
-                            .spacing([8.0, 4.0])
-                            .max_col_width(col1_max_width)
-                            .show(ui, |ui| {
-                                ui.label("Target window");
-                                let matched_window = windows
-                                    .iter()
-                                    .find(|window| window.selector == preset.target_window)
-                                    .or_else(|| {
-                                        let title =
-                                            crate::window_list::selector_base_title(&preset.target_window)
-                                                .trim();
-                                        (!title.is_empty())
-                                            .then(|| {
+                    ui.columns(2, |columns| {
+                        // === LEFT COLUMN: Target Game, Entities & Memory, Bounding Box ===
+                        columns[0].vertical(|ui| {
+                            // --- Target Game & Mode ---
+                            section(ui, "Target Game", Color32::from_rgb(110, 180, 240), |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("Window:");
+                                    let matched_window = windows
+                                        .iter()
+                                        .find(|window| window.selector == preset.target_window)
+                                        .or_else(|| {
+                                            let title = crate::window_list::selector_base_title(&preset.target_window).trim();
+                                            (!title.is_empty()).then(|| {
                                                 windows.iter().find(|window| {
                                                     let w_title = window.title.trim();
                                                     w_title == title
                                                         || w_title.eq_ignore_ascii_case(title)
-                                                        || crate::window_list::selector_base_title(w_title)
-                                                            == title
+                                                        || crate::window_list::selector_base_title(w_title) == title
                                                 })
-                                            })
-                                            .flatten()
-                                    })
-                                    .cloned();
-                                if let Some(window) = &matched_window
-                                    && preset.target_window != window.selector
-                                {
-                                    preset.target_window = window.selector.clone();
-                                }
-                                let target_label = matched_window
-                                    .as_ref()
-                                    .map(|window| format!("{} [PID {}]", window.title, window.process_id))
-                                    .unwrap_or_else(|| {
-                                        if !preset.target_window.is_empty() {
-                                            let base = crate::window_list::selector_base_title(
-                                                &preset.target_window,
-                                            );
-                                            format!("{base} (Offline / Minimized)")
-                                        } else {
-                                            "Select window".to_string()
-                                        }
-                                    });
-                                ComboBox::from_id_salt(("esp_window", preset.id))
-                                    .selected_text(target_label)
-                                    .width(col1_max_width.min(320.0))
-                                    .show_ui(ui, |ui| {
-                                        if !preset.target_window.is_empty() {
-                                            let clear_label = "-- Clear / None --";
-                                            if ui.selectable_label(false, clear_label).clicked() {
-                                                preset.target_window.clear();
+                                            }).flatten()
+                                        })
+                                        .cloned();
+                                    if let Some(window) = &matched_window
+                                        && preset.target_window != window.selector
+                                    {
+                                        preset.target_window = window.selector.clone();
+                                    }
+                                    let target_label = matched_window
+                                        .as_ref()
+                                        .map(|window| format!("{} [PID {}]", window.title, window.process_id))
+                                        .unwrap_or_else(|| {
+                                            if !preset.target_window.is_empty() {
+                                                let base = crate::window_list::selector_base_title(&preset.target_window);
+                                                format!("{base} (Offline / Minimized)")
+                                            } else {
+                                                "Select window".to_string()
                                             }
-                                            ui.separator();
-                                        }
-                                        for window in &windows {
-                                            ui.selectable_value(
-                                                &mut preset.target_window,
-                                                window.selector.clone(),
-                                                format!("{} [PID {}]", window.title, window.process_id),
-                                            );
+                                        });
+                                    let combo_w = (ui.available_width() - 8.0).clamp(140.0, 360.0);
+                                    ComboBox::from_id_salt(("esp_target_window", preset.id))
+                                        .selected_text(target_label)
+                                        .width(combo_w)
+                                        .show_ui(ui, |ui| {
+                                            if !preset.target_window.is_empty() {
+                                                if ui.selectable_label(false, "-- Clear / None --").clicked() {
+                                                    preset.target_window.clear();
+                                                }
+                                                ui.separator();
+                                            }
+                                            for window in &windows {
+                                                ui.selectable_value(
+                                                    &mut preset.target_window,
+                                                    window.selector.clone(),
+                                                    format!("{} [PID {}]", window.title, window.process_id),
+                                                );
+                                            }
+                                        });
+                                });
+                                ui.add_space(2.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Mode:");
+                                    ui.selectable_value(
+                                        &mut preset.entity_list_enabled,
+                                        false,
+                                        "Single target",
+                                    )
+                                    .on_hover_text("Mark one object whose X/Y/Z addresses you already know.");
+                                    ui.selectable_value(
+                                        &mut preset.entity_list_enabled,
+                                        true,
+                                        "Multiple entities",
+                                    )
+                                    .on_hover_text("Mark many entities (players, NPCs...) found by scanning or typed manually.");
+                                });
+                                if !preset.entity_list_enabled {
+                                    ui.add_space(2.0);
+                                    Grid::new(("esp_single_target_grid", preset.id))
+                                        .num_columns(2)
+                                        .spacing([8.0, 4.0])
+                                        .show(ui, |ui| {
+                                            for (label, value) in [
+                                                ("Target X", &mut preset.target_x),
+                                                ("Target Y", &mut preset.target_y),
+                                                ("Target Z", &mut preset.target_z),
+                                            ] {
+                                                memory_expression_row(ui, label, value);
+                                            }
+                                        });
+                                }
+                            });
+
+                            if preset.entity_list_enabled {
+                                ui.add_space(4.0);
+                                section(ui, "Entities & Memory", Color32::from_rgb(120, 210, 180), |ui| {
+                                    use crate::model::EspAutoScanMode as M;
+                                    let current = preset.scan_mode();
+                                    let name = |mode: M| match mode {
+                                        M::Stride => "Single Stride",
+                                        M::MultiStride => "Multi Stride",
+                                        M::HitOrder => "Hit Order",
+                                        M::AllHits => "All Hits",
+                                        M::ManualAddresses => "Manual Addresses",
+                                    };
+
+                                    // Method dropdown
+                                    ui.horizontal(|ui| {
+                                        ui.label("Method:");
+                                        ComboBox::from_id_salt(("esp_auto_scan_mode", preset.id))
+                                            .selected_text(name(current))
+                                            .width(140.0)
+                                            .show_ui(ui, |ui| {
+                                                for (mode, hint) in [
+                                                    (M::Stride, "Entities sit one after another in memory, spaced by one fixed Stride."),
+                                                    (M::MultiStride, "Like Single Stride, but entities can be spaced by any of several Strides."),
+                                                    (M::HitOrder, "Capture entities in the order the selected instruction touches them."),
+                                                    (M::AllHits, "Capture every address the selected instruction touches during the scan."),
+                                                    (M::ManualAddresses, "Type entity addresses yourself; the same X/Y/Z offsets apply to each."),
+                                                ] {
+                                                    if ui.selectable_label(current == mode, name(mode)).on_hover_text(hint).clicked() {
+                                                        preset.entity_auto_scan_mode = mode;
+                                                        preset.entity_auto_hit_order = mode == M::HitOrder;
+                                                        if mode == M::ManualAddresses
+                                                            && preset.entity_manual_addresses.trim().is_empty()
+                                                            && !preset.entity_root.trim().is_empty()
+                                                        {
+                                                            preset.entity_manual_addresses = preset.entity_root.clone();
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        if current == M::ManualAddresses {
+                                            ui.label(RichText::new("Shared X/Y/Z offsets apply to each").weak().size(11.0));
                                         }
                                     });
-                                ui.end_row();
 
-                                ui.label("Gameplay filters");
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(
-                                        &mut preset.entity_hit_order_drop_nearest,
-                                        "Ignore self (Local player)",
-                                    )
-                                    .on_hover_text(
-                                        "Automatically hide the entity closest to camera (your own character).",
-                                    );
+                                    ui.add_space(2.0);
 
-                                    ui.add_space(8.0);
-                                    ui.checkbox(
-                                        &mut preset.entity_filter_motionless_enabled,
-                                        "Ignore motionless (AFK / Dead)",
-                                    )
-                                    .on_hover_text(
-                                        "Hide entities that have not moved for a set duration (removes corpses / static props).",
-                                    );
-                                    if preset.entity_filter_motionless_enabled {
-                                        ui.label("Timeout");
+                                    if current == M::ManualAddresses {
+                                        ui.label("Addresses:");
                                         ui.add(
-                                            DragValue::new(&mut preset.entity_motionless_timeout_secs)
-                                                .range(0.1..=30.0)
-                                                .speed(0.05)
-                                                .suffix("s"),
+                                            TextEdit::multiline(&mut preset.entity_manual_addresses)
+                                                .desired_width((ui.available_width() - 8.0).max(120.0))
+                                                .desired_rows(3)
+                                                .hint_text("0x25B19B2E388, 0x25B19C5F100\n\"game.exe\"+0x100 [0x20]"),
                                         );
-                                        ui.checkbox(
-                                            &mut preset.entity_filter_motionless_permanent,
-                                            "Drop permanently",
-                                        )
-                                        .on_hover_text(
-                                            "Once an entity is motionless for the timeout period, drop it completely and never show it again (eliminates flickering).",
-                                        );
-                                        if ui.small_button("Clear dropped").on_hover_text("Reset motionless trackers so dropped entities can be detected again.").clicked() {
-                                            crate::overlay::clear_esp_motionless_trackers(preset.id);
+                                        let parsed_count = crate::model::parse_multiple_address_expressions(&preset.entity_manual_addresses).len();
+                                        ui.label(RichText::new(format!(
+                                            "{} address(es) configured (comma, semicolon, or newline separated)",
+                                            parsed_count
+                                        )).weak().size(11.0));
+                                    } else {
+                                        let root_step = *preset.entity_root_step.get_or_insert(preset.entity_stride.max(1));
+                                        let root_step_multiplier = preset.entity_root_step_multiplier.max(1);
+                                        let navigation_step = root_step.saturating_mul(root_step_multiplier);
+                                        let can_shift = crate::model::shift_entity_root(
+                                            &preset.entity_root,
+                                            root_step,
+                                            0,
+                                            preset.entity_stride_level,
+                                        ).is_some();
+
+                                        ui.horizontal(|ui| {
+                                            ui.label("Root pointer:");
+                                            let edit_w = (ui.available_width() - 8.0).clamp(140.0, 420.0);
+                                            ui.add(
+                                                TextEdit::singleline(&mut preset.entity_root)
+                                                    .desired_width(edit_w)
+                                                    .hint_text(RichText::new("pointer / module+offset [offsets] / @alias").color(ui.visuals().weak_text_color())),
+                                            );
+                                        });
+
+                                        ui.add_space(2.0);
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 4.0;
+                                            ui.label("Shift pointer:");
+                                            if ui.add_enabled(can_shift, egui::Button::new("▲"))
+                                                .on_hover_text("Shift root address or pointer offset - (Step x multiplier)")
+                                                .clicked()
+                                            {
+                                                if let Some(root) = crate::model::shift_entity_root(
+                                                    &preset.entity_root,
+                                                    navigation_step,
+                                                    -1,
+                                                    preset.entity_stride_level,
+                                                ) {
+                                                    preset.entity_root = root;
+                                                }
+                                            }
+                                            if ui.add_enabled(can_shift, egui::Button::new("▼"))
+                                                .on_hover_text("Shift root address or pointer offset + (Step x multiplier)")
+                                                .clicked()
+                                            {
+                                                if let Some(root) = crate::model::shift_entity_root(
+                                                    &preset.entity_root,
+                                                    navigation_step,
+                                                    1,
+                                                    preset.entity_stride_level,
+                                                ) {
+                                                    preset.entity_root = root;
+                                                }
+                                            }
+                                            ui.add_space(4.0);
+                                            ui.label("Step:");
+                                            if let Some(step) = preset.entity_root_step.as_mut() {
+                                                ui.add(DragValue::new(step).range(1..=0x10000).hexadecimal(1, false, false))
+                                                    .on_hover_text("Hexadecimal step; defaults to Stride.");
+                                            }
+                                            ui.label("x");
+                                            ui.add(DragValue::new(&mut preset.entity_root_step_multiplier).range(1..=1_000_000))
+                                                .on_hover_text("Decimal multiplier.");
+                                        });
+                                    }
+
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Offsets:");
+                                        ui.label("X");
+                                        ui.add(DragValue::new(&mut preset.entity_x_offset));
+                                        ui.add_space(4.0);
+                                        ui.label("Y");
+                                        ui.add(DragValue::new(&mut preset.entity_y_offset));
+                                        ui.add_space(4.0);
+                                        ui.label("Z");
+                                        ui.add(DragValue::new(&mut preset.entity_z_offset));
+                                    });
+
+                                    if current != M::ManualAddresses {
+                                        ui.add_space(2.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Structure:");
+                                            ui.label("Stride");
+                                            ui.add(DragValue::new(&mut preset.entity_stride).range(1..=0x10000).hexadecimal(1, false, false));
+                                            ui.add_space(4.0);
+                                            ui.label("Level");
+                                            ui.add(DragValue::new(&mut preset.entity_stride_level).range(1..=8))
+                                                .on_hover_text("Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.");
+                                            ui.add_space(4.0);
+                                            ui.label("Count");
+                                            ui.add(DragValue::new(&mut preset.entity_count).range(1..=512));
+                                        });
+                                    }
+
+                                    ui.add_space(3.0);
+                                    ui.separator();
+                                    ui.add_space(2.0);
+
+                                    // Auto scan section
+                                    if current == M::ManualAddresses {
+                                        ui.horizontal(|ui| {
+                                            ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD feedback");
+                                            if preset.entity_auto_hud_enabled {
+                                                let hud_name = preset.entity_auto_hud_preset_id
+                                                    .and_then(|id| self.state.hud_presets.iter().find(|hud| hud.id == id))
+                                                    .map_or("Select HUD", |hud| hud.name.as_str());
+                                                ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
+                                                    .selected_text(hud_name)
+                                                    .width(110.0)
+                                                    .show_ui(ui, |ui| {
+                                                        for hud in &self.state.hud_presets {
+                                                            ui.selectable_value(&mut preset.entity_auto_hud_preset_id, Some(hud.id), &hud.name);
+                                                        }
+                                                    });
+                                            }
+                                        });
+                                    } else {
+                                        let selected_code = self.state.memory_code_list.iter().find(|code| {
+                                            code.module.eq_ignore_ascii_case(&preset.entity_auto_code_module)
+                                                && code.offset == preset.entity_auto_code_offset
+                                        });
+                                        let format_code_label = |code: &crate::model::MemoryCodeEntry| {
+                                            if !code.name.trim().is_empty() {
+                                                format!("{} — {}+{:X}  {}", code.name, code.module, code.offset, code.instruction)
+                                            } else {
+                                                format!("{}+{:X}  {}", code.module, code.offset, code.instruction)
+                                            }
+                                        };
+
+                                        ui.horizontal(|ui| {
+                                            ui.label("Auto scan:");
+                                            let code_w = (ui.available_width() - 80.0).clamp(130.0, 300.0);
+                                            ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
+                                                .selected_text(selected_code.map_or("Select instruction".to_owned(), format_code_label))
+                                                .width(code_w)
+                                                .show_ui(ui, |ui| {
+                                                    for code in &self.state.memory_code_list {
+                                                        let selected = code.module.eq_ignore_ascii_case(&preset.entity_auto_code_module)
+                                                            && code.offset == preset.entity_auto_code_offset;
+                                                        if ui.selectable_label(selected, format_code_label(code)).clicked() {
+                                                            preset.entity_auto_code_module = code.module.clone();
+                                                            preset.entity_auto_code_offset = code.offset;
+                                                        }
+                                                    }
+                                                });
+                                            if entity_capture_active {
+                                                if ui.button("Stop").clicked() {
+                                                    auto_capture_stop = Some(preset.id);
+                                                }
+                                            } else if ui.button("Scan").clicked() {
+                                                auto_capture_start = Some(preset.id);
+                                            }
+                                        });
+
+                                        ui.add_space(2.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 6.0;
+                                            ui.checkbox(&mut preset.entity_auto_continuous, "Continuous")
+                                                .on_hover_text("Keep scanning continuously with throttled duty-cycle without lag.");
+                                            if preset.entity_auto_continuous {
+                                                ui.label("Interval");
+                                                ui.add(DragValue::new(&mut preset.entity_auto_continuous_interval_secs).range(0.2..=10.0).speed(0.1).suffix("s"));
+                                            }
+                                            if current == M::AllHits && !preset.entity_auto_continuous {
+                                                ui.label("Duration");
+                                                ui.add(DragValue::new(&mut preset.entity_auto_scan_duration_secs).range(0.1..=30.0).speed(0.1).suffix("s"));
+                                            }
+                                            if current == M::MultiStride {
+                                                ui.label("Strides");
+                                                ui.add(TextEdit::singleline(&mut preset.entity_multi_strides).desired_width(90.0).hint_text("e.g. 2260, 25D0"));
+                                            }
+                                            if current != M::AllHits || preset.entity_hit_order_drop_nearest || !preset.entity_auto_continuous {
+                                                ui.label("Need");
+                                                ui.add(DragValue::new(&mut preset.entity_auto_capture_count).range(1..=512));
+                                            }
+                                            if current == M::HitOrder {
+                                                ui.label("Step");
+                                                ui.add(DragValue::new(&mut preset.entity_auto_hit_step).range(1..=32));
+                                            }
+                                        });
+
+                                        ui.add_space(2.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 6.0;
+                                            if current == M::HitOrder || current == M::MultiStride || current == M::AllHits {
+                                                ui.checkbox(&mut preset.entity_hit_order_merge_pairs, "Merge pairs")
+                                                    .on_hover_text("Merge captured addresses that share the same 3D world position into a single entity.");
+                                            }
+                                            ui.checkbox(&mut preset.entity_hit_order_drop_nearest, "Drop self")
+                                                .on_hover_text("Remove entity closest to camera (local player).");
+                                            ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
+                                            if preset.entity_auto_hud_enabled {
+                                                let hud_name = preset.entity_auto_hud_preset_id
+                                                    .and_then(|id| self.state.hud_presets.iter().find(|hud| hud.id == id))
+                                                    .map_or("Select HUD", |hud| hud.name.as_str());
+                                                ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
+                                                    .selected_text(hud_name)
+                                                    .width(100.0)
+                                                    .show_ui(ui, |ui| {
+                                                        for hud in &self.state.hud_presets {
+                                                            ui.selectable_value(&mut preset.entity_auto_hud_preset_id, Some(hud.id), &hud.name);
+                                                        }
+                                                    });
+                                            }
+                                        });
+
+                                        if let Some(status) = &entity_capture_feedback {
+                                            ui.label(RichText::new(status).color(ui.visuals().weak_text_color()).size(11.0));
                                         }
                                     }
 
-                                    ui.add_space(8.0);
-                                    ui.checkbox(
-                                        &mut preset.entity_distance_filter_enabled,
-                                        "Distance limit",
-                                    )
-                                    .on_hover_text(
-                                        "Only show ESP for entities within a specific distance range (in meters).",
-                                    );
-                                    if preset.entity_distance_filter_enabled {
-                                        ui.label("Min:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_distance_min)
-                                                .range(0.0..=10000.0)
-                                                .speed(1.0)
-                                                .suffix("m"),
-                                        );
-                                        ui.label("Max:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_distance_max)
-                                                .range(0.0..=10000.0)
-                                                .speed(1.0)
-                                                .suffix("m"),
-                                        );
-                                    }
+                                    ui.label(RichText::new("Offsets are bytes. Stride/Step are hex bytes. Runtime reads capped at 512.").weak().size(11.0));
                                 });
-                                ui.end_row();
-                            });
-                    });
 
-                    ui.add_space(4.0);
+                                ui.add_space(4.0);
+                                section(ui, "Bounding Box & Duplicates", Color32::from_rgb(180, 150, 240), |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
+                                        ui.checkbox(&mut preset.entity_aabb_draw_box, "Box from coords")
+                                            .on_hover_text("Draw ESP box directly from AABB coordinate bounds.");
+                                        if preset.entity_aabb_center || preset.entity_aabb_draw_box {
+                                            ui.label("Pair delta");
+                                            ui.add(DragValue::new(&mut preset.entity_aabb_pair_offset).range(-0x10000..=0x10000));
+                                            ui.label("bytes");
+                                        }
+                                    });
+                                    ui.add_space(2.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.checkbox(&mut preset.entity_exclude_near_preset_enabled, "Drop near preset")
+                                            .on_hover_text("Hide entities that match or are closest to entities in another active ESP preset.");
+                                        if preset.entity_exclude_near_preset_enabled {
+                                            let other_name = preset.entity_exclude_near_preset_id
+                                                .and_then(|id| self.state.esp_presets.iter().find(|p| p.id == id))
+                                                .map_or("Select preset", |p| p.name.as_str());
+                                            ComboBox::from_id_salt(("esp_exclude_near_preset", preset.id))
+                                                .selected_text(other_name)
+                                                .width(130.0)
+                                                .show_ui(ui, |ui| {
+                                                    ui.selectable_value(&mut preset.entity_exclude_near_preset_id, None, "-- None --");
+                                                    for other in &self.state.esp_presets {
+                                                        if other.id != preset.id {
+                                                            ui.selectable_value(&mut preset.entity_exclude_near_preset_id, Some(other.id), &other.name);
+                                                        }
+                                                    }
+                                                });
+                                        }
+                                    });
+                                });
+                            }
+                        });
 
-                    ui.columns(2, |columns| {
-                        columns[0].vertical(|ui| {
-                            // --- BOX: Marker & Styling ---
-                            section(ui, "Marker & Style", Color32::from_rgb(180, 140, 255), |ui| {
+                        // === RIGHT COLUMN: Marker Styling, Colors & Overlay, Filters, Audio ===
+                        columns[1].vertical(|ui| {
+                            // --- Marker & Style ---
+                            section(ui, "Marker & Style", Color32::from_rgb(130, 205, 170), |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Source:");
                                     ComboBox::from_id_salt(("esp_marker_source", preset.id))
@@ -1256,7 +1521,7 @@ impl CrosshairApp {
                                             }
                                             EspMarkerKind::Box => {
                                                 if preset.entity_aabb_draw_box {
-                                                    ui.label("(Auto from AABB)");
+                                                    ui.label("(Auto AABB)");
                                                 } else {
                                                     ui.label("W:");
                                                     ui.add(DragValue::new(&mut preset.box_width).speed(1.0).range(2.0..=1000.0));
@@ -1273,14 +1538,14 @@ impl CrosshairApp {
                                         }
                                     } else if preset.marker_source == EspMarkerSource::Text {
                                         ui.add_space(4.0);
-                                        ui.label("Off X:");
-                                        ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));
-                                        ui.label("Off Y:");
-                                        ui.add(DragValue::new(&mut preset.text_offset_y).speed(1.0));
                                         ui.label("Size:");
                                         ui.add(DragValue::new(&mut preset.text_font_size).speed(1.0).range(8.0..=256.0));
                                         ui.label("Opacity:");
                                         ui.add(DragValue::new(&mut preset.text_opacity).speed(0.01).range(0.0..=1.0));
+                                        ui.label("Off X:");
+                                        ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));
+                                        ui.label("Off Y:");
+                                        ui.add(DragValue::new(&mut preset.text_offset_y).speed(1.0));
                                     } else {
                                         ui.add_space(4.0);
                                         let label = if preset.marker_source == EspMarkerSource::Svg { "Choose SVG" } else { "Import image" };
@@ -1300,11 +1565,6 @@ impl CrosshairApp {
                                                 }
                                             }
                                         }
-                                        if preset.marker_source == EspMarkerSource::Image {
-                                            let hint = RichText::new("Image file").color(ui.visuals().weak_text_color());
-                                            let width = (ui.available_width() - 8.0).max(60.0);
-                                            ui.add_sized([width, 21.0], TextEdit::singleline(&mut preset.marker_asset_path).hint_text(hint));
-                                        }
                                         if preset.marker_source == EspMarkerSource::Svg {
                                             ui.label("W:");
                                             ui.add(DragValue::new(&mut preset.svg_width).speed(1.0).range(2.0..=1000.0));
@@ -1319,6 +1579,15 @@ impl CrosshairApp {
                                         ui.checkbox(&mut preset.marker_billboard_3d, "Billboard 3D");
                                     }
                                 });
+
+                                if preset.marker_source == EspMarkerSource::Image {
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        let hint = RichText::new("Image file").color(ui.visuals().weak_text_color());
+                                        let width = (ui.available_width() - 8.0).max(60.0);
+                                        ui.add_sized([width, 21.0], TextEdit::singleline(&mut preset.marker_asset_path).hint_text(hint));
+                                    });
+                                }
 
                                 if preset.marker_source == EspMarkerSource::Text {
                                     ui.add_space(2.0);
@@ -1344,17 +1613,14 @@ impl CrosshairApp {
                                     ui.add_space(2.0);
                                     ui.horizontal(|ui| {
                                         ui.label("SVG:");
-                                        let hint = RichText::new("Paste <svg ...>...</svg> here")
-                                            .color(ui.visuals().weak_text_color());
+                                        let hint = RichText::new("Paste <svg ...>...</svg> here").color(ui.visuals().weak_text_color());
                                         egui::ScrollArea::vertical()
                                             .id_salt(("esp_svg_source_scroll", preset.id))
                                             .max_height(54.0)
                                             .show(ui, |ui| {
                                                 ui.add_sized(
                                                     [(ui.available_width() - 8.0).max(60.0), 54.0],
-                                                    TextEdit::multiline(&mut preset.marker_svg_source)
-                                                        .desired_rows(2)
-                                                        .hint_text(hint),
+                                                    TextEdit::multiline(&mut preset.marker_svg_source).desired_rows(2).hint_text(hint),
                                                 );
                                             });
                                     });
@@ -1362,7 +1628,7 @@ impl CrosshairApp {
 
                                 ui.add_space(2.0);
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label("Marker off:");
+                                    ui.label("Marker offset:");
                                     ui.label("X");
                                     ui.add(DragValue::new(&mut preset.marker_offset_x).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
                                     ui.label("Y");
@@ -1380,35 +1646,30 @@ impl CrosshairApp {
                                         ui.label("Ref:");
                                         ui.add(DragValue::new(&mut preset.distance_reference).speed(1.0).range(0.01..=1_000_000.0));
                                         ui.label("Str:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.distance_scale_strength_percent)
-                                                .speed(1.0)
-                                                .range(0.0..=100.0)
-                                                .suffix("%"),
-                                        );
+                                        ui.add(DragValue::new(&mut preset.distance_scale_strength_percent).speed(1.0).range(0.0..=100.0).suffix("%"));
                                         ui.label("Offset:");
                                         ui.add(DragValue::new(&mut preset.marker_size_offset_percent).speed(1.0).range(-95.0..=1000.0).suffix("%"));
                                     }
                                 });
                             });
-                        });
 
-                        columns[1].vertical(|ui| {
-                            // --- BOX: Display & Overlay Effects ---
-                            section(ui, "Display & Overlay", Color32::from_rgb(120, 230, 180), |ui| {
+                            ui.add_space(4.0);
+
+                            // --- Colors & Tracers ---
+                            section(ui, "Colors & Tracers", Color32::from_rgb(110, 200, 240), |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     let mut color = Color32::from_rgba_unmultiplied(
                                         preset.color.r, preset.color.g, preset.color.b, preset.color.a,
                                     );
-                                    ui.label("Color:");
+                                    ui.label("Main color:");
                                     if ui.color_edit_button_srgba(&mut color).changed() {
                                         preset.color = RgbaColor { r: color.r(), g: color.g(), b: color.b(), a: color.a() };
                                     }
 
-                                    ui.add_space(4.0);
+                                    ui.add_space(6.0);
                                     ui.checkbox(&mut preset.show_tracer, "Tracer");
                                     if preset.show_tracer {
-                                        ui.checkbox(&mut preset.tracer_from_top, "From Top");
+                                        ui.checkbox(&mut preset.tracer_from_top, "From top");
                                         ui.checkbox(&mut preset.clamp_offscreen_tracer, "Clamp off-screen");
                                     }
                                 });
@@ -1416,36 +1677,116 @@ impl CrosshairApp {
                                 ui.add_space(2.0);
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(&mut preset.show_distance, "Show distance");
-                                });
-
-                                ui.add_space(2.0);
-                                ui.horizontal_wrapped(|ui| {
+                                    ui.add_space(4.0);
                                     ui.label("Update:");
                                     ui.add(DragValue::new(&mut preset.update_interval_ms).speed(1.0).range(1..=1000).suffix(" ms"));
-
                                     ui.add_space(4.0);
                                     let mut smooth_enabled = preset.motion_smoothing_ms > 0;
                                     if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
                                         preset.motion_smoothing_ms = if smooth_enabled { 1 } else { 0 };
                                     }
                                     if smooth_enabled {
-                                        ui.add(
-                                            DragValue::new(&mut preset.motion_smoothing_ms)
-                                                .speed(1.0)
-                                                .range(1..=500)
-                                                .suffix(" ms"),
-                                        );
+                                        ui.add(DragValue::new(&mut preset.motion_smoothing_ms).speed(1.0).range(1..=500).suffix(" ms"));
+                                    }
+                                });
+
+                                if preset.entity_list_enabled {
+                                    ui.add_space(2.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label("Per-entity color: Entity #");
+                                        let mut target_idx: u32 = ui.data_mut(|d| {
+                                            *d.get_temp_mut_or(egui::Id::new(("entity_color_idx", preset.id)), 1u32)
+                                        });
+                                        if ui.add(DragValue::new(&mut target_idx).range(1..=preset.entity_count.max(1) as u32)).changed() {
+                                            ui.data_mut(|d| {
+                                                d.insert_temp(egui::Id::new(("entity_color_idx", preset.id)), target_idx)
+                                            });
+                                        }
+                                        let mut pick_color = ui.data_mut(|d| {
+                                            *d.get_temp_mut_or(egui::Id::new(("entity_color_picker", preset.id)), Color32::from_rgb(255, 0, 0))
+                                        });
+                                        if ui.color_edit_button_srgba(&mut pick_color).changed() {
+                                            ui.data_mut(|d| {
+                                                d.insert_temp(egui::Id::new(("entity_color_picker", preset.id)), pick_color)
+                                            });
+                                        }
+                                        if ui.button("Set color").on_hover_text("Assign custom color to selected Entity #").clicked() {
+                                            preset.custom_entity_colors.insert(
+                                                target_idx,
+                                                crate::model::RgbaColor {
+                                                    r: pick_color.r(),
+                                                    g: pick_color.g(),
+                                                    b: pick_color.b(),
+                                                    a: pick_color.a(),
+                                                },
+                                            );
+                                        }
+                                        if !preset.custom_entity_colors.is_empty() {
+                                            let mut to_remove = None;
+                                            let mut sorted_keys: Vec<_> = preset.custom_entity_colors.keys().copied().collect();
+                                            sorted_keys.sort_unstable();
+                                            for key in sorted_keys {
+                                                if let Some(c) = preset.custom_entity_colors.get(&key) {
+                                                    let color_32 = Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a);
+                                                    ui.horizontal(|ui| {
+                                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                                                        ui.painter().rect_filled(rect, 2.0, color_32);
+                                                        ui.label(format!("#{}", key));
+                                                        if ui.small_button("×").clicked() {
+                                                            to_remove = Some(key);
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                            if let Some(key) = to_remove {
+                                                preset.custom_entity_colors.remove(&key);
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+
+                            ui.add_space(4.0);
+
+                            // --- Gameplay Filters ---
+                            section(ui, "Gameplay Filters", Color32::from_rgb(240, 190, 120), |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.entity_hit_order_drop_nearest, "Ignore self (Local player)")
+                                        .on_hover_text("Automatically hide the entity closest to camera (your own character).");
+                                });
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.entity_filter_motionless_enabled, "Ignore motionless (AFK / Dead)")
+                                        .on_hover_text("Hide entities that have not moved for a set duration.");
+                                    if preset.entity_filter_motionless_enabled {
+                                        ui.label("Timeout");
+                                        ui.add(DragValue::new(&mut preset.entity_motionless_timeout_secs).range(0.1..=30.0).speed(0.05).suffix("s"));
+                                        ui.checkbox(&mut preset.entity_filter_motionless_permanent, "Drop perm")
+                                            .on_hover_text("Once an entity is motionless for the timeout period, drop it completely.");
+                                        if ui.small_button("Clear dropped").clicked() {
+                                            crate::overlay::clear_esp_motionless_trackers(preset.id);
+                                        }
+                                    }
+                                });
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.entity_distance_filter_enabled, "Distance limit")
+                                        .on_hover_text("Only show ESP for entities within a specific distance range (in meters).");
+                                    if preset.entity_distance_filter_enabled {
+                                        ui.label("Min:");
+                                        ui.add(DragValue::new(&mut preset.entity_distance_min).range(0.0..=10000.0).speed(1.0).suffix("m"));
+                                        ui.label("Max:");
+                                        ui.add(DragValue::new(&mut preset.entity_distance_max).range(0.0..=10000.0).speed(1.0).suffix("m"));
                                     }
                                 });
                             });
 
                             ui.add_space(4.0);
 
-                            // --- BOX: Spatial Target Audio ---
-                            section(ui, "Sound Alert", Color32::from_rgb(255, 150, 150), |ui| {
+                            // --- Sound Alert ---
+                            section(ui, "Sound Alert", Color32::from_rgb(240, 150, 150), |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(&mut preset.target_audio_enabled, "Enable sound");
-
                                     if preset.target_audio_enabled {
                                         if ui.button("Choose sound").clicked()
                                             && let Some(path) = rfd::FileDialog::new()
@@ -1455,12 +1796,11 @@ impl CrosshairApp {
                                             preset.target_audio_path = path.to_string_lossy().into_owned();
                                         }
                                         let hint = RichText::new("Audio file").color(ui.visuals().weak_text_color());
-                                        let audio_width = (ui.available_width() - 70.0).max(60.0);
+                                        let audio_width = (ui.available_width() - 60.0).clamp(60.0, 240.0);
                                         ui.add_sized([audio_width, 21.0], TextEdit::singleline(&mut preset.target_audio_path).hint_text(hint));
                                         ui.checkbox(&mut preset.target_audio_loop, "Loop");
                                     }
                                 });
-
                                 if preset.target_audio_enabled {
                                     ui.add_space(2.0);
                                     ui.horizontal_wrapped(|ui| {
@@ -1480,797 +1820,69 @@ impl CrosshairApp {
                 }
 
                 if tab == 1 {
-                section(ui, "Target", Color32::from_rgb(100, 200, 255), |ui| {
-                Grid::new(("esp_addresses", preset.id))
-                    .num_columns(2)
-                    .spacing([8.0, 4.0])
-                    .max_col_width(col1_max_width)
-                    .show(ui, |ui| {
-                        ui.label("Target window");
-                        let matched_window = windows
-                            .iter()
-                            .find(|window| window.selector == preset.target_window)
-                            .or_else(|| {
-                                let title =
-                                    crate::window_list::selector_base_title(&preset.target_window)
-                                        .trim();
-                                (!title.is_empty())
-                                    .then(|| {
-                                        windows.iter().find(|window| {
-                                            let w_title = window.title.trim();
-                                            w_title == title
-                                                || w_title.eq_ignore_ascii_case(title)
-                                                || crate::window_list::selector_base_title(w_title)
-                                                    == title
+                    ui.columns(2, |columns| {
+                        // === LEFT COLUMN: Camera Memory Addresses & Format ===
+                        columns[0].vertical(|ui| {
+                            section(ui, "Camera Addresses", Color32::from_rgb(110, 180, 240), |ui| {
+                                ui.label(RichText::new("Game memory locations for camera position and rotation.").weak().size(11.0));
+                                ui.add_space(2.0);
+                                Grid::new(("esp_camera_pos_grid", preset.id))
+                                    .num_columns(2)
+                                    .spacing([8.0, 4.0])
+                                    .show(ui, |ui| {
+                                        for (label, value) in [
+                                            ("Camera X", &mut preset.camera_x),
+                                            ("Camera Y", &mut preset.camera_y),
+                                            ("Camera Z", &mut preset.camera_z),
+                                        ] {
+                                            memory_expression_row(ui, label, value);
+                                        }
+                                    });
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Orientation source:");
+                                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 260.0);
+                                    ComboBox::from_id_salt(("esp_orientation_source", preset.id))
+                                        .selected_text(match preset.orientation_source {
+                                            EspOrientationSource::Angles => "Yaw + pitch angles",
+                                            EspOrientationSource::DirectionPairPitch => "Horizontal direction pair + pitch",
                                         })
-                                    })
-                                    .flatten()
-                            })
-                            .cloned();
-                        if let Some(window) = &matched_window
-                            && preset.target_window != window.selector
-                        {
-                            preset.target_window = window.selector.clone();
-                        }
-                        let target_label = matched_window
-                            .as_ref()
-                            .map(|window| format!("{} [PID {}]", window.title, window.process_id))
-                            .unwrap_or_else(|| {
-                                if !preset.target_window.is_empty() {
-                                    let base = crate::window_list::selector_base_title(
-                                        &preset.target_window,
-                                    );
-                                    format!("{base} (Offline / Minimized)")
-                                } else {
-                                    "Select window".to_string()
-                                }
-                            });
-                        ComboBox::from_id_salt(("esp_window", preset.id))
-                            .selected_text(target_label)
-                            .width(col1_max_width.min(320.0))
-                            .show_ui(ui, |ui| {
-                                if !preset.target_window.is_empty() {
-                                    let clear_label = "-- Clear / None --";
-                                    if ui.selectable_label(false, clear_label).clicked() {
-                                        preset.target_window.clear();
-                                    }
-                                    ui.separator();
-                                }
-                                for window in &windows {
-                                    ui.selectable_value(
-                                        &mut preset.target_window,
-                                        window.selector.clone(),
-                                        format!("{} [PID {}]", window.title, window.process_id),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-                        ui.label("Mode");
-                        ui.scope(|ui| {
-                            ui.set_max_width(col1_max_width);
-                            ui.horizontal_wrapped(|ui| {
-                                ui.selectable_value(
-                                    &mut preset.entity_list_enabled,
-                                    false,
-                                    "Single target",
-                                )
-                                .on_hover_text("Mark one object whose X/Y/Z addresses you already know.");
-                                ui.selectable_value(
-                                    &mut preset.entity_list_enabled,
-                                    true,
-                                    "Multiple targets",
-                                )
-                                .on_hover_text("Mark many entities (players, NPCs...) found by scanning or typed manually.");
-                            });
-                        });
-                        ui.end_row();
-                        if !preset.entity_list_enabled {
-                            for (label, value) in [
-                                ("Target X", &mut preset.target_x),
-                                ("Target Y", &mut preset.target_y),
-                                ("Target Z", &mut preset.target_z),
-                            ] {
-                                memory_expression_row(ui, label, value);
-                            }
-                        }
-                    });
-                });
-                if preset.entity_list_enabled {
-                ui.add_space(4.0);
-                section(ui, "Entities", Color32::from_rgb(120, 230, 180), |ui| {
-                Grid::new(("esp_entities", preset.id))
-                    .num_columns(2)
-                    .spacing([8.0, 4.0])
-                    .max_col_width(col1_max_width)
-                    .show(ui, |ui| {
-                            ui.label("Find method");
-                            ui.horizontal_wrapped(|ui| {
-                                use crate::model::EspAutoScanMode as M;
-                                let current = preset.scan_mode();
-                                let name = |mode: M| match mode {
-                                    M::Stride => "Single Stride",
-                                    M::MultiStride => "Multi Stride",
-                                    M::HitOrder => "Hit Order",
-                                    M::AllHits => "All Hits",
-                                    M::ManualAddresses => "Manual Addresses",
-                                };
-                                ComboBox::from_id_salt(("esp_auto_scan_mode", preset.id))
-                                    .selected_text(name(current))
-                                    .width(140.0)
-                                    .show_ui(ui, |ui| {
-                                        for (mode, hint) in [
-                                            (M::Stride, "Entities sit one after another in memory, spaced by one fixed Stride."),
-                                            (M::MultiStride, "Like Single Stride, but entities can be spaced by any of several Strides."),
-                                            (M::HitOrder, "Capture entities in the order the selected instruction touches them."),
-                                            (M::AllHits, "Capture every address the selected instruction touches during the scan."),
-                                            (M::ManualAddresses, "Type entity addresses yourself; the same X/Y/Z offsets apply to each."),
-                                        ] {
-                                            if ui.selectable_label(current == mode, name(mode)).on_hover_text(hint).clicked() {
-                                                preset.entity_auto_scan_mode = mode;
-                                                preset.entity_auto_hit_order = mode == M::HitOrder;
-                                                if mode == M::ManualAddresses
-                                                    && preset.entity_manual_addresses.trim().is_empty()
-                                                    && !preset.entity_root.trim().is_empty()
-                                                {
-                                                    preset.entity_manual_addresses = preset.entity_root.clone();
-                                                }
-                                            }
-                                        }
-                                    });
-                                if current == M::ManualAddresses {
-                                    ui.label(RichText::new("Shared X/Y/Z offsets apply to each address.").weak().size(11.0));
-                                }
-                            });
-                            ui.end_row();
-                            let scan_mode = preset.scan_mode();
-                            if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
-                                ui.label("Addresses");
-                                ui.scope(|ui| {
-                                    ui.set_max_width(col1_max_width);
-                                    ui.vertical(|ui| {
-                                        ui.add(
-                                            TextEdit::multiline(&mut preset.entity_manual_addresses)
-                                                .desired_width(col1_max_width.min(380.0))
-                                                .desired_rows(3)
-                                                .hint_text("0x25B19B2E388, 0x25B19C5F100\n\"game.exe\"+0x100 [0x20]"),
-                                        );
-                                        let parsed_count = crate::model::parse_multiple_address_expressions(&preset.entity_manual_addresses).len();
-                                        ui.label(RichText::new(format!(
-                                            "{} address(es) configured (comma, semicolon, or newline separated)",
-                                            parsed_count
-                                        )).weak().size(11.0));
-                                    });
-                                });
-                                ui.end_row();
-                            } else {
-                                let root_step = *preset
-                                    .entity_root_step
-                                    .get_or_insert(preset.entity_stride.max(1));
-                                let root_step_multiplier = preset.entity_root_step_multiplier.max(1);
-                                let navigation_step = root_step.saturating_mul(root_step_multiplier);
-                                ui.label("Entity root");
-                                ui.scope(|ui| {
-                                    ui.set_max_width(col1_max_width);
-                                    ui.vertical(|ui| {
-                                        ui.add(
-                                            TextEdit::singleline(&mut preset.entity_root)
-                                                .desired_width(col1_max_width.min(380.0))
-                                                .hint_text(
-                                                    RichText::new(
-                                                        "stable pointer to first entity X / @alias",
-                                                    )
-                                                    .color(ui.visuals().weak_text_color()),
-                                                ),
-                                        );
-                                        let can_shift = crate::model::shift_entity_root(
-                                            &preset.entity_root,
-                                            root_step,
-                                            0,
-                                            preset.entity_stride_level,
-                                        )
-                                        .is_some();
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 4.0;
-                                            ui.label("Shift pointer:");
-                                            if ui
-                                                .add_enabled(can_shift, egui::Button::new("▲"))
-                                                .on_hover_text(
-                                                    "Shift root address or pointer offset - (Step x multiplier)",
-                                                )
-                                                .clicked()
-                                            {
-                                                if let Some(root) = crate::model::shift_entity_root(
-                                                    &preset.entity_root,
-                                                    navigation_step,
-                                                    -1,
-                                                    preset.entity_stride_level,
-                                                ) {
-                                                    preset.entity_root = root;
-                                                }
-                                            }
-                                            if ui
-                                                .add_enabled(can_shift, egui::Button::new("▼"))
-                                                .on_hover_text(
-                                                    "Shift root address or pointer offset + (Step x multiplier)",
-                                                )
-                                                .clicked()
-                                            {
-                                                if let Some(root) = crate::model::shift_entity_root(
-                                                    &preset.entity_root,
-                                                    navigation_step,
-                                                    1,
-                                                    preset.entity_stride_level,
-                                                ) {
-                                                    preset.entity_root = root;
-                                                }
-                                            }
-                                            ui.add_space(4.0);
-                                            ui.label("Step:");
-                                            if let Some(step) = preset.entity_root_step.as_mut() {
-                                                ui.add(
-                                                    DragValue::new(step)
-                                                        .range(1..=0x10000)
-                                                        .hexadecimal(1, false, false),
-                                                )
-                                                .on_hover_text(
-                                                    "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
-                                                );
-                                            }
-                                            ui.label("x");
-                                            ui.add(
-                                                DragValue::new(&mut preset.entity_root_step_multiplier)
-                                                    .range(1..=1_000_000),
-                                            )
-                                            .on_hover_text(
-                                                "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
-                                            );
+                                        .width(combo_w)
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut preset.orientation_source, EspOrientationSource::Angles, "Yaw + pitch angles");
+                                            ui.selectable_value(&mut preset.orientation_source, EspOrientationSource::DirectionPairPitch, "Horizontal direction pair + pitch");
                                         });
-                                    });
                                 });
-                                ui.end_row();
-                            }
-                            ui.label("Coordinates");
-                            ui.scope(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("X offset:");
-                                    ui.add(DragValue::new(&mut preset.entity_x_offset));
-                                    ui.label("Y offset:");
-                                    ui.add(DragValue::new(&mut preset.entity_y_offset));
-                                    ui.label("Z offset:");
-                                    ui.add(DragValue::new(&mut preset.entity_z_offset));
-                                });
-                            });
-                            ui.end_row();
-                            if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
-                                ui.label("Array structure");
-                                ui.scope(|ui| {
-                                    ui.set_max_width(col1_max_width);
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label("Stride:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_stride)
-                                                .range(1..=0x10000)
-                                                .hexadecimal(1, false, false),
-                                        );
-                                        ui.label("Level:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_stride_level)
-                                                .range(1..=8),
-                                        )
-                                        .on_hover_text(
-                                            "Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.",
-                                        );
-                                        ui.label("Count:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_count).range(1..=512),
-                                        );
-                                    });
-                                });
-                                ui.end_row();
-                            }
-                            let scan_mode = preset.scan_mode();
-                            ui.label(if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
-                                "HUD"
-                            } else {
-                                "Auto scan"
-                            });
-                            ui.vertical(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                let selected_code = self
-                                    .state
-                                    .memory_code_list
-                                    .iter()
-                                    .find(|code| {
-                                        code.module.eq_ignore_ascii_case(
-                                            &preset.entity_auto_code_module,
-                                        ) && code.offset == preset.entity_auto_code_offset
-                                    });
-                                let format_code_label = |code: &crate::model::MemoryCodeEntry| {
-                                    if !code.name.trim().is_empty() {
-                                        format!(
-                                            "{} — {}+{:X}  {}",
-                                            code.name, code.module, code.offset, code.instruction
-                                        )
-                                    } else {
-                                        format!(
-                                            "{}+{:X}  {}",
-                                            code.module, code.offset, code.instruction
-                                        )
-                                    }
-                                };
-                                // Sub-row 1: Instruction dropdown (scan method is picked in "Find method")
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 6.0;
-                                    if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
-                                        let code_w = (col1_max_width - 120.0).clamp(140.0, 260.0);
-                                        ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
-                                            .selected_text(selected_code.map_or(
-                                                "Select instruction".to_owned(),
-                                                format_code_label,
-                                            ))
-                                            .width(code_w)
-                                            .show_ui(ui, |ui| {
-                                                for code in &self.state.memory_code_list {
-                                                    let selected = code.module.eq_ignore_ascii_case(
-                                                        &preset.entity_auto_code_module,
-                                                    ) && code.offset == preset.entity_auto_code_offset;
-                                                    if ui
-                                                        .selectable_label(
-                                                            selected,
-                                                            format_code_label(code),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        preset.entity_auto_code_module =
-                                                            code.module.clone();
-                                                        preset.entity_auto_code_offset = code.offset;
-                                                    }
+                                ui.add_space(2.0);
+                                Grid::new(("esp_camera_orient_grid", preset.id))
+                                    .num_columns(2)
+                                    .spacing([8.0, 4.0])
+                                    .show(ui, |ui| {
+                                        match preset.orientation_source {
+                                            EspOrientationSource::Angles => {
+                                                for (label, value) in [
+                                                    ("Camera yaw", &mut preset.camera_yaw),
+                                                    ("Camera pitch", &mut preset.camera_pitch),
+                                                ] {
+                                                    memory_expression_row(ui, label, value);
                                                 }
-                                            });
-                                    }
-                                });
-
-                                if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 6.0;
-                                        ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
-                                        if preset.entity_auto_hud_enabled {
-                                            let hud_name = preset
-                                                .entity_auto_hud_preset_id
-                                                .and_then(|id| {
-                                                    self.state
-                                                        .hud_presets
-                                                        .iter()
-                                                        .find(|hud| hud.id == id)
-                                                })
-                                                .map_or("Select HUD", |hud| hud.name.as_str());
-                                            ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
-                                                .selected_text(hud_name)
-                                                .width(110.0)
-                                                .show_ui(ui, |ui| {
-                                                    for hud in &self.state.hud_presets {
-                                                        ui.selectable_value(
-                                                            &mut preset.entity_auto_hud_preset_id,
-                                                            Some(hud.id),
-                                                            &hud.name,
-                                                        );
-                                                    }
-                                                });
-                                        }
-                                    });
-                                } else {
-                                    // Sub-row 2: Continuous & scan timing / counts
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 6.0;
-                                        let scan_mode = preset.scan_mode();
-                                        ui.checkbox(&mut preset.entity_auto_continuous, "Continuous")
-                                            .on_hover_text(
-                                                "Keep scanning continuously with throttled duty-cycle without lag. Newly discovered entity addresses are immediately added and displayed in ESP.",
-                                            );
-
-                                        if preset.entity_auto_continuous {
-                                            ui.label("Interval");
-                                            ui.add(
-                                                DragValue::new(&mut preset.entity_auto_continuous_interval_secs)
-                                                    .range(0.2..=10.0)
-                                                    .speed(0.1)
-                                                    .suffix("s"),
-                                            )
-                                            .on_hover_text(
-                                                "Pause interval between burst scans to eliminate game lag (default: 1.0s).",
-                                            );
-                                        }
-
-                                        if scan_mode == crate::model::EspAutoScanMode::AllHits && !preset.entity_auto_continuous {
-                                            ui.label("Duration");
-                                            ui.add(
-                                                DragValue::new(&mut preset.entity_auto_scan_duration_secs)
-                                                    .range(0.1..=30.0)
-                                                    .speed(0.1)
-                                                    .suffix("s"),
-                                            )
-                                            .on_hover_text("Scan time duration in seconds (default: 1.0s).");
-                                        }
-
-                                        if scan_mode == crate::model::EspAutoScanMode::MultiStride {
-                                            ui.label("Strides");
-                                            ui.add(
-                                                egui::TextEdit::singleline(&mut preset.entity_multi_strides)
-                                                    .desired_width(110.0)
-                                                    .hint_text("e.g. 2260, 25D0"),
-                                            )
-                                            .on_hover_text(
-                                                "Comma-separated hex/dec strides for variable entity struct sizes (e.g. 2260, 25D0 or 0x2260, 0x25D0).",
-                                            );
-                                        }
-
-                                        if scan_mode != crate::model::EspAutoScanMode::AllHits
-                                            || preset.entity_hit_order_drop_nearest
-                                            || !preset.entity_auto_continuous
-                                        {
-                                            ui.label("Need");
-                                            ui.add(
-                                                DragValue::new(&mut preset.entity_auto_capture_count)
-                                                    .range(1..=512),
-                                            )
-                                            .on_hover_text(match scan_mode {
-                                                crate::model::EspAutoScanMode::HitOrder => {
-                                                    "Stop after this many filtered entities are captured."
-                                                }
-                                                crate::model::EspAutoScanMode::MultiStride => {
-                                                    "Stop after finding a chain of this many entities connected by allowed strides."
-                                                }
-                                                crate::model::EspAutoScanMode::Stride => {
-                                                    "Stop only after this many addresses form one group at the configured Stride."
-                                                }
-                                                crate::model::EspAutoScanMode::AllHits => {
-                                                    "Target count of entity addresses to capture before evaluating Drop Self."
-                                                }
-                                                crate::model::EspAutoScanMode::ManualAddresses => "",
-                                            });
-                                        }
-
-                                        if scan_mode == crate::model::EspAutoScanMode::HitOrder {
-                                            ui.label("Step");
-                                            ui.add(
-                                                DragValue::new(&mut preset.entity_auto_hit_step)
-                                                    .range(1..=32),
-                                            )
-                                            .on_hover_text(
-                                                "Number of address hits per entity (e.g. 2 for AABB min/max pair). Automatically selects the smaller base address in each pair (even or odd index).",
-                                            );
-                                        }
-                                    });
-
-                                    // Sub-row 3: Filtering & HUD
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 6.0;
-                                        let scan_mode = preset.scan_mode();
-                                        if scan_mode == crate::model::EspAutoScanMode::HitOrder
-                                            || scan_mode == crate::model::EspAutoScanMode::MultiStride
-                                            || scan_mode == crate::model::EspAutoScanMode::AllHits
-                                        {
-                                            ui.checkbox(
-                                                &mut preset.entity_hit_order_merge_pairs,
-                                                "Merge pairs",
-                                            )
-                                            .on_hover_text(
-                                                "Merge captured addresses that share the same 3D world position into a single entity.",
-                                            );
-                                        }
-
-                                        ui.checkbox(
-                                            &mut preset.entity_hit_order_drop_nearest,
-                                            "Drop self",
-                                        )
-                                        .on_hover_text(
-                                            "After capturing the required number of entities, remove the entity with the smallest distance to camera (local player) and blacklist it.",
-                                        );
-
-                                        ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
-                                        if preset.entity_auto_hud_enabled {
-                                            let hud_name = preset
-                                                .entity_auto_hud_preset_id
-                                                .and_then(|id| {
-                                                    self.state
-                                                        .hud_presets
-                                                        .iter()
-                                                        .find(|hud| hud.id == id)
-                                                })
-                                                .map_or("Select HUD", |hud| hud.name.as_str());
-                                            ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
-                                                .selected_text(hud_name)
-                                                .width(110.0)
-                                                .show_ui(ui, |ui| {
-                                                    for hud in &self.state.hud_presets {
-                                                        ui.selectable_value(
-                                                            &mut preset.entity_auto_hud_preset_id,
-                                                            Some(hud.id),
-                                                            &hud.name,
-                                                        );
-                                                    }
-                                                });
-                                        }
-                                    });
-
-                                    ui.add_space(4.0);
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 8.0;
-                                        if entity_capture_active {
-                                            if ui.button("Stop").clicked() {
-                                                auto_capture_stop = Some(preset.id);
                                             }
-                                        } else if ui.button("Scan").clicked() {
-                                            auto_capture_start = Some(preset.id);
-                                        }
-                                        if let Some(status) = &entity_capture_feedback {
-                                            ui.label(
-                                                RichText::new(status)
-                                                    .color(ui.visuals().weak_text_color()),
-                                            );
-                                        }
-                                    });
-                                }
-                            });
-                            ui.end_row();
-                            ui.label("");
-                            ui.label(
-                                RichText::new(
-                                    "Offsets are bytes. Stride and Step are hexadecimal bytes. Runtime reads are capped at 512 slots.",
-                                )
-                                .weak()
-                                .size(11.0),
-                            );
-                            ui.end_row();
-                    });
-                });
-                ui.add_space(4.0);
-                section(ui, "Filters & colors", Color32::from_rgb(180, 140, 255), |ui| {
-                Grid::new(("esp_entity_filters", preset.id))
-                    .num_columns(2)
-                    .spacing([8.0, 4.0])
-                    .max_col_width(col1_max_width)
-                    .show(ui, |ui| {
-                            ui.label("Bounding box");
-                            ui.scope(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
-                                    ui.checkbox(
-                                        &mut preset.entity_aabb_draw_box,
-                                        "Box from coords",
-                                    )
-                                    .on_hover_text(
-                                        "Draw ESP box directly from AABB coordinate bounds, ignoring manual box width/height settings.",
-                                    );
-                                    if preset.entity_aabb_center || preset.entity_aabb_draw_box {
-                                        ui.label("Pair delta");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_aabb_pair_offset)
-                                                .range(-0x10000..=0x10000),
-                                        );
-                                        ui.label("bytes");
-                                    }
-                                });
-                            });
-                            ui.end_row();
-                            ui.label("Duplicates");
-                            ui.scope(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(
-                                        &mut preset.entity_exclude_near_preset_enabled,
-                                        "Drop near preset",
-                                    )
-                                    .on_hover_text(
-                                        "Hide entities that match or are closest to entities in another active ESP preset (avoids duplicate overlapping boxes).",
-                                    );
-
-                                    if preset.entity_exclude_near_preset_enabled {
-                                        let other_name = preset
-                                            .entity_exclude_near_preset_id
-                                            .and_then(|id| {
-                                                self.state
-                                                    .esp_presets
-                                                    .iter()
-                                                    .find(|p| p.id == id)
-                                            })
-                                            .map_or("Select preset", |p| p.name.as_str());
-                                        ComboBox::from_id_salt(("esp_exclude_near_preset", preset.id))
-                                            .selected_text(other_name)
-                                            .width(col1_max_width.min(130.0))
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(
-                                                    &mut preset.entity_exclude_near_preset_id,
-                                                    None,
-                                                    "-- None --",
-                                                );
-                                                for other in &self.state.esp_presets {
-                                                    if other.id != preset.id {
-                                                        ui.selectable_value(
-                                                            &mut preset.entity_exclude_near_preset_id,
-                                                            Some(other.id),
-                                                            &other.name,
-                                                        );
-                                                    }
+                                            EspOrientationSource::DirectionPairPitch => {
+                                                for (label, value) in [
+                                                    ("Camera direction A", &mut preset.camera_direction_a),
+                                                    ("Camera pitch", &mut preset.camera_pitch),
+                                                    ("Camera direction B", &mut preset.camera_direction_b),
+                                                ] {
+                                                    memory_expression_row(ui, label, value);
                                                 }
-                                            });
-                                    }
-                                });
-                            });
-                            ui.end_row();
-                            ui.label("Per-entity color");
-                            ui.scope(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                ui.horizontal_wrapped(|ui| {
-                                ui.label("Entity #");
-                                let mut target_idx: u32 = ui.data_mut(|d| {
-                                    *d.get_temp_mut_or(
-                                        egui::Id::new(("entity_color_idx", preset.id)),
-                                        1u32,
-                                    )
-                                });
-                                if ui
-                                    .add(
-                                        DragValue::new(&mut target_idx)
-                                            .range(1..=preset.entity_count.max(1) as u32),
-                                    )
-                                    .changed()
-                                {
-                                    ui.data_mut(|d| {
-                                        d.insert_temp(
-                                            egui::Id::new(("entity_color_idx", preset.id)),
-                                            target_idx,
-                                        )
+                                            }
+                                        }
                                     });
-                                }
-
-                                let mut pick_color = ui.data_mut(|d| {
-                                    *d.get_temp_mut_or(
-                                        egui::Id::new(("entity_color_picker", preset.id)),
-                                        Color32::from_rgb(255, 0, 0),
-                                    )
-                                });
-                                if ui.color_edit_button_srgba(&mut pick_color).changed() {
-                                    ui.data_mut(|d| {
-                                        d.insert_temp(
-                                            egui::Id::new(("entity_color_picker", preset.id)),
-                                            pick_color,
-                                        )
-                                    });
-                                }
-
-                                if ui
-                                    .button("Set color")
-                                    .on_hover_text("Assign custom color to selected Entity #")
-                                    .clicked()
-                                {
-                                    preset.custom_entity_colors.insert(
-                                        target_idx,
-                                        crate::model::RgbaColor {
-                                            r: pick_color.r(),
-                                            g: pick_color.g(),
-                                            b: pick_color.b(),
-                                            a: pick_color.a(),
-                                        },
-                                    );
-                                }
-
-                                if !preset.custom_entity_colors.is_empty() {
-                                    ui.label("| Active:");
-                                    let mut to_remove = None;
-                                    let mut sorted_keys: Vec<_> =
-                                        preset.custom_entity_colors.keys().copied().collect();
-                                    sorted_keys.sort_unstable();
-                                    for key in sorted_keys {
-                                        if let Some(c) = preset.custom_entity_colors.get(&key) {
-                                            let color_32 = Color32::from_rgba_unmultiplied(
-                                                c.r, c.g, c.b, c.a,
-                                            );
-                                            ui.horizontal(|ui| {
-                                                let (rect, _) = ui.allocate_exact_size(
-                                                    egui::vec2(12.0, 12.0),
-                                                    egui::Sense::hover(),
-                                                );
-                                                ui.painter().rect_filled(rect, 2.0, color_32);
-                                                ui.label(format!("#{}", key));
-                                                if ui.small_button("×").clicked() {
-                                                    to_remove = Some(key);
-                                                }
-                                            });
-                                        }
-                                    }
-                                    if let Some(key) = to_remove {
-                                        preset.custom_entity_colors.remove(&key);
-                                    }
-                                }
                             });
-                        });
-                        ui.end_row();
-                    });
-                });
-                }
-                }
 
-                if tab == 2 {
-                section(ui, "Camera addresses", Color32::from_rgb(100, 200, 255), |ui| {
-                ui.label(RichText::new("Where the game stores the camera position and rotation.").weak().size(11.0));
-                ui.columns(2, |columns| {
-                    // --- Left Column: Camera Position (X, Y, Z) ---
-                    columns[0].vertical(|ui| {
-                        Grid::new(("esp_camera_pos_grid", preset.id))
-                            .num_columns(2)
-                            .spacing([8.0, 4.0])
-                            .show(ui, |ui| {
-                                for (label, value) in [
-                                    ("Camera X", &mut preset.camera_x),
-                                    ("Camera Y", &mut preset.camera_y),
-                                    ("Camera Z", &mut preset.camera_z),
-                                ] {
-                                    memory_expression_row(ui, label, value);
-                                }
-                            });
-                    });
+                            ui.add_space(4.0);
 
-                    // --- Right Column: Orientation Source & Direction/Pitch ---
-                    columns[1].vertical(|ui| {
-                        Grid::new(("esp_camera_orient_grid", preset.id))
-                            .num_columns(2)
-                            .spacing([8.0, 4.0])
-                            .show(ui, |ui| {
-                                ui.label("Orientation source");
-                                let combo_w = (ui.available_width() - 8.0).clamp(100.0, 420.0);
-                                ComboBox::from_id_salt(("esp_orientation_source", preset.id))
-                                    .selected_text(match preset.orientation_source {
-                                        EspOrientationSource::Angles => "Yaw + pitch angles",
-                                        EspOrientationSource::DirectionPairPitch => {
-                                            "Horizontal direction pair + pitch"
-                                        }
-                                    })
-                                    .width(combo_w)
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut preset.orientation_source,
-                                            EspOrientationSource::Angles,
-                                            "Yaw + pitch angles",
-                                        );
-                                        ui.selectable_value(
-                                            &mut preset.orientation_source,
-                                            EspOrientationSource::DirectionPairPitch,
-                                            "Horizontal direction pair + pitch",
-                                        );
-                                    });
-                                ui.end_row();
-
-                                match preset.orientation_source {
-                                    EspOrientationSource::Angles => {
-                                        for (label, value) in [
-                                            ("Camera yaw", &mut preset.camera_yaw),
-                                            ("Camera pitch", &mut preset.camera_pitch),
-                                        ] {
-                                            memory_expression_row(ui, label, value);
-                                        }
-                                    }
-                                    EspOrientationSource::DirectionPairPitch => {
-                                        for (label, value) in [
-                                            ("Camera direction A", &mut preset.camera_direction_a),
-                                            ("Camera pitch", &mut preset.camera_pitch),
-                                            ("Camera direction B", &mut preset.camera_direction_b),
-                                        ] {
-                                            memory_expression_row(ui, label, value);
-                                        }
-                                    }
-                                }
-                            });
-                    });
-                });
-                });
-
-                ui.add_space(4.0);
-                // --- BOX 1: Camera data format ---
-                section(ui, "Data format", Color32::from_rgb(100, 200, 255), |ui| {
-                                // Row 1: Coordinate system & FOV
+                            section(ui, "Data Format & Optics", Color32::from_rgb(120, 210, 180), |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Value type:");
                                     ComboBox::from_id_salt(("esp_type", preset.id))
@@ -2284,28 +1896,14 @@ impl CrosshairApp {
                                                 MemoryValueType::I64,
                                                 MemoryValueType::F64,
                                             ] {
-                                                ui.selectable_value(
-                                                    &mut preset.value_type,
-                                                    value_type,
-                                                    memory_type_name(value_type),
-                                                );
+                                                ui.selectable_value(&mut preset.value_type, value_type, memory_type_name(value_type));
                                             }
                                         });
-
-
-
                                     ui.add_space(4.0);
                                     ui.label("FOV:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.horizontal_fov)
-                                            .speed(1.0)
-                                            .range(1.0..=179.0),
-                                    );
+                                    ui.add(DragValue::new(&mut preset.horizontal_fov).speed(1.0).range(1.0..=179.0));
                                 });
-
                                 ui.add_space(2.0);
-
-                                // Row 2: Angle units / Direction toggles
                                 ui.horizontal_wrapped(|ui| {
                                     if preset.orientation_source == EspOrientationSource::Angles {
                                         angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
@@ -2319,69 +1917,45 @@ impl CrosshairApp {
                                     }
                                 });
                             });
-                }
-                if tab == 3 {
-                ui.label(RichText::new("Only needed if markers don't line up with targets. Try \"Calibration helpers\" first.").weak());
-                ui.add_space(2.0);
-                ui.columns(2, |columns| {
-                    columns[0].vertical(|ui| {
-                        section(ui, "Projection tuning", Color32::from_rgb(100, 200, 255), |ui| {
-                                // Row 3: Invert & Mirror toggles
+                        });
+
+                        // === RIGHT COLUMN: Projection Tuning & Calibration Helpers ===
+                        columns[1].vertical(|ui| {
+                            section(ui, "Projection Tuning", Color32::from_rgb(180, 150, 240), |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw")
-                                        .on_hover_text("Reverse only camera rotation.");
+                                        .on_hover_text("Reverse camera yaw rotation.");
                                     ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch")
-                                        .on_hover_text("Reverse only camera pitch angle.");
-                                    ui.checkbox(&mut preset.invert_vertical, "Invert height (Z)")
+                                        .on_hover_text("Reverse camera pitch angle.");
+                                    ui.checkbox(&mut preset.invert_vertical, "Invert Z (height)")
                                         .on_hover_text("Invert target elevation difference.");
                                 });
+                                ui.add_space(2.0);
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(&mut preset.invert_yaw, "Mirror X")
-                                        .on_hover_text("Mirror only final left/right screen position.");
+                                        .on_hover_text("Mirror final left/right screen position.");
                                     ui.checkbox(&mut preset.invert_pitch, "Mirror Y")
-                                        .on_hover_text("Mirror only final up/down screen position.");
+                                        .on_hover_text("Mirror final up/down screen position.");
                                     if preset.orientation_source == EspOrientationSource::Angles {
                                         ui.checkbox(&mut preset.invert_direction_a, "Invert A (X)")
-                                            .on_hover_text("Invert horizontal axis A (X). Use this when 2 opposite directions show ESP but 2 perpendicular directions disappear.");
+                                            .on_hover_text("Invert horizontal axis A (X).");
                                         ui.checkbox(&mut preset.invert_direction_b, "Invert B (Y)")
                                             .on_hover_text("Invert horizontal axis B (Y).");
                                         ui.checkbox(&mut preset.swap_direction_pair, "Swap A/B")
                                             .on_hover_text("Swap horizontal axes A and B.");
                                     }
                                 });
-
                                 ui.add_space(2.0);
-
-                                // Row 4: Yaw offset & Direction B/A ratio
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Yaw offset:").on_hover_text("Use this when marker is consistently rotated left/right.");
-                                    ui.add(
-                                        DragValue::new(&mut preset.yaw_offset_degrees)
-                                            .speed(1.0)
-                                            .range(-360.0..=360.0)
-                                            .suffix("°"),
-                                    );
+                                    ui.add(DragValue::new(&mut preset.yaw_offset_degrees).speed(1.0).range(-360.0..=360.0).suffix("°"));
                                     for value in [-180.0, -90.0, 0.0, 90.0, 180.0] {
                                         if ui.small_button(format!("{value:+.0}")).clicked() {
                                             preset.yaw_offset_degrees = value;
                                         }
                                     }
                                 });
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("Dir B/A ratio:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.direction_multiplier)
-                                            .speed(0.001)
-                                            .range(0.0001..=100.0),
-                                    );
-                                    if ui.small_button("Reset").clicked() {
-                                        preset.direction_multiplier = 1.0;
-                                    }
-                                });
-
                                 ui.add_space(2.0);
-
-                                // Row 5: Pitch controls
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Pitch input:");
                                     ComboBox::from_id_salt(("esp_pitch_input", preset.id))
@@ -2392,90 +1966,52 @@ impl CrosshairApp {
                                         })
                                         .show_ui(ui, |ui| {
                                             ui.selectable_value(&mut preset.pitch_input, EspPitchInput::Angle, "Angle");
-                                            ui.selectable_value(
-                                                &mut preset.pitch_input,
-                                                EspPitchInput::SineComponent,
-                                                "Direction component (asin)",
-                                            );
-                                            ui.selectable_value(
-                                                &mut preset.pitch_input,
-                                                EspPitchInput::TangentComponent,
-                                                "Slope component (atan)",
-                                            );
+                                            ui.selectable_value(&mut preset.pitch_input, EspPitchInput::SineComponent, "Direction component (asin)");
+                                            ui.selectable_value(&mut preset.pitch_input, EspPitchInput::TangentComponent, "Slope component (atan)");
                                         });
-                                });
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("Pitch scale:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.pitch_multiplier)
-                                            .speed(0.01)
-                                            .range(0.0..=10.0),
-                                    );
+                                    ui.label("Scale:");
+                                    ui.add(DragValue::new(&mut preset.pitch_multiplier).speed(0.01).range(0.0..=10.0));
                                     if ui.small_button("Reset").clicked() {
                                         preset.pitch_multiplier = 1.0;
                                     }
-
-                                    ui.add_space(4.0);
-                                    ui.label("Pitch offset:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.pitch_offset_degrees)
-                                            .speed(1.0)
-                                            .range(-180.0..=180.0)
-                                            .suffix("°"),
-                                    );
+                                    ui.label("Offset:");
+                                    ui.add(DragValue::new(&mut preset.pitch_offset_degrees).speed(1.0).range(-180.0..=180.0).suffix("°"));
                                     if ui.small_button("Reset").clicked() {
                                         preset.pitch_offset_degrees = 0.0;
                                     }
                                 });
-
                                 ui.add_space(2.0);
-
-                                // Row 6: Projection scales, Target height, World height scale
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label("Horizontal proj scale:").on_hover_text("Calibrate when ESP moves faster or slower than entity when rotating camera horizontally (symmetric from screen center).");
-                                    ui.add(
-                                        DragValue::new(&mut preset.horizontal_projection_multiplier)
-                                            .speed(0.01)
-                                            .range(0.0..=10.0),
-                                    );
+                                    ui.label("Dir B/A ratio:");
+                                    ui.add(DragValue::new(&mut preset.direction_multiplier).speed(0.001).range(0.0001..=100.0));
                                     if ui.small_button("Reset").clicked() {
-                                        preset.horizontal_projection_multiplier = 1.0;
+                                        preset.direction_multiplier = 1.0;
                                     }
-
                                     ui.add_space(4.0);
-                                    ui.label("Vertical proj scale:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.vertical_projection_multiplier)
-                                            .speed(0.01)
-                                            .range(0.0..=10.0),
-                                    );
-                                    if ui.small_button("Reset").clicked() {
-                                        preset.vertical_projection_multiplier = 1.0;
-                                    }
-                                });
-                                ui.horizontal_wrapped(|ui| {
                                     ui.label("Target height:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.target_vertical_offset)
-                                            .speed(1.0)
-                                            .range(-10000.0..=10000.0),
-                                    );
-
+                                    ui.add(DragValue::new(&mut preset.target_vertical_offset).speed(1.0).range(-10000.0..=10000.0));
                                     ui.add_space(4.0);
                                     ui.label("Height scale:");
-                                    ui.add(
-                                        DragValue::new(&mut preset.height_scale)
-                                            .speed(0.001)
-                                            .range(0.0001..=100.0),
-                                    );
+                                    ui.add(DragValue::new(&mut preset.height_scale).speed(0.001).range(0.0001..=100.0));
                                     if ui.small_button("Reset").clicked() {
                                         preset.height_scale = 1.0;
                                     }
                                 });
-
                                 ui.add_space(2.0);
-
-                                // Row 7: Screen offset
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("H proj scale:");
+                                    ui.add(DragValue::new(&mut preset.horizontal_projection_multiplier).speed(0.01).range(0.0..=10.0));
+                                    if ui.small_button("Reset").clicked() {
+                                        preset.horizontal_projection_multiplier = 1.0;
+                                    }
+                                    ui.add_space(4.0);
+                                    ui.label("V proj scale:");
+                                    ui.add(DragValue::new(&mut preset.vertical_projection_multiplier).speed(0.01).range(0.0..=10.0));
+                                    if ui.small_button("Reset").clicked() {
+                                        preset.vertical_projection_multiplier = 1.0;
+                                    }
+                                });
+                                ui.add_space(2.0);
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Screen offset:");
                                     ui.label("X");
@@ -2488,15 +2024,13 @@ impl CrosshairApp {
                                     }
                                 });
                             });
-                    });
-                    columns[1].vertical(|ui| {
-                        // --- BOX 2: Calibration & Combination Matrix ---
-                        section(ui, "Calibration helpers", Color32::from_rgb(255, 200, 100), |ui| {
 
-                                // Auto Calibration
+                            ui.add_space(4.0);
+
+                            section(ui, "Calibration Helpers", Color32::from_rgb(240, 190, 120), |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Auto Calib:");
-                                    if ui.small_button("Apply suggested start").on_hover_text("Suggested: XY + vertical Z, yaw Degrees, pitch Radians, FOV 90. If sideways try ±90; if behind try 180.").clicked() {
+                                    if ui.small_button("Apply suggested start").on_hover_text("Suggested: XY + vertical Z, yaw Degrees, pitch Radians, FOV 90.").clicked() {
                                         preset.yaw_unit = EspAngleUnit::Degrees;
                                         preset.pitch_unit = EspAngleUnit::Radians;
                                         preset.pitch_input = EspPitchInput::Angle;
@@ -2520,72 +2054,35 @@ impl CrosshairApp {
                                         preset.entity_filter_motionless_permanent = false;
                                     }
                                     if ui.button("Capture direction").clicked() {
-                                        self.esp_calibration_feedback
-                                            .insert(preset.id, "Capturing direction...".to_owned());
-                                        if self
-                                            .overlay_tx
-                                            .send(crate::overlay::OverlayCommand::CaptureEspCalibration(
-                                                preset.clone(),
-                                            ))
-                                            .is_err()
-                                        {
-                                            self.esp_calibration_feedback.insert(
-                                                preset.id,
-                                                "Calibration unavailable: overlay worker stopped".to_owned(),
-                                            );
+                                        self.esp_calibration_feedback.insert(preset.id, "Capturing direction...".to_owned());
+                                        if self.overlay_tx.send(crate::overlay::OverlayCommand::CaptureEspCalibration(preset.clone())).is_err() {
+                                            self.esp_calibration_feedback.insert(preset.id, "Calibration unavailable: overlay worker stopped".to_owned());
                                         }
                                     }
                                     if ui.small_button("Clear captures").clicked() {
-                                        self.esp_calibration_feedback
-                                            .insert(preset.id, "Clearing captures...".to_owned());
-                                        let _ = self
-                                            .overlay_tx
-                                            .send(crate::overlay::OverlayCommand::ClearEspCalibration(preset.id));
+                                        self.esp_calibration_feedback.insert(preset.id, "Clearing captures...".to_owned());
+                                        let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::ClearEspCalibration(preset.id));
                                     }
                                     if let Some(feedback) = &calibration_feedback {
                                         ui.label(RichText::new(feedback).color(ui.visuals().weak_text_color()));
                                     }
                                 });
-
                                 ui.add_space(2.0);
-
-                                // Combination Matrix
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(
-                                        &mut preset.permutation_debug_mode,
-                                        "Render combination matrix (Single target)",
-                                    )
-                                    .on_hover_text(
-                                        "Simultaneously renders combination matrix with numbered labels. Look at target in-game to see which # lands on it, then apply! Tip: Tilt view slightly up/down in-game if numbers overlap at neutral pitch.",
-                                    );
-
+                                    ui.checkbox(&mut preset.permutation_debug_mode, "Combination matrix (Single target)")
+                                        .on_hover_text("Simultaneously renders combination matrix with numbered labels.");
                                     if preset.permutation_debug_mode {
                                         let perms = crate::model::esp_debug_permutations();
                                         preset.selected_permutation = preset.selected_permutation.clamp(1, perms.len());
                                         let selected_perm = &mut preset.selected_permutation;
                                         self.esp_selected_permutation.insert(preset.id, *selected_perm);
                                         ui.label("Pick #:");
-                                        ui.add(
-                                            DragValue::new(selected_perm)
-                                                .range(1..=perms.len())
-                                                .speed(1.0),
-                                        );
+                                        ui.add(DragValue::new(selected_perm).range(1..=perms.len()).speed(1.0));
                                         ui.checkbox(&mut preset.invert_yaw, "Mirror X");
                                         ui.checkbox(&mut preset.invert_pitch, "Mirror Y");
                                         if let Some(target_cfg) = perms.iter().find(|c| c.index == *selected_perm) {
-                                            ui.label(
-                                                RichText::new(&target_cfg.short_desc)
-                                                    .color(Color32::from_rgb(
-                                                        target_cfg.color[0],
-                                                        target_cfg.color[1],
-                                                        target_cfg.color[2],
-                                                    ))
-                                                    .strong(),
-                                            );
-                                            if ui
-                                                .button(format!("Apply #{}", target_cfg.index))
-                                                .clicked()
-                                            {
+                                            ui.label(RichText::new(&target_cfg.short_desc).color(Color32::from_rgb(target_cfg.color[0], target_cfg.color[1], target_cfg.color[2])).strong());
+                                            if ui.button(format!("Apply #{}", target_cfg.index)).clicked() {
                                                 preset.swap_direction_pair = target_cfg.swap_direction_pair;
                                                 preset.invert_direction_a = target_cfg.invert_direction_a;
                                                 preset.invert_direction_b = target_cfg.invert_direction_b;
@@ -2605,8 +2102,8 @@ impl CrosshairApp {
                                 ui.checkbox(&mut preset.debug_mode, "Debug labels")
                                     .on_hover_text("Show entity addresses next to each marker on the overlay.");
                             });
+                        });
                     });
-                });
                 }
 
             });
