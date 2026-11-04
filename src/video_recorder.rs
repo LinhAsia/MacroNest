@@ -49,6 +49,9 @@ pub struct VideoRecorderConfig {
     pub copy_after_recording: bool,
     pub ffmpeg_exe: PathBuf,
     pub ui_language: crate::model::UiLanguage,
+    pub audio_system: bool,
+    pub audio_mic: bool,
+    pub audio_app_windows: Vec<String>,
 }
 
 impl Default for VideoRecorderConfig {
@@ -64,6 +67,9 @@ impl Default for VideoRecorderConfig {
             copy_after_recording: true,
             ffmpeg_exe: PathBuf::new(),
             ui_language: crate::model::UiLanguage::English,
+            audio_system: true,
+            audio_mic: false,
+            audio_app_windows: Vec::new(),
         }
     }
 }
@@ -76,7 +82,7 @@ struct RecordingProcess {
     region_rect: Option<RECT>,
     audio_stop: Arc<AtomicBool>,
     audio_thread: Option<JoinHandle<Result<(), String>>>,
-    audio_path: PathBuf,
+    audio_path: Option<PathBuf>,
     copy_after_recording: bool,
     ffmpeg_exe: PathBuf,
     ui_language: crate::model::UiLanguage,
@@ -930,19 +936,33 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
 
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
     let output_path = unique_output_path(&config.output_dir, &format!("MacroNest_{timestamp}"));
-    let audio_path = config.output_dir.join(format!(
-        ".macronest-video-audio-{}-{timestamp}.f32le",
-        std::process::id()
-    ));
-    let (audio_stop, audio_thread, audio_start) = start_system_audio_capture(&audio_path)?;
+    let has_audio = config.audio_system || config.audio_mic || !config.audio_app_windows.is_empty();
+    let mut audio_capture_opt = if has_audio {
+        let audio_path = config.output_dir.join(format!(
+            ".macronest-video-audio-{}-{timestamp}.f32le",
+            std::process::id()
+        ));
+        match start_multi_audio_capture(&audio_path, &config) {
+            Ok((stop, worker, start_tx)) => Some((stop, worker, start_tx, audio_path)),
+            Err(err) => return Err(err),
+        }
+    } else {
+        None
+    };
+
+    let cleanup_audio = |cap: &mut Option<(Arc<AtomicBool>, JoinHandle<Result<(), String>>, SyncSender<()>, PathBuf)>| {
+        if let Some((stop, worker, start_tx, audio_path)) = cap.take() {
+            stop.store(true, Ordering::Release);
+            let _ = start_tx.send(());
+            let _ = worker.join();
+            let _ = fs::remove_file(&audio_path);
+        }
+    };
 
     let source = match capture_source(&config) {
         Ok(res) => res,
         Err(err) => {
-            audio_stop.store(true, Ordering::Release);
-            let _ = audio_start.send(());
-            let _ = audio_thread.join();
-            let _ = fs::remove_file(&audio_path);
+            cleanup_audio(&mut audio_capture_opt);
             return Err(err);
         }
     };
@@ -993,10 +1013,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     let log = match File::create(&log_path) {
         Ok(file) => file,
         Err(error) => {
-            audio_stop.store(true, Ordering::Release);
-            let _ = audio_start.send(());
-            let _ = audio_thread.join();
-            let _ = fs::remove_file(&audio_path);
+            cleanup_audio(&mut audio_capture_opt);
             return Err(format!("Could not create the recorder log: {error}"));
         }
     };
@@ -1014,20 +1031,14 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             let mut session = match crate::window_list::init_wgc_session(*hwnd) {
                 Ok(s) => s,
                 Err(err) => {
-                    audio_stop.store(true, Ordering::Release);
-                    let _ = audio_start.send(());
-                    let _ = audio_thread.join();
-                    let _ = fs::remove_file(&audio_path);
+                    cleanup_audio(&mut audio_capture_opt);
                     return Err(format!("Could not initialize window capture: {err}"));
                 }
             };
             let initial_frame = match session.get_next_frame() {
                 Ok(f) => f,
                 Err(err) => {
-                    audio_stop.store(true, Ordering::Release);
-                    let _ = audio_start.send(());
-                    let _ = audio_thread.join();
-                    let _ = fs::remove_file(&audio_path);
+                    cleanup_audio(&mut audio_capture_opt);
                     return Err(format!("Could not capture initial window frame: {err}"));
                 }
             };
@@ -1038,10 +1049,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             let mut session = match crate::game_capture::GameCaptureSession::start(*hwnd, &paths) {
                 Ok(s) => s,
                 Err(err) => {
-                    audio_stop.store(true, Ordering::Release);
-                    let _ = audio_start.send(());
-                    let _ = audio_thread.join();
-                    let _ = fs::remove_file(&audio_path);
+                    cleanup_audio(&mut audio_capture_opt);
                     return Err(format!("Could not initialize Game Capture (OBS Hook): {err}"));
                 }
             };
@@ -1049,10 +1057,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             let mut initial_rgba = Vec::new();
             if !session.has_nvenc() {
                 if let Err(err) = session.poll_into_buffer(&mut initial_rgba, width as usize, height as usize) {
-                    audio_stop.store(true, Ordering::Release);
-                    let _ = audio_start.send(());
-                    let _ = audio_thread.join();
-                    let _ = fs::remove_file(&audio_path);
+                    cleanup_audio(&mut audio_capture_opt);
                     return Err(format!("Could not capture initial game frame: {err}"));
                 }
             }
@@ -1254,10 +1259,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
-            audio_stop.store(true, Ordering::Release);
-            let _ = audio_start.send(());
-            let _ = audio_thread.join();
-            let _ = fs::remove_file(&audio_path);
+            cleanup_audio(&mut audio_capture_opt);
             return Err(format!("Could not start FFmpeg: {error}"));
         }
     };
@@ -1273,17 +1275,14 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         let stdin = match child.stdin.take() {
             Some(pipe) => pipe,
             None => {
-                audio_stop.store(true, Ordering::Release);
-                let _ = audio_start.send(());
-                let _ = audio_thread.join();
-                let _ = fs::remove_file(&audio_path);
+                cleanup_audio(&mut audio_capture_opt);
                 return Err("Could not connect to FFmpeg video stream.".to_owned());
             }
         };
         let stop_signal = Arc::new(AtomicBool::new(false));
         let feeder_stop = stop_signal.clone();
         let feeder_fps = fps.max(1) as u64;
-        let audio_start_clone = audio_start.clone();
+        let audio_start_clone = audio_capture_opt.as_ref().map(|(_, _, s, _)| s.clone());
         let thread_handle = thread::spawn(move || {
             #[cfg(windows)]
             unsafe {
@@ -1297,7 +1296,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             if use_nvenc {
                 if let Ok(Some(first_packet)) = active_session.poll_encoded_frame(true) {
                     if pipe.write_all(first_packet).is_ok() && pipe.flush().is_ok() {
-                        let _ = audio_start_clone.send(());
+                        if let Some(s) = &audio_start_clone { let _ = s.send(()); }
                     } else {
                         #[cfg(windows)]
                         unsafe {
@@ -1314,7 +1313,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 }
             } else {
                 if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
-                    let _ = audio_start_clone.send(());
+                    if let Some(s) = &audio_start_clone { let _ = s.send(()); }
                 } else {
                     #[cfg(windows)]
                     unsafe {
@@ -1366,7 +1365,9 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         });
         (Some(stop_signal), Some(thread_handle))
     } else {
-        let _ = audio_start.send(());
+        if let Some((_, _, s, _)) = &audio_capture_opt {
+            let _ = s.send(());
+        }
         (None, None)
     };
 
@@ -1374,6 +1375,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         signal.store(true, Ordering::Release);
     }
     let session_id = SESSION_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+    let (audio_stop, audio_thread, audio_path) = match audio_capture_opt {
+        Some((stop, thread, _, path)) => (stop, Some(thread), Some(path)),
+        None => (Arc::new(AtomicBool::new(false)), None, None),
+    };
     *PROCESS.lock() = Some(RecordingProcess {
         child,
         output_path: output_path.clone(),
@@ -1381,7 +1386,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         region_border,
         region_rect: border_rect.map(|(r, _)| r),
         audio_stop,
-        audio_thread: Some(audio_thread),
+        audio_thread,
         audio_path,
         copy_after_recording: config.copy_after_recording,
         ffmpeg_exe: config.ffmpeg_exe,
@@ -1433,30 +1438,40 @@ fn stop_recording_inner() {
         }
     }
     recording.audio_stop.store(true, Ordering::Release);
-    let audio_result = recording
-        .audio_thread
-        .take()
-        .map(|worker| {
-            worker
-                .join()
-                .map_err(|_| "System audio capture stopped unexpectedly.".to_owned())?
-        })
-        .unwrap_or(Ok(()));
-    let mux_result = audio_result.and_then(|_| {
-        mux_system_audio(
-            &recording.ffmpeg_exe,
-            &recording.audio_path,
-            &recording.output_path,
-        )
-    });
-    let _ = fs::remove_file(&recording.audio_path);
+    let has_audio = recording.audio_thread.is_some() && recording.audio_path.is_some();
+    let mux_result = if let (Some(worker), Some(audio_path)) = (recording.audio_thread.take(), recording.audio_path.take()) {
+        let audio_result = worker
+            .join()
+            .map_err(|_| "Audio capture stopped unexpectedly.".to_owned())
+            .and_then(|r| r);
+        let res = audio_result.and_then(|_| {
+            mux_system_audio(
+                &recording.ffmpeg_exe,
+                &audio_path,
+                &recording.output_path,
+            )
+        });
+        let _ = fs::remove_file(&audio_path);
+        res
+    } else {
+        Ok(())
+    };
     let mut status = match mux_result {
-        Ok(()) => format!(
-            "Saved with system audio: {}",
-            recording.output_path.display()
-        ),
+        Ok(()) => {
+            if has_audio {
+                format!(
+                    "Saved with audio: {}",
+                    recording.output_path.display()
+                )
+            } else {
+                format!(
+                    "Saved video: {}",
+                    recording.output_path.display()
+                )
+            }
+        }
         Err(error) => format!(
-            "Saved without system audio: {} ({error})",
+            "Saved without audio: {} ({error})",
             recording.output_path.display()
         ),
     };
@@ -1496,7 +1511,7 @@ fn spawn_exit_watchdog(session_id: u64) {
                     }
                     let error = fs::read_to_string(&recording.log_path).unwrap_or_default();
                     let _ = fs::remove_file(&recording.log_path);
-                    let _ = fs::remove_file(&recording.audio_path);
+                    if let Some(audio_path) = &recording.audio_path { let _ = fs::remove_file(audio_path); }
                     let _ = fs::remove_file(&recording.output_path);
                     *STATUS.lock() = if error.trim().is_empty() {
                         "Video recording stopped unexpectedly.".to_owned()
@@ -1629,8 +1644,15 @@ fn ffmpeg_signature(ffmpeg_exe: &Path) -> String {
     format!("{}:{}:{}", ffmpeg_exe.display(), metadata.len(), modified)
 }
 
-fn start_system_audio_capture(
+struct ActiveAudioSource {
+    _client: wasapi::AudioClient,
+    capture: wasapi::AudioCaptureClient,
+    event: wasapi::Handle,
+}
+
+fn start_multi_audio_capture(
     audio_path: &Path,
+    config: &VideoRecorderConfig,
 ) -> Result<
     (
         Arc<AtomicBool>,
@@ -1644,8 +1666,10 @@ fn start_system_audio_capture(
     let worker_path = audio_path.to_path_buf();
     let (ready_tx, ready_rx) = sync_channel(1);
     let (start_tx, start_rx) = sync_channel(1);
-    let worker =
-        thread::spawn(move || capture_system_audio(&worker_path, worker_stop, ready_tx, start_rx));
+    let config_clone = config.clone();
+    let worker = thread::spawn(move || {
+        capture_multi_audio(&worker_path, &config_clone, worker_stop, ready_tx, start_rx)
+    });
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
         Ok(Ok(())) => Ok((stop, worker, start_tx)),
         Ok(Err(error)) => {
@@ -1653,59 +1677,144 @@ fn start_system_audio_capture(
             let _ = start_tx.send(());
             let _ = worker.join();
             let _ = fs::remove_file(audio_path);
-            Err(format!("Could not start system audio capture: {error}"))
+            Err(format!("Could not start audio capture: {error}"))
         }
         Err(_) => {
             stop.store(true, Ordering::Release);
             let _ = start_tx.send(());
             let _ = worker.join();
             let _ = fs::remove_file(audio_path);
-            Err("System audio capture did not start in time.".to_owned())
+            Err("Audio capture did not start in time.".to_owned())
         }
     }
 }
 
-fn capture_system_audio(
+fn capture_multi_audio(
     audio_path: &Path,
+    config: &VideoRecorderConfig,
     stop: Arc<AtomicBool>,
     ready: SyncSender<Result<(), String>>,
     start: Receiver<()>,
 ) -> Result<(), String> {
     use wasapi::{
-        Direction, SampleType, StreamMode, WaveFormat, get_default_device, initialize_mta,
+        AudioClient, Direction, SampleType, StreamMode, WaveFormat, get_default_device, initialize_mta,
     };
 
     let initialized = (|| -> Result<_, String> {
         let _ = initialize_mta();
-        let device = get_default_device(&Direction::Render).map_err(|error| error.to_string())?;
-        let mut audio_client = device
-            .get_iaudioclient()
-            .map_err(|error| error.to_string())?;
+        let mut sources = Vec::new();
         let format = WaveFormat::new(32, 32, &SampleType::Float, 48_000, 2, None);
-        let (_, min_time) = audio_client
-            .get_device_period()
-            .map_err(|error| error.to_string())?;
-        audio_client
-            .initialize_client(
-                &format,
-                &Direction::Capture,
-                &StreamMode::EventsShared {
-                    autoconvert: true,
-                    buffer_duration_hns: min_time,
-                },
-            )
-            .map_err(|error| error.to_string())?;
-        let event = audio_client
-            .set_get_eventhandle()
-            .map_err(|error| error.to_string())?;
-        let capture = audio_client
-            .get_audiocaptureclient()
-            .map_err(|error| error.to_string())?;
+
+        // 1. System sound (render loopback)
+        if config.audio_system {
+            if let Ok(device) = get_default_device(&Direction::Render) {
+                if let Ok(mut client) = device.get_iaudioclient() {
+                    let (_, min_time) = client.get_device_period().unwrap_or((0, 200_000));
+                    if client
+                        .initialize_client(
+                            &format,
+                            &Direction::Capture,
+                            &StreamMode::EventsShared {
+                                autoconvert: true,
+                                buffer_duration_hns: min_time,
+                            },
+                        )
+                        .is_ok()
+                    {
+                        if let (Ok(event), Ok(capture)) =
+                            (client.set_get_eventhandle(), client.get_audiocaptureclient())
+                        {
+                            sources.push(ActiveAudioSource {
+                                _client: client,
+                                capture,
+                                event,
+                            });
+                        }
+                    }
+                }
+            }
+        } else if !config.audio_app_windows.is_empty() {
+            // 2. Specific window application loopback(s) (OBS style per-process capture)
+            let open_windows = crate::window_list::list_open_windows();
+            let mut target_pids = Vec::new();
+            for selector in &config.audio_app_windows {
+                if let Some(win) = open_windows.iter().find(|w| &w.selector == selector) {
+                    if win.process_id > 0 && !target_pids.contains(&win.process_id) {
+                        target_pids.push(win.process_id);
+                    }
+                } else {
+                    let base = crate::window_list::selector_base_title(selector);
+                    if let Some(win) = open_windows
+                        .iter()
+                        .find(|w| crate::window_list::selector_base_title(&w.title) == base)
+                    {
+                        if win.process_id > 0 && !target_pids.contains(&win.process_id) {
+                            target_pids.push(win.process_id);
+                        }
+                    }
+                }
+            }
+
+            for pid in target_pids {
+                if let Ok(mut client) = AudioClient::new_application_loopback_client(pid, true) {
+                    let mode = StreamMode::EventsShared {
+                        autoconvert: true,
+                        buffer_duration_hns: 200_000,
+                    };
+                    if client.initialize_client(&format, &Direction::Capture, &mode).is_ok() {
+                        if let (Ok(event), Ok(capture)) =
+                            (client.set_get_eventhandle(), client.get_audiocaptureclient())
+                        {
+                            sources.push(ActiveAudioSource {
+                                _client: client,
+                                capture,
+                                event,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Microphone input
+        if config.audio_mic {
+            if let Ok(device) = get_default_device(&Direction::Capture) {
+                if let Ok(mut client) = device.get_iaudioclient() {
+                    let (_, min_time) = client.get_device_period().unwrap_or((0, 200_000));
+                    if client
+                        .initialize_client(
+                            &format,
+                            &Direction::Capture,
+                            &StreamMode::EventsShared {
+                                autoconvert: true,
+                                buffer_duration_hns: min_time,
+                            },
+                        )
+                        .is_ok()
+                    {
+                        if let (Ok(event), Ok(capture)) =
+                            (client.set_get_eventhandle(), client.get_audiocaptureclient())
+                        {
+                            sources.push(ActiveAudioSource {
+                                _client: client,
+                                capture,
+                                event,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if sources.is_empty() {
+            return Err("No audio sources could be initialized.".to_owned());
+        }
+
         let file = File::create(audio_path).map_err(|error| error.to_string())?;
-        Ok((audio_client, capture, event, BufWriter::new(file)))
+        Ok((sources, BufWriter::new(file)))
     })();
 
-    let (audio_client, capture, event, mut output) = match initialized {
+    let (mut sources, mut output) = match initialized {
         Ok(values) => {
             let _ = ready.send(Ok(()));
             values
@@ -1715,72 +1824,188 @@ fn capture_system_audio(
             return Err(error);
         }
     };
+
     if start.recv_timeout(Duration::from_secs(5)).is_err() {
         return Ok(());
     }
-    audio_client
-        .start_stream()
-        .map_err(|error| error.to_string())?;
 
-    let audio_start_time = Instant::now();
-    let mut total_bytes_written: u64 = 0;
+    for s in &mut sources {
+        let _ = s._client.start_stream();
+    }
+
     const BYTES_PER_SAMPLE_FRAME: usize = 8;
     const BYTES_PER_SEC: usize = 48_000 * BYTES_PER_SAMPLE_FRAME;
     const SILENCE_MARGIN_BYTES: usize = (48_000 * 20 / 1000) * BYTES_PER_SAMPLE_FRAME;
     let silence_chunk = [0u8; 8192];
-    let mut samples = VecDeque::new();
 
-    while !stop.load(Ordering::Acquire) {
-        let _ = event.wait_for_event(20);
+    if sources.len() == 1 {
+        // High-performance direct path for single audio source
+        let s = sources.pop().unwrap();
+        let audio_start_time = Instant::now();
+        let mut total_bytes_written: u64 = 0;
+        let mut samples = VecDeque::new();
 
-        while let Ok(Some(packet_size)) = capture.get_next_packet_size() {
-            if packet_size == 0 {
-                break;
+        while !stop.load(Ordering::Acquire) {
+            let _ = s.event.wait_for_event(20);
+
+            while let Ok(Some(packet_size)) = s.capture.get_next_packet_size() {
+                if packet_size == 0 {
+                    break;
+                }
+                s.capture
+                    .read_from_device_to_deque(&mut samples)
+                    .map_err(|error| error.to_string())?;
+                let (first, second) = samples.as_slices();
+                if !first.is_empty() {
+                    output.write_all(first).map_err(|error| error.to_string())?;
+                    total_bytes_written += first.len() as u64;
+                }
+                if !second.is_empty() {
+                    output.write_all(second).map_err(|error| error.to_string())?;
+                    total_bytes_written += second.len() as u64;
+                }
+                samples.clear();
             }
-            capture
-                .read_from_device_to_deque(&mut samples)
-                .map_err(|error| error.to_string())?;
-            let (first, second) = samples.as_slices();
-            if !first.is_empty() {
-                output.write_all(first).map_err(|error| error.to_string())?;
-                total_bytes_written += first.len() as u64;
+
+            let elapsed_micros = audio_start_time.elapsed().as_micros();
+            let expected_bytes = ((elapsed_micros * BYTES_PER_SEC as u128) / 1_000_000) as u64;
+            let expected_bytes =
+                (expected_bytes / BYTES_PER_SAMPLE_FRAME as u64) * BYTES_PER_SAMPLE_FRAME as u64;
+            if expected_bytes > total_bytes_written + SILENCE_MARGIN_BYTES as u64 {
+                let mut gap = (expected_bytes - total_bytes_written) as usize;
+                gap = (gap / BYTES_PER_SAMPLE_FRAME) * BYTES_PER_SAMPLE_FRAME;
+                while gap > 0 {
+                    let to_write = gap.min(silence_chunk.len());
+                    output
+                        .write_all(&silence_chunk[..to_write])
+                        .map_err(|error| error.to_string())?;
+                    total_bytes_written += to_write as u64;
+                    gap -= to_write;
+                }
             }
-            if !second.is_empty() {
-                output.write_all(second).map_err(|error| error.to_string())?;
-                total_bytes_written += second.len() as u64;
-            }
-            samples.clear();
         }
 
         let elapsed_micros = audio_start_time.elapsed().as_micros();
         let expected_bytes = ((elapsed_micros * BYTES_PER_SEC as u128) / 1_000_000) as u64;
-        let expected_bytes = (expected_bytes / BYTES_PER_SAMPLE_FRAME as u64) * BYTES_PER_SAMPLE_FRAME as u64;
-        if expected_bytes > total_bytes_written + SILENCE_MARGIN_BYTES as u64 {
+        let expected_bytes =
+            (expected_bytes / BYTES_PER_SAMPLE_FRAME as u64) * BYTES_PER_SAMPLE_FRAME as u64;
+        if expected_bytes > total_bytes_written {
             let mut gap = (expected_bytes - total_bytes_written) as usize;
             gap = (gap / BYTES_PER_SAMPLE_FRAME) * BYTES_PER_SAMPLE_FRAME;
             while gap > 0 {
                 let to_write = gap.min(silence_chunk.len());
-                output.write_all(&silence_chunk[..to_write]).map_err(|error| error.to_string())?;
-                total_bytes_written += to_write as u64;
+                let _ = output.write_all(&silence_chunk[..to_write]);
                 gap -= to_write;
             }
         }
-    }
 
-    let elapsed_micros = audio_start_time.elapsed().as_micros();
-    let expected_bytes = ((elapsed_micros * BYTES_PER_SEC as u128) / 1_000_000) as u64;
-    let expected_bytes = (expected_bytes / BYTES_PER_SAMPLE_FRAME as u64) * BYTES_PER_SAMPLE_FRAME as u64;
-    if expected_bytes > total_bytes_written {
-        let mut gap = (expected_bytes - total_bytes_written) as usize;
-        gap = (gap / BYTES_PER_SAMPLE_FRAME) * BYTES_PER_SAMPLE_FRAME;
-        while gap > 0 {
-            let to_write = gap.min(silence_chunk.len());
-            let _ = output.write_all(&silence_chunk[..to_write]);
-            gap -= to_write;
+        let _ = s._client.stop_stream();
+    } else {
+        // Multi-source real-time audio mixer
+        let num_sources = sources.len();
+        let mut source_buffers: Vec<VecDeque<f32>> = (0..num_sources)
+            .map(|_| VecDeque::with_capacity(48_000))
+            .collect();
+        let mut raw_bytes = VecDeque::new();
+        let audio_start_time = Instant::now();
+        let mut frames_written: u64 = 0;
+        const MAX_BUFFERED_SAMPLES: usize = 48_000 * 2; // 1 second buffer limit per source
+
+        while !stop.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(5));
+
+            for (i, s) in sources.iter_mut().enumerate() {
+                while let Ok(Some(packet_size)) = s.capture.get_next_packet_size() {
+                    if packet_size == 0 {
+                        break;
+                    }
+                    if s.capture.read_from_device_to_deque(&mut raw_bytes).is_ok() {
+                        let (first, second) = raw_bytes.as_slices();
+                        for chunk in [first, second] {
+                            if !chunk.is_empty() {
+                                for c in chunk.chunks_exact(4) {
+                                    let sample = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                                    source_buffers[i].push_back(sample);
+                                }
+                            }
+                        }
+                        raw_bytes.clear();
+                    }
+                }
+                if source_buffers[i].len() > MAX_BUFFERED_SAMPLES {
+                    let excess = source_buffers[i].len() - MAX_BUFFERED_SAMPLES;
+                    source_buffers[i].drain(..excess);
+                }
+            }
+
+            let elapsed_micros = audio_start_time.elapsed().as_micros();
+            let target_frames = ((elapsed_micros * 48_000) / 1_000_000) as u64;
+            if target_frames > frames_written {
+                let mut frames_needed = (target_frames - frames_written) as usize;
+                let mut write_buf = [0u8; 512 * 8];
+                while frames_needed > 0 {
+                    let batch = frames_needed.min(512);
+                    let mut buf_pos = 0;
+                    for _ in 0..batch {
+                        let mut left = 0.0f32;
+                        let mut right = 0.0f32;
+                        for buf in &mut source_buffers {
+                            if buf.len() >= 2 {
+                                left += buf.pop_front().unwrap_or(0.0);
+                                right += buf.pop_front().unwrap_or(0.0);
+                            }
+                        }
+                        let l_clamped = left.clamp(-1.0, 1.0);
+                        let r_clamped = right.clamp(-1.0, 1.0);
+                        write_buf[buf_pos..buf_pos + 4].copy_from_slice(&l_clamped.to_le_bytes());
+                        write_buf[buf_pos + 4..buf_pos + 8]
+                            .copy_from_slice(&r_clamped.to_le_bytes());
+                        buf_pos += 8;
+                    }
+                    output
+                        .write_all(&write_buf[..buf_pos])
+                        .map_err(|e| e.to_string())?;
+                    frames_written += batch as u64;
+                    frames_needed -= batch;
+                }
+            }
+        }
+
+        // Final drain on stop
+        let elapsed_micros = audio_start_time.elapsed().as_micros();
+        let target_frames = ((elapsed_micros * 48_000) / 1_000_000) as u64;
+        if target_frames > frames_written {
+            let mut frames_needed = (target_frames - frames_written) as usize;
+            let mut write_buf = [0u8; 512 * 8];
+            while frames_needed > 0 {
+                let batch = frames_needed.min(512);
+                let mut buf_pos = 0;
+                for _ in 0..batch {
+                    let mut left = 0.0f32;
+                    let mut right = 0.0f32;
+                    for buf in &mut source_buffers {
+                        if buf.len() >= 2 {
+                            left += buf.pop_front().unwrap_or(0.0);
+                            right += buf.pop_front().unwrap_or(0.0);
+                        }
+                    }
+                    let l_clamped = left.clamp(-1.0, 1.0);
+                    let r_clamped = right.clamp(-1.0, 1.0);
+                    write_buf[buf_pos..buf_pos + 4].copy_from_slice(&l_clamped.to_le_bytes());
+                    write_buf[buf_pos + 4..buf_pos + 8]
+                        .copy_from_slice(&r_clamped.to_le_bytes());
+                    buf_pos += 8;
+                }
+                let _ = output.write_all(&write_buf[..buf_pos]);
+                frames_needed -= batch;
+            }
+        }
+
+        for s in &mut sources {
+            let _ = s._client.stop_stream();
         }
     }
 
-    let _ = audio_client.stop_stream();
     output.flush().map_err(|error| error.to_string())
 }
 

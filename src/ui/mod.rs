@@ -7499,6 +7499,174 @@ impl CrosshairApp {
                                     });
 
                                     ui.add_space(3.0);
+                                    ui.separator();
+                                    ui.add_space(2.0);
+
+                                    ui.label(RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Audio sources",
+                                        "Nguồn âm thanh",
+                                    )).strong().size(12.0));
+
+                                    // Option 1: System sound
+                                    let sys_resp = ui.checkbox(
+                                        &mut self.state.quick_video_audio_system,
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "System sound",
+                                            "Âm thanh hệ thống",
+                                        ),
+                                    ).on_hover_text(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Record all system audio (desktop loopback). When checked, specific window sound is disabled.",
+                                        "Thu toàn bộ âm thanh hệ thống. Khi bật, âm thanh từng cửa sổ sẽ bị vô hiệu hóa.",
+                                    ));
+                                    if sys_resp.changed() {
+                                        self.sync_quick_video_record_config();
+                                        self.persist();
+                                    }
+
+                                    // Option 2: Microphone
+                                    let mic_resp = ui.checkbox(
+                                        &mut self.state.quick_video_audio_mic,
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Microphone",
+                                            "Microphone",
+                                        ),
+                                    ).on_hover_text(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Record microphone input audio.",
+                                        "Thu âm thanh từ micro.",
+                                    ));
+                                    if mic_resp.changed() {
+                                        self.sync_quick_video_record_config();
+                                        self.persist();
+                                    }
+
+                                    // Option 3: Specific window audio
+                                    if self.state.quick_video_audio_system {
+                                        ui.add_enabled_ui(false, |ui| {
+                                            ui.checkbox(
+                                                &mut false,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Window sound (locked)",
+                                                    "Âm thanh cửa sổ (đã khóa)",
+                                                ),
+                                            ).on_disabled_hover_text(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Uncheck 'System sound' to choose specific windows/apps to record audio from.",
+                                                "Bỏ chọn 'Âm thanh hệ thống' để chọn âm thanh từ các cửa sổ cụ thể.",
+                                            ));
+                                        });
+                                    } else {
+                                        ui.add_space(2.0);
+                                        ui.label(RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Window sound:",
+                                            "Âm thanh cửa sổ:",
+                                        )).size(11.0));
+
+                                        if matches!(
+                                            self.state.quick_video_record_mode,
+                                            QuickVideoRecordMode::SelectedWindow | QuickVideoRecordMode::GameCapture
+                                        ) && !self.state.quick_video_record_target_window.is_empty()
+                                            && !self.state.quick_video_audio_app_windows.contains(&self.state.quick_video_record_target_window)
+                                        {
+                                            if ui.button(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "+ Add recorded window",
+                                                "+ Thêm cửa sổ đang quay",
+                                            )).clicked() {
+                                                self.state.quick_video_audio_app_windows.push(self.state.quick_video_record_target_window.clone());
+                                                self.sync_quick_video_record_config();
+                                                self.persist();
+                                            }
+                                        }
+
+                                        let mut add_window_selector = String::new();
+                                        let combo = egui::ComboBox::from_id_salt("quick-video-audio-add-win")
+                                            .width(186.0)
+                                            .selected_text(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "+ Add window audio...",
+                                                "+ Thêm âm thanh cửa sổ...",
+                                            ))
+                                            .show_ui(ui, |ui| {
+                                                for window in &self.open_window_infos {
+                                                    let already_added = self.state.quick_video_audio_app_windows.contains(&window.selector);
+                                                    let label = format!(
+                                                        "{} {}",
+                                                        if already_added { "[x]" } else { "[+]" },
+                                                        Self::truncate_window_title(
+                                                            &Self::quick_action_window_display(&window.selector, &self.open_window_infos),
+                                                            24,
+                                                        )
+                                                    );
+                                                    if ui.selectable_label(already_added, label).clicked() {
+                                                        add_window_selector = window.selector.clone();
+                                                    }
+                                                }
+                                            });
+                                        if combo.response.clicked() {
+                                            self.ensure_open_windows_ready(true);
+                                        }
+                                        if !add_window_selector.is_empty() {
+                                            if let Some(pos) = self.state.quick_video_audio_app_windows.iter().position(|s| s == &add_window_selector) {
+                                                self.state.quick_video_audio_app_windows.remove(pos);
+                                            } else {
+                                                self.state.quick_video_audio_app_windows.push(add_window_selector);
+                                            }
+                                            self.sync_quick_video_record_config();
+                                            self.persist();
+                                        }
+
+                                        if !self.state.quick_video_audio_app_windows.is_empty() {
+                                            let mut remove_idx = None;
+                                            for (i, selector) in self.state.quick_video_audio_app_windows.iter().enumerate() {
+                                                ui.horizontal(|ui| {
+                                                    if ui.small_button("x").on_hover_text(Self::tr_lang(
+                                                        self.state.ui_language,
+                                                        "Remove",
+                                                        "Xóa",
+                                                    )).clicked() {
+                                                        remove_idx = Some(i);
+                                                    }
+                                                    let title = Self::truncate_window_title(
+                                                        &Self::quick_action_window_display(selector, &self.open_window_infos),
+                                                        22,
+                                                    );
+                                                    ui.label(RichText::new(title).size(11.0));
+                                                });
+                                            }
+                                            if let Some(idx) = remove_idx {
+                                                self.state.quick_video_audio_app_windows.remove(idx);
+                                                self.sync_quick_video_record_config();
+                                                self.persist();
+                                            }
+                                        } else {
+                                            ui.label(RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "No windows added yet",
+                                                "Chưa thêm cửa sổ nào",
+                                            )).weak().size(11.0));
+                                        }
+                                    }
+
+                                    if !self.state.quick_video_audio_system
+                                        && !self.state.quick_video_audio_mic
+                                        && self.state.quick_video_audio_app_windows.is_empty()
+                                    {
+                                        ui.label(RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "No audio source selected (video will have no sound)",
+                                            "Chưa chọn nguồn âm thanh (video sẽ không có tiếng)",
+                                        )).color(Color32::from_rgb(220, 160, 60)).size(11.0));
+                                    }
+
+                                    ui.separator();
+                                    ui.add_space(3.0);
                                     let folder_name = Path::new(
                                         &self.state.quick_video_record_output_dir,
                                     )

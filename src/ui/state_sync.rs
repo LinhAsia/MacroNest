@@ -398,6 +398,9 @@ impl CrosshairApp {
             copy_after_recording: self.state.quick_video_copy_after_recording,
             ffmpeg_exe: self.paths.ffmpeg_exe.clone(),
             ui_language: self.state.ui_language,
+            audio_system: self.state.quick_video_audio_system,
+            audio_mic: self.state.quick_video_audio_mic,
+            audio_app_windows: self.state.quick_video_audio_app_windows.clone(),
         });
     }
 

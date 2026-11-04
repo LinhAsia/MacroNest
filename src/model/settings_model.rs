@@ -1025,6 +1025,12 @@ pub struct AppState {
     pub quick_video_record_fps: u32,
     #[serde(default = "default_true")]
     pub quick_video_copy_after_recording: bool,
+    #[serde(default = "default_true")]
+    pub quick_video_audio_system: bool,
+    #[serde(default)]
+    pub quick_video_audio_mic: bool,
+    #[serde(default)]
+    pub quick_video_audio_app_windows: Vec<String>,
     #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
@@ -1401,6 +1407,9 @@ impl Default for AppState {
             quick_video_record_output_dir: default_quick_video_output_dir(),
             quick_video_record_fps: default_quick_video_record_fps(),
             quick_video_copy_after_recording: true,
+            quick_video_audio_system: true,
+            quick_video_audio_mic: false,
+            quick_video_audio_app_windows: Vec::new(),
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),
