@@ -68,7 +68,11 @@ impl CrosshairApp {
                 .nth(1)
                 .is_some()
         {
-            Self::selector_base_title(selector).to_owned()
+            if selector.contains(" (0x") {
+                selector.to_owned()
+            } else {
+                Self::selector_base_title(selector).to_owned()
+            }
         } else {
             simplified.into_owned()
         }
@@ -126,6 +130,33 @@ mod tests {
         assert_eq!(
             CrosshairApp::quick_action_window_display(&w1.selector, &[w1.clone(), w2]),
             "calc.exe::Calculator"
+        );
+    }
+
+    #[test]
+    fn quick_action_window_display_distinguishes_same_game_instances_with_hex_handles() {
+        use crate::window_list::WindowInfo;
+
+        let w1 = WindowInfo {
+            selector: "IdentityV (0x10A24)".to_string(),
+            title: "IdentityV".to_string(),
+            process_id: 11200,
+            process_path: "drier.exe".to_string(),
+        };
+        let w2 = WindowInfo {
+            selector: "IdentityV (0x20F58)".to_string(),
+            title: "IdentityV".to_string(),
+            process_id: 11204,
+            process_path: "drier.exe".to_string(),
+        };
+        let list = [w1.clone(), w2.clone()];
+        assert_eq!(
+            CrosshairApp::quick_action_window_display(&w1.selector, &list),
+            "IdentityV (0x10A24)"
+        );
+        assert_eq!(
+            CrosshairApp::quick_action_window_display(&w2.selector, &list),
+            "IdentityV (0x20F58)"
         );
     }
 }

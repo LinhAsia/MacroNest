@@ -7313,6 +7313,95 @@ impl CrosshairApp {
                                                 self.sync_quick_video_record_config();
                                                 self.persist();
                                             }
+
+                                            ui.add_space(2.0);
+                                            let switch_resp = ui.checkbox(
+                                                &mut self.state.quick_video_switch_on_focus,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Switch scene on focus",
+                                                    "Chuyển cảnh khi focus",
+                                                ),
+                                            ).on_hover_text(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Automatically switch recording to captured window when you tab/switch focus to it (supports multiple instances of the same game).",
+                                                "Tự động chuyển cảnh quay sang cửa sổ khi bạn tab/focus qua (hỗ trợ cả các cửa sổ cùng tên game).",
+                                            ));
+                                            if switch_resp.changed() {
+                                                self.sync_quick_video_record_config();
+                                                self.persist();
+                                            }
+
+                                            if self.state.quick_video_switch_on_focus {
+                                                let mut add_switch_selector = String::new();
+                                                let switch_combo = egui::ComboBox::from_id_salt("quick-video-switch-add-win")
+                                                    .width(186.0)
+                                                    .selected_text(Self::tr_lang(
+                                                        self.state.ui_language,
+                                                        "+ Add switch window...",
+                                                        "+ Thêm cửa sổ chuyển cảnh...",
+                                                    ))
+                                                    .show_ui(ui, |ui| {
+                                                        for window in &self.open_window_infos {
+                                                            let is_main = window.selector == self.state.quick_video_record_target_window;
+                                                            let is_added = self.state.quick_video_switch_windows.contains(&window.selector);
+                                                            let label = format!(
+                                                                "{} {}",
+                                                                if is_main { "[Main]" } else if is_added { "[x]" } else { "[+]" },
+                                                                Self::truncate_window_title(
+                                                                    &Self::quick_action_window_display(&window.selector, &self.open_window_infos),
+                                                                    24,
+                                                                )
+                                                            );
+                                                            if !is_main {
+                                                                if ui.selectable_label(is_added, label).clicked() {
+                                                                    add_switch_selector = window.selector.clone();
+                                                                }
+                                                            } else {
+                                                                ui.add_enabled_ui(false, |ui| {
+                                                                    let _ = ui.selectable_label(true, label);
+                                                                });
+                                                            }
+                                                        }
+                                                    });
+                                                if switch_combo.response.clicked() {
+                                                    self.ensure_open_windows_ready(true);
+                                                }
+                                                if !add_switch_selector.is_empty() {
+                                                    if let Some(pos) = self.state.quick_video_switch_windows.iter().position(|s| s == &add_switch_selector) {
+                                                        self.state.quick_video_switch_windows.remove(pos);
+                                                    } else {
+                                                        self.state.quick_video_switch_windows.push(add_switch_selector);
+                                                    }
+                                                    self.sync_quick_video_record_config();
+                                                    self.persist();
+                                                }
+
+                                                if !self.state.quick_video_switch_windows.is_empty() {
+                                                    let mut remove_idx = None;
+                                                    for (i, selector) in self.state.quick_video_switch_windows.iter().enumerate() {
+                                                        ui.horizontal(|ui| {
+                                                            if ui.small_button("x").on_hover_text(Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Remove",
+                                                                "Xóa",
+                                                            )).clicked() {
+                                                                remove_idx = Some(i);
+                                                            }
+                                                            let title = Self::truncate_window_title(
+                                                                &Self::quick_action_window_display(selector, &self.open_window_infos),
+                                                                20,
+                                                            );
+                                                            ui.label(RichText::new(title).size(11.0));
+                                                        });
+                                                    }
+                                                    if let Some(idx) = remove_idx {
+                                                        self.state.quick_video_switch_windows.remove(idx);
+                                                        self.sync_quick_video_record_config();
+                                                        self.persist();
+                                                    }
+                                                }
+                                            }
                                         }
                                         QuickVideoRecordMode::Region => {
                                             let region_text = self

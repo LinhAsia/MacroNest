@@ -401,6 +401,8 @@ impl CrosshairApp {
             audio_system: self.state.quick_video_audio_system,
             audio_mic: self.state.quick_video_audio_mic,
             audio_app_windows: self.state.quick_video_audio_app_windows.clone(),
+            switch_on_focus: self.state.quick_video_switch_on_focus,
+            switch_windows: self.state.quick_video_switch_windows.clone(),
         });
     }
 

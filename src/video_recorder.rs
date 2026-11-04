@@ -52,6 +52,8 @@ pub struct VideoRecorderConfig {
     pub audio_system: bool,
     pub audio_mic: bool,
     pub audio_app_windows: Vec<String>,
+    pub switch_on_focus: bool,
+    pub switch_windows: Vec<String>,
 }
 
 impl Default for VideoRecorderConfig {
@@ -70,6 +72,8 @@ impl Default for VideoRecorderConfig {
             audio_system: true,
             audio_mic: false,
             audio_app_windows: Vec::new(),
+            switch_on_focus: false,
+            switch_windows: Vec::new(),
         }
     }
 }
@@ -907,6 +911,16 @@ impl ActiveCaptureSession {
         }
     }
 
+    fn dimensions(&self) -> (usize, usize) {
+        match self {
+            Self::Wgc(s) => (s.width, s.height),
+            Self::Game(s) => {
+                let (w, h) = s.dimensions();
+                (w as usize, h as usize)
+            }
+        }
+    }
+
     fn has_nvenc(&self) -> bool {
         match self {
             Self::Game(s) => s.has_nvenc(),
@@ -920,6 +934,56 @@ impl ActiveCaptureSession {
             _ => anyhow::bail!("Not an NVENC session"),
         }
     }
+}
+
+fn blit_and_scale_bgra(
+    src: &[u8],
+    src_w: usize,
+    src_h: usize,
+    dst: &mut [u8],
+    dst_w: usize,
+    dst_h: usize,
+) {
+    if src_w == dst_w && src_h == dst_h {
+        let copy_len = src.len().min(dst.len());
+        dst[..copy_len].copy_from_slice(&src[..copy_len]);
+        return;
+    }
+    if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
+        return;
+    }
+    for dy in 0..dst_h {
+        let sy = (dy * src_h) / dst_h;
+        let src_row = sy * src_w * 4;
+        let dst_row = dy * dst_w * 4;
+        for dx in 0..dst_w {
+            let sx = (dx * src_w) / dst_w;
+            let s_idx = src_row + sx * 4;
+            let d_idx = dst_row + dx * 4;
+            if s_idx + 4 <= src.len() && d_idx + 4 <= dst.len() {
+                dst[d_idx..d_idx + 4].copy_from_slice(&src[s_idx..s_idx + 4]);
+            }
+        }
+    }
+}
+
+fn create_capture_session_for_hwnd(
+    hwnd: HWND,
+    is_game_capture: bool,
+) -> Result<ActiveCaptureSession, String> {
+    if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+        return Err("Target window is no longer valid".to_owned());
+    }
+    if is_game_capture {
+        if let Ok(paths) = crate::storage::AppPaths::discover() {
+            if let Ok(session) = crate::game_capture::GameCaptureSession::start(hwnd, &paths) {
+                return Ok(ActiveCaptureSession::Game(session));
+            }
+        }
+    }
+    let session = crate::window_list::init_wgc_session(hwnd)
+        .map_err(|e| format!("Could not initialize window capture: {e}"))?;
+    Ok(ActiveCaptureSession::Wgc(session))
 }
 
 fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String> {
@@ -966,47 +1030,52 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             return Err(err);
         }
     };
-    let border_rect = match &source {
+    let (border_rect, initial_target_hwnd) = match &source {
         CaptureSource::Desktop { .. } => {
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-            Some((
-                RECT {
-                    left,
-                    top,
-                    right: left + width,
-                    bottom: top + height,
-                },
-                false,
-            ))
+            (
+                Some((
+                    RECT {
+                        left,
+                        top,
+                        right: left + width,
+                        bottom: top + height,
+                    },
+                    false,
+                )),
+                0isize,
+            )
         }
         CaptureSource::WgcWindow { hwnd, .. } => {
             let mut r = RECT::default();
-            unsafe {
+            let rect_opt = unsafe {
                 if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
                     Some((r, false))
                 } else {
                     None
                 }
-            }
+            };
+            (rect_opt, hwnd.0 as isize)
         }
-        CaptureSource::Region { region, .. } => Some((*region, false)),
+        CaptureSource::Region { region, .. } => (Some((*region, false)), 0isize),
         CaptureSource::GameCapture { hwnd, .. } => {
             let mut r = RECT::default();
-            unsafe {
+            let rect_opt = unsafe {
                 if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
                     Some((r, true))
                 } else {
                     None
                 }
-            }
+            };
+            (rect_opt, hwnd.0 as isize)
         }
     };
-    let (region_border, recording_active_signal) = match border_rect {
+    let (region_border, recording_active_signal, border_target_hwnd) = match border_rect {
         Some((rect, badge_only)) => {
-            let (border, signal) = RegionBorder::start(rect, config.ui_language, badge_only);
-            (Some(border), Some(signal))
+            let (border, signal, target_sig) = RegionBorder::start(rect, config.ui_language, badge_only, initial_target_hwnd);
+            (Some(border), Some(signal), Some(target_sig))
         }
-        None => (None, None),
+        None => (None, None, None),
     };
 
     let log_path = config.output_dir.join(".macronest-video-recorder.log");
@@ -1055,7 +1124,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             };
             let (width, height) = session.dimensions();
             let mut initial_rgba = Vec::new();
-            if !session.has_nvenc() {
+            if !session.has_nvenc() || config.switch_on_focus {
                 if let Err(err) = session.poll_into_buffer(&mut initial_rgba, width as usize, height as usize) {
                     cleanup_audio(&mut audio_capture_opt);
                     return Err(format!("Could not capture initial game frame: {err}"));
@@ -1073,7 +1142,11 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         _ => (None, None),
     };
 
-    let use_nvenc = session_opt.as_ref().map(|s| s.has_nvenc()).unwrap_or(false);
+    let use_nvenc = if config.switch_on_focus {
+        false
+    } else {
+        session_opt.as_ref().map(|s| s.has_nvenc()).unwrap_or(false)
+    };
 
     match &source {
         CaptureSource::Desktop { fps } => {
@@ -1272,6 +1345,34 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             CaptureSource::WgcWindow { fps, .. } | CaptureSource::GameCapture { fps, .. } => fps,
             _ => 60,
         };
+        let is_game_capture = matches!(source, CaptureSource::GameCapture { .. });
+        let initial_hwnd = match source {
+            CaptureSource::WgcWindow { hwnd, .. } | CaptureSource::GameCapture { hwnd, .. } => hwnd,
+            _ => HWND(std::ptr::null_mut()),
+        };
+        let initial_hwnd_val = initial_hwnd.0 as isize;
+        let switch_on_focus = config.switch_on_focus;
+        let mut switch_targets: Vec<isize> = Vec::new();
+        if switch_on_focus {
+            if initial_hwnd_val != 0 {
+                switch_targets.push(initial_hwnd_val);
+            }
+            if let Some(h) = selector_hwnd(&config.target_window) {
+                let val = h.0 as isize;
+                if !switch_targets.contains(&val) {
+                    switch_targets.push(val);
+                }
+            }
+            for s in &config.switch_windows {
+                if let Some(h) = selector_hwnd(s) {
+                    let val = h.0 as isize;
+                    if !switch_targets.contains(&val) {
+                        switch_targets.push(val);
+                    }
+                }
+            }
+        }
+
         let stdin = match child.stdin.take() {
             Some(pipe) => pipe,
             None => {
@@ -1283,15 +1384,25 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         let feeder_stop = stop_signal.clone();
         let feeder_fps = fps.max(1) as u64;
         let audio_start_clone = audio_capture_opt.as_ref().map(|(_, _, s, _)| s.clone());
+        let border_target_clone = border_target_hwnd.clone();
+
         let thread_handle = thread::spawn(move || {
             #[cfg(windows)]
             unsafe {
                 let _ = timeBeginPeriod(1);
             }
             let mut active_session = session;
-            let use_nvenc = active_session.has_nvenc();
+            let use_nvenc = if switch_on_focus {
+                false
+            } else {
+                active_session.has_nvenc()
+            };
             let mut last_frame = initial.rgba;
+            let mut temp_poll_buffer = Vec::new();
             let mut pipe = std::io::BufWriter::with_capacity(8 * 1024 * 1024, stdin);
+            let mut current_hwnd_val = initial_hwnd_val;
+            let mut session_cache: std::collections::HashMap<isize, ActiveCaptureSession> = std::collections::HashMap::new();
+            let mut check_tick: usize = 0;
 
             if use_nvenc {
                 if let Ok(Some(first_packet)) = active_session.poll_encoded_frame(true) {
@@ -1340,6 +1451,55 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                     frame_count = 0;
                 }
 
+                if switch_on_focus && !switch_targets.is_empty() {
+                    check_tick += 1;
+                    if check_tick % 3 == 0 {
+                        let fg = unsafe { GetForegroundWindow() };
+                        let fg_val = fg.0 as isize;
+                        if fg_val != 0 && fg_val != current_hwnd_val {
+                            let root_fg = unsafe {
+                                let r = windows::Win32::UI::WindowsAndMessaging::GetAncestor(
+                                    fg,
+                                    windows::Win32::UI::WindowsAndMessaging::GA_ROOT,
+                                );
+                                if r.0.is_null() { fg } else { r }
+                            };
+                            let root_val = root_fg.0 as isize;
+                            let matched = if switch_targets.contains(&fg_val) {
+                                Some(fg_val)
+                            } else if switch_targets.contains(&root_val) {
+                                Some(root_val)
+                            } else {
+                                None
+                            };
+
+                            if let Some(new_target_val) = matched {
+                                let new_target = HWND(new_target_val as *mut _);
+                                if new_target_val != current_hwnd_val && unsafe { IsWindow(Some(new_target)).as_bool() } {
+                                    let old_key = current_hwnd_val;
+                                    let new_key = new_target_val;
+
+                                    if let Some(cached_session) = session_cache.remove(&new_key) {
+                                        let old_session = std::mem::replace(&mut active_session, cached_session);
+                                        session_cache.insert(old_key, old_session);
+                                        current_hwnd_val = new_target_val;
+                                        if let Some(target_sig) = &border_target_clone {
+                                            target_sig.store(new_key, Ordering::Release);
+                                        }
+                                    } else if let Ok(new_session) = create_capture_session_for_hwnd(new_target, is_game_capture) {
+                                        let old_session = std::mem::replace(&mut active_session, new_session);
+                                        session_cache.insert(old_key, old_session);
+                                        current_hwnd_val = new_target_val;
+                                        if let Some(target_sig) = &border_target_clone {
+                                            target_sig.store(new_key, Ordering::Release);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if use_nvenc {
                     let force_idr = (frame_count % (feeder_fps * 2)) == 0;
                     if let Ok(Some(packet)) = active_session.poll_encoded_frame(force_idr) {
@@ -1350,7 +1510,17 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                         }
                     }
                 } else {
-                    let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
+                    let (src_w, src_h) = active_session.dimensions();
+                    if src_w == width && src_h == height {
+                        let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
+                    } else if src_w > 0 && src_h > 0 {
+                        if let Ok(true) = active_session.poll_into_buffer(&mut temp_poll_buffer, 0, 0) {
+                            let (cur_w, cur_h) = active_session.dimensions();
+                            blit_and_scale_bgra(&temp_poll_buffer, cur_w, cur_h, &mut last_frame, width, height);
+                        }
+                    } else {
+                        let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
+                    }
 
                     if pipe.write_all(&last_frame).is_err() {
                         break 'feeder;
@@ -2194,17 +2364,25 @@ fn unique_output_path(dir: &Path, stem: &str) -> PathBuf {
 #[cfg(windows)]
 struct RegionBorder {
     stop: std::sync::Arc<AtomicBool>,
+    _target_hwnd: std::sync::Arc<std::sync::atomic::AtomicIsize>,
 }
 
 #[cfg(windows)]
 impl RegionBorder {
-    fn start(rect: RECT, language: crate::model::UiLanguage, badge_only: bool) -> (Self, std::sync::Arc<AtomicBool>) {
+    fn start(
+        rect: RECT,
+        language: crate::model::UiLanguage,
+        badge_only: bool,
+        target_hwnd_val: isize,
+    ) -> (Self, std::sync::Arc<AtomicBool>, std::sync::Arc<std::sync::atomic::AtomicIsize>) {
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let recording_active = std::sync::Arc::new(AtomicBool::new(false));
+        let target_hwnd = std::sync::Arc::new(std::sync::atomic::AtomicIsize::new(target_hwnd_val));
         let thread_stop = stop.clone();
         let thread_active = recording_active.clone();
-        thread::spawn(move || run_region_border(rect, thread_stop, thread_active, language, badge_only));
-        (Self { stop }, recording_active)
+        let thread_target = target_hwnd.clone();
+        thread::spawn(move || run_region_border(rect, thread_stop, thread_active, language, badge_only, thread_target));
+        (Self { stop, _target_hwnd: target_hwnd.clone() }, recording_active, target_hwnd)
     }
 }
 
@@ -2222,6 +2400,7 @@ fn run_region_border(
     recording_active: std::sync::Arc<AtomicBool>,
     language: crate::model::UiLanguage,
     badge_only: bool,
+    target_hwnd: std::sync::Arc<std::sync::atomic::AtomicIsize>,
 ) {
     use windows::{
         Win32::{
@@ -2344,11 +2523,36 @@ fn run_region_border(
         let mut message = MSG::default();
 
         let (b_left, b_top) = if badge_only { (0, 0) } else { (3, 3) };
+        let mut last_rect = rect;
 
         while !stop.load(Ordering::Acquire) {
             while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
+            }
+
+            let cur_hwnd_val = target_hwnd.load(Ordering::Acquire);
+            if cur_hwnd_val != 0 {
+                let target = HWND(cur_hwnd_val as *mut _);
+                let mut cur_r = RECT::default();
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(target, &mut cur_r).is_ok() {
+                    if cur_r.left != last_rect.left
+                        || cur_r.top != last_rect.top
+                        || cur_r.right != last_rect.right
+                        || cur_r.bottom != last_rect.bottom
+                    {
+                        last_rect = cur_r;
+                        let rw = (cur_r.right - cur_r.left).max(10);
+                        let rh = (cur_r.bottom - cur_r.top).max(10);
+                        let (nx, ny, nw, nh) = if badge_only {
+                            (cur_r.left + 8, cur_r.top + 8, 145, 24)
+                        } else {
+                            (cur_r.left, cur_r.top, rw, rh)
+                        };
+                        use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+                        let _ = SetWindowPos(hwnd, None, nx, ny, nw, nh, SWP_NOACTIVATE | SWP_NOZORDER);
+                    }
+                }
             }
 
             let is_active = recording_active.load(Ordering::Acquire);
@@ -2702,6 +2906,24 @@ mod tests {
         });
         assert!(!process_hotkey(&binding, true, false));
         assert!(!process_hotkey(&binding, false, false));
+    }
+
+    #[test]
+    fn test_blit_and_scale_bgra_exact_and_scaling() {
+        let src_w = 2;
+        let src_h = 2;
+        let src = vec![
+            10, 20, 30, 255,   40, 50, 60, 255,
+            70, 80, 90, 255,   100, 110, 120, 255,
+        ];
+        let mut dst_exact = vec![0u8; 2 * 2 * 4];
+        blit_and_scale_bgra(&src, src_w, src_h, &mut dst_exact, 2, 2);
+        assert_eq!(dst_exact, src);
+
+        let mut dst_scaled = vec![0u8; 4 * 4 * 4];
+        blit_and_scale_bgra(&src, src_w, src_h, &mut dst_scaled, 4, 4);
+        assert_eq!(&dst_scaled[0..4], &[10, 20, 30, 255]);
+        assert_eq!(&dst_scaled[(3 * 4 + 3) * 4..(3 * 4 + 4) * 4], &[100, 110, 120, 255]);
     }
 
     #[test]

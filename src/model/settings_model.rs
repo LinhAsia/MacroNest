@@ -1032,6 +1032,10 @@ pub struct AppState {
     #[serde(default)]
     pub quick_video_audio_app_windows: Vec<String>,
     #[serde(default)]
+    pub quick_video_switch_on_focus: bool,
+    #[serde(default)]
+    pub quick_video_switch_windows: Vec<String>,
+    #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
     pub quick_key_sound_style: u32,
@@ -1410,6 +1414,8 @@ impl Default for AppState {
             quick_video_audio_system: true,
             quick_video_audio_mic: false,
             quick_video_audio_app_windows: Vec::new(),
+            quick_video_switch_on_focus: false,
+            quick_video_switch_windows: Vec::new(),
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),

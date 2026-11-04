@@ -1359,6 +1359,8 @@ mod windows_impl {
         staging_textures: Option<([ID3D11Texture2D; 2], u32, u32)>,
         write_idx: usize,
         copies_count: usize,
+        pub(crate) width: usize,
+        pub(crate) height: usize,
     }
 
     unsafe impl Send for WgcSession {}
@@ -1418,6 +1420,8 @@ mod windows_impl {
             staging_textures: None,
             write_idx: 0,
             copies_count: 0,
+            width: size.Width.max(1) as usize,
+            height: size.Height.max(1) as usize,
         })
     }
 
@@ -1476,6 +1480,8 @@ mod windows_impl {
             }
             let width = desc.Width as usize;
             let height = desc.Height as usize;
+            self.width = width;
+            self.height = height;
 
             if expected_w > 0 && expected_h > 0 && (width != expected_w || height != expected_h) {
                 return Ok(false);
