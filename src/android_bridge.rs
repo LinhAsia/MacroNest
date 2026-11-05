@@ -105,15 +105,19 @@ pub struct AndroidBridgeState {
     pub is_connected: bool,
     pub connected_device_name: String,
     pub processes: Vec<AndroidProcess>,
+    pub process_search: String,
     pub selected_pid: Option<u32>,
     pub selected_process_name: String,
     pub modules: Vec<AndroidMemoryModule>,
     pub module_filter: String,
-    // GVA <-> HVA Delta Translator
-    pub guest_addr_input: String,
-    pub host_addr_input: String,
-    pub translation_result: String,
-    // Value reader
+    // Automated GVA <-> HVA Delta
+    pub guest_module_base: Option<usize>,
+    pub guest_module_name: String,
+    pub host_base_address: Option<usize>,
+    pub delta: Option<isize>,
+    pub delta_formula: String,
+    pub auto_sync_status: String,
+    // Value quick probe
     pub read_addr_input: String,
     pub read_value_result: String,
 }
@@ -280,10 +284,17 @@ pub fn parse_android_ps(output: &str) -> Vec<AndroidProcess> {
         let name = parts[name_col].to_string();
         let user = parts.get(user_col).unwrap_or(&"").to_string();
 
-        // Identify if it's a user application (games, apps usually have package names with dots or start with u0_a)
-        let is_user_app = (name.contains('.') && !name.starts_with('[') && !name.contains('/'))
-            || user.starts_with("u0_a")
-            || user.starts_with("u0_i");
+        let is_system = name.starts_with("android.")
+            || name.starts_with("com.android.")
+            || name.starts_with("vendor.")
+            || name.starts_with("system_")
+            || name.starts_with('/')
+            || name.starts_with('[');
+
+        let is_user_app = !is_system
+            && (user.starts_with("u0_a")
+                || user.starts_with("u0_i")
+                || (name.contains('.') && !name.contains('/')));
 
         processes.push(AndroidProcess {
             pid,
@@ -506,11 +517,12 @@ mod tests {
         let sample = r#"USER           PID  PPID     VSZ    RSS WCHAN            ADDR S NAME
 root             1     0   20480   1230 0                   0 S init
 system        1000     1  102400  32100 0                   0 S system_server
+system         665     1   50000   1000 0                   0 S android.hardware.audio.service
 u0_a123       4567  1000 2048000 150000 0                   0 S com.netease.dwrg
 u0_a234       8910  1000 1500000 100000 0                   0 S com.mihoyo.GenshinImpact
 "#;
         let procs = parse_android_ps(sample);
-        assert_eq!(procs.len(), 4);
+        assert_eq!(procs.len(), 5);
         assert_eq!(procs[0].name, "com.mihoyo.GenshinImpact");
         assert_eq!(procs[0].pid, 8910);
         assert!(procs[0].is_user_app);
@@ -519,8 +531,13 @@ u0_a234       8910  1000 1500000 100000 0                   0 S com.mihoyo.Gensh
         assert_eq!(procs[1].pid, 4567);
         assert!(procs[1].is_user_app);
 
-        assert_eq!(procs[2].name, "init");
-        assert!(!procs[2].is_user_app);
+        let audio = procs.iter().find(|p| p.name == "android.hardware.audio.service").unwrap();
+        assert!(!audio.is_user_app);
+
+        assert_eq!(procs[3].name, "init");
+        assert!(!procs[3].is_user_app);
+        assert_eq!(procs[4].name, "system_server");
+        assert!(!procs[4].is_user_app);
     }
 
     #[test]

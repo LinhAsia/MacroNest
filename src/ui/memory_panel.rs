@@ -2698,30 +2698,6 @@ impl CrosshairApp {
                 });
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let bridge_active = self.memory_panel.android_bridge.is_connected;
-                    let bridge_label = if bridge_active {
-                        format!("Android: {}", self.memory_panel.android_bridge.selected_target)
-                    } else {
-                        "Android Bridge".to_string()
-                    };
-                    let bridge_color = if bridge_active {
-                        Color32::from_rgb(84, 214, 140)
-                    } else {
-                        Color32::from_rgb(170, 180, 200)
-                    };
-                    if ui
-                        .button(RichText::new(bridge_label).color(bridge_color))
-                        .on_hover_text(self.tr(
-                            "Android Emulator Bridge: Inspect processes, base maps (libil2cpp/neox), delta offset, and memory directly via ADB",
-                            "Cầu nối giả lập Android: Đọc tiến trình, module maps (libil2cpp/neox), tính offset Delta và đọc trực tiếp qua ADB",
-                        ))
-                        .clicked()
-                    {
-                        self.memory_panel.android_bridge.is_open = !self.memory_panel.android_bridge.is_open;
-                        if self.memory_panel.android_bridge.is_open && self.memory_panel.android_bridge.discovered_devices.is_empty() {
-                            self.android_scan_emulators();
-                        }
-                    }
                     let select_process_str = self.tr("Select process", "Select process");
                     let process_label = if self.memory_panel.process_pid.is_none() {
                         if let Some(last) = &self.memory_panel.last_selected_process {
@@ -6270,231 +6246,229 @@ impl CrosshairApp {
             return;
         }
 
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(self.tr(
-                "Direct ADB bridge into Android Emulators (MuMu Player 12/X/6, LDPlayer, BlueStacks, Nox, MEmu). Solves emulator VMCS debug register masking and non-root Guest-to-Host address mapping.",
-                "Cầu nối ADB trực tiếp vào giả lập Android (MuMu, LDPlayer, BlueStacks, Nox...). Vượt qua giới hạn che giấu debug register của VMCS và dịch địa chỉ GVA sang HVA.",
-            ))
-            .weak(),
-        );
-        ui.separator();
-
         let is_connected = self.memory_panel.android_bridge.is_connected;
+
+        // Status line
         ui.horizontal(|ui| {
             let status_color = if is_connected {
                 Color32::from_rgb(80, 210, 120)
             } else {
-                Color32::from_rgb(200, 160, 60)
+                Color32::from_rgb(180, 180, 190)
             };
-            ui.label(RichText::new(format!("Status: {}", self.memory_panel.android_bridge.status)).color(status_color));
+            ui.label(RichText::new(&self.memory_panel.android_bridge.status).color(status_color));
         });
-        ui.add_space(4.0);
+        ui.add_space(2.0);
 
-        // Section 1: Target Emulator
-        Frame::group(ui.style()).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("1. Target Emulator").strong());
-                if ui.button(self.tr("Auto-Scan Active Emulators", "Quét tìm giả lập đang chạy")).clicked() {
+        // Connection row
+        ui.horizontal(|ui| {
+            ui.label(self.tr("Target:", "Mục tiêu:"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.custom_target)
+                    .desired_width(140.0),
+            );
+
+            if !is_connected {
+                if ui.button(self.tr("Connect", "Kết nối")).clicked() {
+                    self.android_connect();
+                }
+                if ui.button(self.tr("Scan Ports", "Quét cổng")).clicked() {
                     self.android_scan_emulators();
                 }
-            });
-
-            if !self.memory_panel.android_bridge.discovered_devices.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(self.tr("Detected:", "Phát hiện:"));
-                    for dev in self.memory_panel.android_bridge.discovered_devices.clone() {
-                        let btn = ui.small_button(&dev.label);
-                        if btn.on_hover_text("Click to select this target").clicked() {
-                            self.memory_panel.android_bridge.custom_target = dev.target.clone();
-                        }
-                    }
-                });
+            } else {
+                if ui.button(RichText::new(self.tr("Disconnect", "Ngắt kết nối")).color(Color32::from_rgb(220, 80, 80))).clicked() {
+                    self.android_disconnect();
+                }
+                if ui.button(self.tr("Refresh", "Làm mới")).clicked() {
+                    self.android_refresh_processes();
+                }
             }
+        });
 
-            ui.horizontal(|ui| {
-                ui.label(self.tr("Target IP:Port:", "Địa chỉ IP:Port:"));
-                ui.add(egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.custom_target).desired_width(180.0));
-
-                if !is_connected {
-                    if ui.button(RichText::new(self.tr("Connect ADB", "Kết nối ADB")).color(Color32::from_rgb(80, 210, 120)).strong()).clicked() {
+        // Detected emulator quick picks
+        if !self.memory_panel.android_bridge.discovered_devices.is_empty() && !is_connected {
+            ui.horizontal_wrapped(|ui| {
+                for dev in self.memory_panel.android_bridge.discovered_devices.clone() {
+                    if ui.small_button(&dev.label).clicked() {
+                        self.memory_panel.android_bridge.custom_target = dev.target.clone();
                         self.android_connect();
-                    }
-                } else {
-                    if ui.button(RichText::new(self.tr("Disconnect", "Ngắt kết nối")).color(Color32::from_rgb(220, 80, 80))).clicked() {
-                        self.android_disconnect();
                     }
                 }
             });
-        });
+        }
 
         if !is_connected {
             return;
         }
 
-        ui.add_space(4.0);
+        ui.separator();
 
-        // Section 2: Android Process & Modules
-        Frame::group(ui.style()).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("2. Android Process & Modules").strong());
-                if ui.button(self.tr("Refresh Processes", "Làm mới tiến trình")).clicked() {
-                    self.android_refresh_processes();
-                }
-                if let Some(pid) = self.memory_panel.android_bridge.selected_pid {
-                    ui.label(RichText::new(format!("Selected: {} (PID: {})", self.memory_panel.android_bridge.selected_process_name, pid)).color(Color32::from_rgb(100, 200, 255)).strong());
-                    if ui.button(self.tr("Reload Maps", "Tải lại Maps")).clicked() {
-                        self.android_load_maps(pid);
-                    }
-                }
-            });
+        // Process Selector with Integrated Search Box
+        let current_label = if let Some(pid) = self.memory_panel.android_bridge.selected_pid {
+            format!("{} ({})", self.memory_panel.android_bridge.selected_process_name, pid)
+        } else {
+            self.tr("Select Android Process...", "Chọn tiến trình Android...").to_string()
+        };
 
-            if !self.memory_panel.android_bridge.processes.is_empty() {
-                let current_label = if let Some(pid) = self.memory_panel.android_bridge.selected_pid {
-                    format!("{} (PID: {})", self.memory_panel.android_bridge.selected_process_name, pid)
-                } else {
-                    self.tr("Click to select Android Game/Process...", "Chọn tiến trình Android / Game...").to_string()
-                };
+        ui.horizontal(|ui| {
+            ui.label(self.tr("Process:", "Tiến trình:"));
+            egui::ComboBox::from_id_salt("android-proc-combo")
+                .selected_text(current_label)
+                .width(320.0)
+                .show_ui(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("Search:", "Tìm:"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.process_search)
+                                .hint_text("PID / Name...")
+                                .desired_width(180.0),
+                        );
+                        if !self.memory_panel.android_bridge.process_search.is_empty() {
+                            if ui.small_button("Clear").clicked() {
+                                self.memory_panel.android_bridge.process_search.clear();
+                            }
+                        }
+                    });
+                    ui.separator();
 
-                egui::ComboBox::from_id_salt("android-process-combo")
-                    .selected_text(current_label)
-                    .width(360.0)
-                    .show_ui(ui, |ui| {
-                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                            for proc in self.memory_panel.android_bridge.processes.clone() {
-                                let label = if proc.is_user_app {
-                                    format!("★ {} (PID: {})", proc.name, proc.pid)
-                                } else {
-                                    format!("  {} (PID: {})", proc.name, proc.pid)
-                                };
+                    let filter = self.memory_panel.android_bridge.process_search.trim().to_lowercase();
+                    let matching: Vec<_> = self.memory_panel.android_bridge.processes
+                        .iter()
+                        .filter(|p| {
+                            filter.is_empty()
+                                || p.name.to_lowercase().contains(&filter)
+                                || p.pid.to_string().contains(&filter)
+                        })
+                        .cloned()
+                        .collect();
+
+                    if matching.is_empty() {
+                        ui.label(self.tr("No matching processes", "Không có tiến trình phù hợp"));
+                    } else {
+                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                            for proc in matching {
+                                let label = format!("{} ({})", proc.name, proc.pid);
                                 let is_sel = self.memory_panel.android_bridge.selected_pid == Some(proc.pid);
-                                if ui.selectable_label(is_sel, label).clicked() {
+                                let text_color = if proc.is_user_app {
+                                    Color32::from_rgb(100, 210, 255)
+                                } else {
+                                    Color32::from_rgb(180, 180, 180)
+                                };
+                                if ui.selectable_label(is_sel, RichText::new(label).color(text_color)).clicked() {
                                     self.memory_panel.android_bridge.selected_pid = Some(proc.pid);
                                     self.memory_panel.android_bridge.selected_process_name = proc.name.clone();
                                     self.android_load_maps(proc.pid);
+                                    ui.close();
                                 }
                             }
                         });
-                    });
+                    }
+                });
+        });
+
+        // Automated Mapping & Delta Section
+        if let Some(_) = self.memory_panel.android_bridge.selected_pid {
+            ui.separator();
+
+            let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
+                "None".to_string()
+            } else {
+                self.memory_panel.android_bridge.guest_module_name.clone()
+            };
+
+            let gva_str = if let Some(gva) = self.memory_panel.android_bridge.guest_module_base {
+                format!("0x{gva:X}")
+            } else {
+                "-".to_string()
+            };
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Base:").strong());
+                ui.label(RichText::new(&mod_name).color(Color32::from_rgb(255, 215, 0)));
+                ui.label(format!("(GVA: {})", gva_str));
+
+                if ui.button(RichText::new(self.tr("Auto-Sync Delta", "Tự động tính Delta")).strong()).clicked() {
+                    self.android_auto_sync_delta();
+                }
+            });
+
+            if let Some(delta) = self.memory_panel.android_bridge.delta {
+                ui.horizontal(|ui| {
+                    let host_str = if let Some(hva) = self.memory_panel.android_bridge.host_base_address {
+                        format!("0x{hva:X}")
+                    } else {
+                        "-".to_string()
+                    };
+                    let sign = if delta >= 0 { "+" } else { "-" };
+                    let abs_d = delta.unsigned_abs();
+                    ui.label(RichText::new(format!("Host: {host_str} | Delta: {sign}0x{abs_d:X}")).color(Color32::from_rgb(80, 210, 120)).strong());
+
+                    if ui.small_button(self.tr("Copy Delta", "Copy Delta")).clicked() {
+                        ui.ctx().copy_text(format!("{sign}0x{abs_d:X}"));
+                    }
+
+                    if ui.small_button(self.tr("Add to Saved", "Thêm vào danh sách")).clicked() {
+                        if let Some(hva) = self.memory_panel.android_bridge.host_base_address {
+                            self.memory_panel.manual_address = format!("0x{hva:X}");
+                            self.add_manual_memory_address();
+                        }
+                    }
+                });
+            } else if !self.memory_panel.android_bridge.auto_sync_status.is_empty() {
+                ui.label(RichText::new(&self.memory_panel.android_bridge.auto_sync_status).weak());
             }
 
+            // Quick Memory Probe (Inline)
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(self.tr("Probe GVA:", "Soi GVA:"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.read_addr_input)
+                        .hint_text("0x...")
+                        .desired_width(120.0),
+                );
+                if ui.small_button(self.tr("Read", "Đọc")).clicked() {
+                    self.android_read_memory();
+                }
+                if !self.memory_panel.android_bridge.read_value_result.is_empty() {
+                    ui.label(RichText::new(&self.memory_panel.android_bridge.read_value_result).color(Color32::from_rgb(220, 220, 100)).monospace());
+                }
+            });
+
+            // Collapsible Modules Table (clean & compact)
             if !self.memory_panel.android_bridge.modules.is_empty() {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(self.tr("Filter modules:", "Lọc module:"));
-                    ui.add(egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.module_filter).desired_width(160.0));
-                    ui.label(RichText::new(format!("Total: {} modules", self.memory_panel.android_bridge.modules.len())).weak());
-                });
+                ui.collapsing(format!("Modules ({})", self.memory_panel.android_bridge.modules.len()), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("Filter:", "Lọc:"));
+                        ui.add(egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.module_filter).desired_width(140.0));
+                    });
 
-                let filter = self.memory_panel.android_bridge.module_filter.to_lowercase();
-                let filtered_mods: Vec<_> = self.memory_panel.android_bridge.modules
-                    .iter()
-                    .filter(|m| filter.is_empty() || m.name.to_lowercase().contains(&filter) || m.pathname.to_lowercase().contains(&filter))
-                    .cloned()
-                    .collect();
+                    let filter = self.memory_panel.android_bridge.module_filter.to_lowercase();
+                    let filtered: Vec<_> = self.memory_panel.android_bridge.modules
+                        .iter()
+                        .filter(|m| filter.is_empty() || m.name.to_lowercase().contains(&filter))
+                        .cloned()
+                        .collect();
 
-                egui::ScrollArea::vertical()
-                    .id_salt("android-modules-scroll")
-                    .max_height(160.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("android_mods_grid").striped(true).min_col_width(70.0).show(ui, |ui| {
-                            ui.label(RichText::new("Module").strong());
-                            ui.label(RichText::new("Base Address (GVA)").strong());
-                            ui.label(RichText::new("End Address").strong());
-                            ui.label(RichText::new("Size").strong());
-                            ui.label(RichText::new("Perms").strong());
-                            ui.label(RichText::new("Action").strong());
-                            ui.end_row();
-
-                            for m in filtered_mods {
+                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                        egui::Grid::new("android_mod_grid_clean").striped(true).min_col_width(60.0).show(ui, |ui| {
+                            for m in filtered {
                                 let is_pri = m.name.contains("libil2cpp") || m.name.contains("libunity") || m.name.contains("libneox");
-                                let name_color = if is_pri { Color32::from_rgb(255, 215, 0) } else { Color32::LIGHT_GRAY };
-
-                                ui.label(RichText::new(&m.name).color(name_color));
+                                let color = if is_pri { Color32::from_rgb(255, 215, 0) } else { Color32::LIGHT_GRAY };
+                                ui.label(RichText::new(&m.name).color(color));
                                 ui.label(format!("0x{:X}", m.base_address));
-                                ui.label(format!("0x{:X}", m.end_address));
-                                ui.label(format!("{:.2} MB", m.size as f64 / (1024.0 * 1024.0)));
-                                ui.label(&m.permissions);
-
-                                ui.horizontal(|ui| {
-                                    if ui.small_button("Set Guest").on_hover_text("Use this base address as Guest Address (GVA) for Delta calculation").clicked() {
-                                        self.memory_panel.android_bridge.guest_addr_input = format!("0x{:X}", m.base_address);
-                                    }
-                                    if ui.small_button("Copy").clicked() {
-                                        ui.ctx().copy_text(format!("0x{:X}", m.base_address));
-                                    }
-                                });
+                                ui.label(format!("{:.1}MB", m.size as f64 / 1_048_576.0));
+                                if ui.small_button("Set Base").clicked() {
+                                    self.memory_panel.android_bridge.guest_module_name = m.name.clone();
+                                    self.memory_panel.android_bridge.guest_module_base = Some(m.base_address);
+                                    self.android_auto_sync_delta();
+                                }
                                 ui.end_row();
                             }
                         });
                     });
-            }
-        });
-
-        ui.add_space(4.0);
-
-        // Section 3: GVA <-> HVA Delta Translator
-        Frame::group(ui.style()).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-            ui.label(RichText::new("3. Guest <-> Host (GVA <-> HVA) Delta Calculator").strong());
-            ui.label(
-                RichText::new(self.tr(
-                    "Emulators map the entire Android Guest RAM to a continuous block in Windows Host memory. Enter an address from Android (e.g. libil2cpp base) and the corresponding address found in Windows scan to compute the translation delta.",
-                    "Giả lập ánh xạ RAM của Android vào một vùng nhớ liên tục trên Windows. Nhập địa chỉ Guest (từ bản đồ /proc/maps bên trên) và địa chỉ Host tìm thấy trên Windows để tính toán Delta.",
-                ))
-                .weak(),
-            );
-
-            ui.horizontal(|ui| {
-                ui.label("Guest Addr (GVA):");
-                ui.add(egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.guest_addr_input).desired_width(130.0));
-                ui.label("Host Addr (HVA):");
-                ui.add(egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.host_addr_input).desired_width(130.0));
-
-                if ui.button(RichText::new(self.tr("Calculate Delta", "Tính Delta")).strong()).clicked() {
-                    self.android_calculate_delta();
-                }
-            });
-
-            if !self.memory_panel.android_bridge.translation_result.is_empty() {
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&self.memory_panel.android_bridge.translation_result).color(Color32::from_rgb(100, 220, 255)).monospace());
-                    if ui.small_button(self.tr("Copy Result", "Copy kết quả")).clicked() {
-                        ui.ctx().copy_text(self.memory_panel.android_bridge.translation_result.clone());
-                    }
                 });
             }
-        });
-
-        ui.add_space(4.0);
-
-        // Section 4: Direct Memory Inspection via ADB (/proc/<pid>/mem)
-        Frame::group(ui.style()).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("4. Direct Android Memory Read (/proc/<pid>/mem)").strong());
-            });
-            ui.label(
-                RichText::new(self.tr(
-                    "Directly reads bytes from the Android process memory via ADB. Bypasses emulator host translation and verifies true coordinate/pointer values inside the guest VM.",
-                    "Đọc trực tiếp byte từ bộ nhớ tiến trình Android qua ADB. Bỏ qua cơ chế phân trang của máy chủ và kiểm tra trực tiếp tọa độ / pointer trong VM.",
-                ))
-                .weak(),
-            );
-
-            ui.horizontal(|ui| {
-                ui.label("Address (Hex):");
-                ui.add(egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.read_addr_input).desired_width(140.0));
-
-                if ui.button(self.tr("Read 8 Bytes", "Đọc 8 byte")).clicked() {
-                    self.android_read_memory();
-                }
-            });
-
-            if !self.memory_panel.android_bridge.read_value_result.is_empty() {
-                ui.add_space(2.0);
-                ui.label(RichText::new(&self.memory_panel.android_bridge.read_value_result).color(Color32::from_rgb(220, 220, 100)).monospace());
-            }
-        });
+        }
     }
 
     fn android_scan_emulators(&mut self) {
@@ -6515,7 +6489,7 @@ impl CrosshairApp {
                     self.memory_panel.android_bridge.adb_path = Some(found.clone());
                     found
                 } else {
-                    self.memory_panel.android_bridge.status = "ADB executable not found. Please install Android Platform Tools or check emulator path.".to_string();
+                    self.memory_panel.android_bridge.status = "ADB executable not found".to_string();
                     return;
                 }
             }
@@ -6548,6 +6522,10 @@ impl CrosshairApp {
         self.memory_panel.android_bridge.processes.clear();
         self.memory_panel.android_bridge.modules.clear();
         self.memory_panel.android_bridge.selected_pid = None;
+        self.memory_panel.android_bridge.guest_module_base = None;
+        self.memory_panel.android_bridge.guest_module_name.clear();
+        self.memory_panel.android_bridge.host_base_address = None;
+        self.memory_panel.android_bridge.delta = None;
         self.memory_panel.android_bridge.status = "Disconnected".to_string();
     }
 
@@ -6561,7 +6539,7 @@ impl CrosshairApp {
             Ok(procs) => {
                 let count = procs.len();
                 self.memory_panel.android_bridge.processes = procs;
-                self.memory_panel.android_bridge.status = format!("Loaded {count} processes from emulator");
+                self.memory_panel.android_bridge.status = format!("Loaded {count} processes");
             }
             Err(err) => {
                 self.memory_panel.android_bridge.status = format!("Failed to list processes: {err}");
@@ -6579,37 +6557,85 @@ impl CrosshairApp {
             Ok(mods) => {
                 let count = mods.len();
                 if let Some(pri) = mods.iter().find(|m| m.name.contains("libil2cpp") || m.name.contains("libneox") || m.name.contains("libunity")) {
-                    if self.memory_panel.android_bridge.guest_addr_input.trim().is_empty() {
-                        self.memory_panel.android_bridge.guest_addr_input = format!("0x{:X}", pri.base_address);
-                    }
+                    self.memory_panel.android_bridge.guest_module_name = pri.name.clone();
+                    self.memory_panel.android_bridge.guest_module_base = Some(pri.base_address);
+                    self.memory_panel.android_bridge.read_addr_input = format!("0x{:X}", pri.base_address);
+                } else if let Some(first) = mods.first() {
+                    self.memory_panel.android_bridge.guest_module_name = first.name.clone();
+                    self.memory_panel.android_bridge.guest_module_base = Some(first.base_address);
+                    self.memory_panel.android_bridge.read_addr_input = format!("0x{:X}", first.base_address);
                 }
                 self.memory_panel.android_bridge.modules = mods;
-                self.memory_panel.android_bridge.status = format!("Loaded {count} memory modules for PID {pid}");
+                self.memory_panel.android_bridge.status = format!("Loaded {count} modules for PID {pid}");
+                self.android_auto_sync_delta();
             }
             Err(err) => {
-                self.memory_panel.android_bridge.status = format!("Failed to load maps for PID {pid}: {err}");
+                self.memory_panel.android_bridge.status = format!("Failed to load maps: {err}");
             }
         }
     }
 
-    fn android_calculate_delta(&mut self) {
-        let guest_str = self.memory_panel.android_bridge.guest_addr_input.trim();
-        let host_str = self.memory_panel.android_bridge.host_addr_input.trim();
-
-        let parse_hex = |s: &str| -> Option<usize> {
-            let clean = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
-            usize::from_str_radix(clean, 16).ok()
+    fn android_auto_sync_delta(&mut self) {
+        let adb = match &self.memory_panel.android_bridge.adb_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let target = self.memory_panel.android_bridge.selected_target.clone();
+        let pid = match self.memory_panel.android_bridge.selected_pid {
+            Some(p) => p,
+            None => return,
+        };
+        let guest_base = match self.memory_panel.android_bridge.guest_module_base {
+            Some(b) => b,
+            None => return,
         };
 
-        match (parse_hex(guest_str), parse_hex(host_str)) {
-            (Some(g), Some(h)) => {
-                let (_, text) = crate::android_bridge::calculate_gva_hva_delta(g, h);
-                self.memory_panel.android_bridge.translation_result = text;
-            }
+        let magic = match crate::android_bridge::read_android_memory_bytes(&adb, &target, pid, guest_base, 16) {
+            Ok(b) if b.len() >= 8 => b,
             _ => {
-                self.memory_panel.android_bridge.translation_result = "Invalid hex address in Guest or Host field".to_string();
+                self.memory_panel.android_bridge.auto_sync_status = "Failed to read guest module header".to_string();
+                return;
+            }
+        };
+
+        if let Some(cand_addr) = self.memory_panel.selected_results.iter().next().and_then(|&idx| self.memory_panel.candidates.get(idx)).map(|c| c.address) {
+            let delta = cand_addr as isize - guest_base as isize;
+            self.memory_panel.android_bridge.host_base_address = Some(cand_addr);
+            self.memory_panel.android_bridge.delta = Some(delta);
+            self.memory_panel.android_bridge.auto_sync_status = "Delta synced via selected candidate".to_string();
+            return;
+        }
+
+        let host_pid = self.memory_panel.process_pid;
+        if let Some(h_pid) = host_pid {
+            let hex_pattern = magic[..8.min(magic.len())].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
+            let options = MemoryScanOptions {
+                writable: false,
+                executable: true,
+                copy_on_write: false,
+                active_memory_only: false,
+                mem_private: true,
+                mem_image: true,
+                mem_mapped: true,
+                alignment: None,
+            };
+
+            let progress = Arc::new(AtomicUsize::new(0));
+            if let Ok(addrs) = crate::process_memory::scan_aob_memory_addresses(h_pid, &hex_pattern, 5, options, progress) {
+                if let Some(&first_host) = addrs.first() {
+                    let delta = first_host as isize - guest_base as isize;
+                    self.memory_panel.android_bridge.host_base_address = Some(first_host);
+                    self.memory_panel.android_bridge.delta = Some(delta);
+                    self.memory_panel.android_bridge.auto_sync_status = format!("Found host base 0x{first_host:X}");
+                    return;
+                }
             }
         }
+
+        self.memory_panel.android_bridge.auto_sync_status = self.tr(
+            "Attach emulator in Memory Scanner to auto-sync",
+            "Chọn tiến trình giả lập ở Memory Scanner để tự động đồng bộ"
+        ).to_string();
     }
 
     fn android_read_memory(&mut self) {
@@ -6617,13 +6643,10 @@ impl CrosshairApp {
             Some(p) => p.clone(),
             None => return,
         };
-        let target = &self.memory_panel.android_bridge.selected_target;
+        let target = self.memory_panel.android_bridge.selected_target.clone();
         let pid = match self.memory_panel.android_bridge.selected_pid {
             Some(p) => p,
-            None => {
-                self.memory_panel.android_bridge.read_value_result = "No process selected".to_string();
-                return;
-            }
+            None => return,
         };
 
         let addr_str = self.memory_panel.android_bridge.read_addr_input.trim();
@@ -6631,31 +6654,23 @@ impl CrosshairApp {
         let addr = match usize::from_str_radix(clean, 16) {
             Ok(a) => a,
             Err(_) => {
-                self.memory_panel.android_bridge.read_value_result = "Invalid hex address".to_string();
+                self.memory_panel.android_bridge.read_value_result = "Invalid hex".to_string();
                 return;
             }
         };
 
-        match crate::android_bridge::read_android_memory_bytes(&adb, target, pid, addr, 8) {
+        match crate::android_bridge::read_android_memory_bytes(&adb, &target, pid, addr, 8) {
             Ok(bytes) => {
-                let hex_str = bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
                 let as_u32 = if bytes.len() >= 4 {
                     u32::from_le_bytes(bytes[0..4].try_into().unwrap_or_default())
                 } else {
                     0
                 };
                 let as_f32 = f32::from_bits(as_u32);
-                let as_u64 = if bytes.len() >= 8 {
-                    u64::from_le_bytes(bytes[0..8].try_into().unwrap_or_default())
-                } else {
-                    0
-                };
-                self.memory_panel.android_bridge.read_value_result = format!(
-                    "Bytes: [{hex_str}]\nFloat: {as_f32}\nu32: {as_u32} (0x{as_u32:X})\nu64: 0x{as_u64:X}"
-                );
+                self.memory_panel.android_bridge.read_value_result = format!("{as_f32:.2} (0x{as_u32:X})");
             }
-            Err(err) => {
-                self.memory_panel.android_bridge.read_value_result = format!("Read error: {err}");
+            Err(_) => {
+                self.memory_panel.android_bridge.read_value_result = "Read error".to_string();
             }
         }
     }
