@@ -24,6 +24,7 @@ mod ui;
 mod video_recorder;
 mod window_list;
 mod game_capture;
+pub mod android_bridge;
 #[cfg(windows)]
 pub mod nvenc;
 #[cfg(windows)]
