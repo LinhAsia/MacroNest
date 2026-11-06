@@ -115,17 +115,12 @@ pub struct AndroidBridgeState {
     pub guest_module_name: String,
     pub host_base_address: Option<usize>,
     pub delta: Option<isize>,
-    pub delta_formula: String,
-    pub auto_sync_status: String,
-    // Value quick probe
-    pub read_addr_input: String,
-    pub read_value_result: String,
 }
 
 impl AndroidBridgeState {
     pub fn new() -> Self {
         Self {
-            custom_target: "127.0.0.1:16384".to_string(),
+            custom_target: "127.0.0.1:16416".to_string(),
             status: "Ready".to_string(),
             ..Default::default()
         }
