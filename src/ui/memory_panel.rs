@@ -1983,7 +1983,7 @@ impl CrosshairApp {
             } else if id == "memory-settings-host" {
                 vec2(600.0, 720.0)
             } else if id == "memory-android-bridge-host" {
-                vec2(520.0, 125.0)
+                vec2(600.0, 420.0)
             } else {
                 vec2(860.0, 620.0)
             };
@@ -1994,7 +1994,7 @@ impl CrosshairApp {
             } else if id == "memory-settings-host" {
                 vec2(440.0, 320.0)
             } else if id == "memory-android-bridge-host" {
-                vec2(440.0, 110.0)
+                vec2(460.0, 260.0)
             } else {
                 vec2(480.0, 280.0)
             };
@@ -2022,6 +2022,14 @@ impl CrosshairApp {
                     let applied: bool = ctx.data(|d| d.get_temp(stable_key)).unwrap_or(false);
                     if !applied {
                         ctx.data_mut(|d| d.insert_temp(stable_key, true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(inner_size * scale));
+                    }
+                }
+                if id == "memory-android-bridge-host" {
+                    let bridge_key = egui::Id::new((id, "bridge_size_v3"));
+                    let applied: bool = ctx.data(|d| d.get_temp(bridge_key)).unwrap_or(false);
+                    if !applied {
+                        ctx.data_mut(|d| d.insert_temp(bridge_key, true));
                         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(inner_size * scale));
                     }
                 }
@@ -2061,6 +2069,8 @@ impl CrosshairApp {
                 (vec2(stable_pointer_width, 620.0), vec2(stable_pointer_width, 280.0))
             } else if id == "memory-settings-host" {
                 (vec2(600.0, 720.0), vec2(440.0, 320.0))
+            } else if id == "memory-android-bridge-host" {
+                (vec2(600.0, 420.0), vec2(460.0, 260.0))
             } else {
                 (vec2(640.0, 440.0), vec2(380.0, 240.0))
             };
@@ -6392,12 +6402,109 @@ impl CrosshairApp {
             };
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Synced:").color(Color32::from_rgb(80, 210, 120)).strong());
+                ui.label(RichText::new("Synced Base:").color(Color32::from_rgb(80, 210, 120)).strong());
                 ui.label(RichText::new(format!("{mod_name} (PID {pid})")).strong());
                 if let Some(delta) = self.memory_panel.android_bridge.delta {
                     let sign = if delta >= 0 { "+" } else { "-" };
                     ui.label(RichText::new(format!("(Delta: {sign}0x{:X})", delta.unsigned_abs())).weak());
                 }
+            });
+
+            ui.separator();
+
+            let total_mods = self.memory_panel.android_bridge.modules.len();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("Modules ({total_mods})")).strong());
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.module_filter)
+                        .hint_text("Filter modules...")
+                        .desired_width(140.0),
+                );
+                if !self.memory_panel.android_bridge.module_filter.is_empty() {
+                    if ui.small_button("Clear").clicked() {
+                        self.memory_panel.android_bridge.module_filter.clear();
+                    }
+                }
+            });
+
+            let filter = self.memory_panel.android_bridge.module_filter.trim().to_lowercase();
+            let delta = self.memory_panel.android_bridge.delta;
+            let filtered: Vec<_> = self.memory_panel.android_bridge.modules
+                .iter()
+                .filter(|m| filter.is_empty() || m.name.to_lowercase().contains(&filter) || m.pathname.to_lowercase().contains(&filter))
+                .cloned()
+                .collect();
+
+            if filtered.is_empty() {
+                ui.label(RichText::new("No matching modules").weak());
+            } else {
+                let mut switch_base = None;
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        egui::Grid::new("android_mod_grid_streamlined")
+                            .striped(true)
+                            .min_col_width(65.0)
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("Module").strong());
+                                ui.label(RichText::new("Guest Base (GVA)").strong());
+                                ui.label(RichText::new("Host Base (HVA)").strong());
+                                ui.label(RichText::new("Size").strong());
+                                ui.label(RichText::new("Action").strong());
+                                ui.end_row();
+
+                                for m in &filtered {
+                                    let is_active = m.name == mod_name;
+                                    let is_key_mod = m.name.contains("libil2cpp") || m.name.contains("libunity") || m.name.contains("libmain");
+                                    let name_color = if is_active {
+                                        Color32::from_rgb(80, 210, 120)
+                                    } else if is_key_mod {
+                                        Color32::from_rgb(100, 210, 255)
+                                    } else {
+                                        Color32::from_rgb(200, 200, 200)
+                                    };
+
+                                    let gva_str = format!("0x{:X}", m.base_address);
+                                    let hva_str = if let Some(d) = delta {
+                                        let hva = (m.base_address as isize + d) as usize;
+                                        format!("0x{hva:X}")
+                                    } else {
+                                        "-".to_string()
+                                    };
+                                    let size_str = if m.size >= 1024 * 1024 {
+                                        format!("{:.1} MB", m.size as f64 / (1024.0 * 1024.0))
+                                    } else {
+                                        format!("{:.0} KB", m.size as f64 / 1024.0)
+                                    };
+
+                                    ui.label(RichText::new(&m.name).color(name_color));
+                                    ui.label(RichText::new(&gva_str).weak());
+                                    ui.label(RichText::new(&hva_str).color(Color32::from_rgb(255, 215, 0)));
+                                    ui.label(RichText::new(&size_str).weak());
+
+                                    if is_active {
+                                        ui.label(RichText::new("[Active Base]").color(Color32::from_rgb(80, 210, 120)));
+                                    } else if ui.small_button("Set Base").clicked() {
+                                        switch_base = Some((m.name.clone(), m.base_address));
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    });
+
+                if let Some((new_name, new_base)) = switch_base {
+                    self.memory_panel.android_bridge.guest_module_name = new_name;
+                    self.memory_panel.android_bridge.guest_module_base = Some(new_base);
+                    self.android_auto_sync_delta();
+                }
+            }
+        } else {
+            ui.add_space(20.0);
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(self.tr(
+                    "Select an Android game process above to inspect loaded modules and sync memory delta.",
+                    "Chọn tiến trình game Android ở trên để xem danh sách module và đồng bộ Delta bộ nhớ."
+                )).weak());
             });
         }
     }
