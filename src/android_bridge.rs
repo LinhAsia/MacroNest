@@ -92,6 +92,7 @@ pub struct AndroidMemoryModule {
     pub size: usize,
     pub permissions: String,
     pub pathname: String,
+    pub is_game_module: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -110,6 +111,7 @@ pub struct AndroidBridgeState {
     pub selected_process_name: String,
     pub modules: Vec<AndroidMemoryModule>,
     pub module_filter: String,
+    pub show_game_modules_only: bool,
     // Automated GVA <-> HVA Delta
     pub guest_module_base: Option<usize>,
     pub guest_module_name: String,
@@ -122,6 +124,7 @@ impl AndroidBridgeState {
         Self {
             custom_target: "127.0.0.1:16416".to_string(),
             status: "Ready".to_string(),
+            show_game_modules_only: true,
             ..Default::default()
         }
     }
@@ -324,8 +327,19 @@ pub fn list_android_processes(adb: &Path, target: &str) -> Result<Vec<AndroidPro
 
 /// Parses the contents of `/proc/<pid>/maps` from Android.
 pub fn parse_android_maps(maps_content: &str) -> Vec<AndroidMemoryModule> {
-    let mut modules_map: HashMap<String, (usize, usize, usize, String, String)> = HashMap::new();
-    let mut standalone_sections = Vec::new();
+    struct SoRegion {
+        name: String,
+        base_address: usize,
+        end_address: usize,
+        size: usize,
+        permissions: String,
+        pathname: String,
+        has_executable_or_write: bool,
+        section_count: usize,
+        is_game_module: bool,
+    }
+
+    let mut regions_by_name: HashMap<String, Vec<SoRegion>> = HashMap::new();
 
     for line in maps_content.lines() {
         let trimmed = line.trim();
@@ -333,7 +347,6 @@ pub fn parse_android_maps(maps_content: &str) -> Vec<AndroidMemoryModule> {
             continue;
         }
 
-        // Format: 7b120000-7b340000 r-xp 00000000 08:06 12345 /data/app/.../libil2cpp.so
         let mut parts = trimmed.split_whitespace();
         let range = match parts.next() {
             Some(r) => r,
@@ -363,68 +376,89 @@ pub fn parse_android_maps(maps_content: &str) -> Vec<AndroidMemoryModule> {
         };
 
         let clean_name = if pathname.is_empty() {
-            "[anonymous]".to_string()
+            continue;
         } else if let Some((_, file)) = pathname.rsplit_once('/') {
             file.to_string()
         } else {
             pathname.to_string()
         };
 
-        // For .so files or known named memory, group contiguous sections by file to identify primary base address
-        if clean_name.ends_with(".so")
-            || clean_name.ends_with(".apk")
-            || clean_name.starts_with('[')
-        {
-            if let Some(entry) = modules_map.get_mut(&clean_name) {
-                if start >= entry.0 && start.saturating_sub(entry.1) < 256 * 1024 * 1024 {
-                    if end > entry.1 {
-                        entry.1 = end;
-                    }
-                    entry.2 += end.saturating_sub(start);
-                    if perms.contains('x') {
-                        entry.3 = perms.to_string();
-                    }
-                    continue;
+        // ONLY keep shared libraries (.so)
+        if !clean_name.ends_with(".so") && !pathname.ends_with(".so") {
+            continue;
+        }
+
+        let is_write_or_x = perms.contains('w') || perms.contains('x');
+        let is_game = pathname.contains("/data/app/")
+            || clean_name.contains("il2cpp")
+            || clean_name.contains("unity")
+            || clean_name.contains("main")
+            || clean_name.contains("game");
+
+        let entry = regions_by_name.entry(clean_name.clone()).or_default();
+        if let Some(last) = entry.last_mut() {
+            if start >= last.base_address && start.saturating_sub(last.end_address) < 64 * 1024 * 1024 {
+                if end > last.end_address {
+                    last.end_address = end;
                 }
-            } else {
-                modules_map.insert(
-                    clean_name.clone(),
-                    (start, end, end.saturating_sub(start), perms.to_string(), pathname.to_string()),
-                );
+                last.size = last.end_address.saturating_sub(last.base_address);
+                if is_write_or_x {
+                    last.has_executable_or_write = true;
+                    if perms.contains('x') {
+                        last.permissions = perms.to_string();
+                    }
+                }
+                last.section_count += 1;
                 continue;
             }
         }
 
-        standalone_sections.push(AndroidMemoryModule {
+        entry.push(SoRegion {
             name: clean_name,
             base_address: start,
             end_address: end,
             size: end.saturating_sub(start),
             permissions: perms.to_string(),
             pathname: pathname.to_string(),
+            has_executable_or_write: is_write_or_x,
+            section_count: 1,
+            is_game_module: is_game,
         });
     }
 
     let mut result = Vec::new();
-    for (name, (base, end, size, perms, path)) in modules_map {
-        result.push(AndroidMemoryModule {
-            name,
-            base_address: base,
-            end_address: end,
-            size: if size > 0 { size } else { end.saturating_sub(base) },
-            permissions: perms,
-            pathname: path,
-        });
+    for (_name, regions) in regions_by_name {
+        if let Some(best) = regions.into_iter().max_by_key(|r| {
+            let mut score = 0i32;
+            if r.has_executable_or_write {
+                score += 1000;
+            }
+            if r.section_count > 1 {
+                score += 500;
+            }
+            if r.size >= 1024 * 1024 {
+                score += 100;
+            }
+            score
+        }) {
+            result.push(AndroidMemoryModule {
+                name: best.name,
+                base_address: best.base_address,
+                end_address: best.end_address,
+                size: best.size,
+                permissions: best.permissions,
+                pathname: best.pathname,
+                is_game_module: best.is_game_module,
+            });
+        }
     }
 
-    result.extend(standalone_sections);
-
-    // Sort: Game critical modules (.so files like libil2cpp, libunity, libneox) first, then by base
     result.sort_by(|a, b| {
         let a_score = module_priority_score(&a.name);
         let b_score = module_priority_score(&b.name);
         b_score
             .cmp(&a_score)
+            .then_with(|| b.is_game_module.cmp(&a.is_game_module))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             .then_with(|| a.base_address.cmp(&b.base_address))
     });

@@ -626,7 +626,7 @@ pub fn capture_pointer_map_with_budget(
     max_bytes: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<PointerMap> {
-    capture_pointer_map_with_budget_cancel(pid, modules, pointer_width, max_bytes, progress, None)
+    capture_pointer_map_with_budget_cancel(pid, modules, pointer_width, max_bytes, progress, None, None)
 }
 
 fn capture_pointer_map_with_budget_cancel(
@@ -636,6 +636,7 @@ fn capture_pointer_map_with_budget_cancel(
     max_bytes: usize,
     progress: Arc<AtomicUsize>,
     cancel: Option<&AtomicBool>,
+    emulator_delta: Option<isize>,
 ) -> io::Result<PointerMap> {
     if !matches!(pointer_width, 4 | 8) {
         return Err(io::Error::new(
@@ -704,60 +705,90 @@ fn capture_pointer_map_with_budget_cancel(
                 let chunks = read / 8;
                 for (i, chunk) in buffer[..chunks * 8].chunks_exact(8).enumerate() {
                     let value = u64::from_le_bytes(chunk.try_into().unwrap()) as usize;
-                    if value < min_readable || value >= max_readable {
-                        continue;
-                    }
-                    if value >= last_hit_base && value < last_hit_end {
+                    let valid_addr = if value >= min_readable && value < max_readable {
+                        if (value >= last_hit_base && value < last_hit_end) || {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                            if range > 0 && value < readable_ranges[range - 1].1 {
+                                last_hit_base = readable_ranges[range - 1].0;
+                                last_hit_end = readable_ranges[range - 1].1;
+                                true
+                            } else {
+                                false
+                            }
+                        } {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    } else if let Some(delta) = emulator_delta {
+                        let translated = (value as isize).wrapping_add(delta) as usize;
+                        if translated >= min_readable && translated < max_readable {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= translated);
+                            if range > 0 && translated < readable_ranges[range - 1].1 {
+                                Some(translated)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(target_ptr) = valid_addr {
                         if pointers.len() == pointers.capacity() {
                             let additional = pointers.capacity().max(1_000_000).min(8_000_000);
                             if pointers.try_reserve(additional).is_err() {
                                 break 'regions;
                             }
                         }
-                        pointers.push((value, address + i * 8));
-                        continue;
-                    }
-                    let range = readable_ranges.partition_point(|(base, _)| *base <= value);
-                    if range > 0 && value < readable_ranges[range - 1].1 {
-                        last_hit_base = readable_ranges[range - 1].0;
-                        last_hit_end = readable_ranges[range - 1].1;
-                        if pointers.len() == pointers.capacity() {
-                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
-                            if pointers.try_reserve(additional).is_err() {
-                                break 'regions;
-                            }
-                        }
-                        pointers.push((value, address + i * 8));
+                        pointers.push((target_ptr, address + i * 8));
                     }
                 }
             } else {
                 let chunks = read / 4;
                 for (i, chunk) in buffer[..chunks * 4].chunks_exact(4).enumerate() {
                     let value = u32::from_le_bytes(chunk.try_into().unwrap()) as usize;
-                    if value < min_readable || value >= max_readable {
-                        continue;
-                    }
-                    if value >= last_hit_base && value < last_hit_end {
+                    let valid_addr = if value >= min_readable && value < max_readable {
+                        if (value >= last_hit_base && value < last_hit_end) || {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                            if range > 0 && value < readable_ranges[range - 1].1 {
+                                last_hit_base = readable_ranges[range - 1].0;
+                                last_hit_end = readable_ranges[range - 1].1;
+                                true
+                            } else {
+                                false
+                            }
+                        } {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    } else if let Some(delta) = emulator_delta {
+                        let translated = (value as isize).wrapping_add(delta) as usize;
+                        if translated >= min_readable && translated < max_readable {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= translated);
+                            if range > 0 && translated < readable_ranges[range - 1].1 {
+                                Some(translated)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(target_ptr) = valid_addr {
                         if pointers.len() == pointers.capacity() {
                             let additional = pointers.capacity().max(1_000_000).min(8_000_000);
                             if pointers.try_reserve(additional).is_err() {
                                 break 'regions;
                             }
                         }
-                        pointers.push((value, address + i * 4));
-                        continue;
-                    }
-                    let range = readable_ranges.partition_point(|(base, _)| *base <= value);
-                    if range > 0 && value < readable_ranges[range - 1].1 {
-                        last_hit_base = readable_ranges[range - 1].0;
-                        last_hit_end = readable_ranges[range - 1].1;
-                        if pointers.len() == pointers.capacity() {
-                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
-                            if pointers.try_reserve(additional).is_err() {
-                                break 'regions;
-                            }
-                        }
-                        pointers.push((value, address + i * 4));
+                        pointers.push((target_ptr, address + i * 4));
                     }
                 }
             }
@@ -883,6 +914,7 @@ pub fn scan_pointer_paths_to_targets_with_budget(
         &[],
         progress,
         false,
+        None,
     )
     .map(|(_, paths)| paths)
 }
@@ -899,6 +931,7 @@ pub fn scan_pointer_map_and_paths_to_targets_must_end(
     must_end_offsets: &[usize],
     progress: Arc<AtomicUsize>,
     exhaustive: bool,
+    emulator_delta: Option<isize>,
 ) -> io::Result<(PointerMap, Vec<(usize, Vec<PointerPath>)>)> {
     let effective_bytes = if exhaustive {
         max_bytes.max(4096 * 1024 * 1024)
@@ -912,6 +945,7 @@ pub fn scan_pointer_map_and_paths_to_targets_must_end(
         effective_bytes,
         progress,
         None,
+        emulator_delta,
     )?;
     let target_count = targets.len().max(1);
     let per_target_limit = if exhaustive {
@@ -987,6 +1021,7 @@ pub fn scan_pointer_paths_with_budget_options_must_end(
         max_bytes,
         progress,
         Some(&cancel),
+        None,
     )?;
     Ok(find_pointer_paths_to_any(
         &map.pointers,
@@ -5283,6 +5318,16 @@ mod tests {
         let u16_decoded: Vec<u16> = u8_bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         let decoded = String::from_utf16_lossy(&u16_decoded);
         assert_eq!(decoded.trim_matches(char::from(0)), "PlayerTwo");
+    }
+
+    #[test]
+    fn test_emulator_delta_pointer_translation() {
+        let gva: usize = 0x4000_1000_0000;
+        let hva: usize = 0x0000_2000_0000;
+        let delta: isize = (hva as isize).wrapping_sub(gva as isize);
+
+        let translated = (gva as isize).wrapping_add(delta) as usize;
+        assert_eq!(translated, hva);
     }
 }
 

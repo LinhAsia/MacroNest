@@ -165,6 +165,7 @@ struct PointerSpec {
     base: usize,
     module: Option<(String, usize)>,
     offsets: Vec<isize>,
+    delta: Option<isize>,
 }
 
 #[derive(Clone)]
@@ -249,6 +250,8 @@ struct StablePointerDialog {
     exhaustive_scan: bool,
     sort_level_ascending: Option<bool>,
     exact_search: bool,
+    emulator_delta: Option<isize>,
+    extra_modules: Vec<(String, usize)>,
 }
 
 enum DeepPointerJobResult {
@@ -6415,10 +6418,11 @@ impl CrosshairApp {
             let total_mods = self.memory_panel.android_bridge.modules.len();
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("Modules ({total_mods})")).strong());
+                ui.checkbox(&mut self.memory_panel.android_bridge.show_game_modules_only, "Game modules only");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.module_filter)
                         .hint_text("Filter modules...")
-                        .desired_width(140.0),
+                        .desired_width(120.0),
                 );
                 if !self.memory_panel.android_bridge.module_filter.is_empty() {
                     if ui.small_button("Clear").clicked() {
@@ -6428,10 +6432,16 @@ impl CrosshairApp {
             });
 
             let filter = self.memory_panel.android_bridge.module_filter.trim().to_lowercase();
+            let game_only = self.memory_panel.android_bridge.show_game_modules_only;
             let delta = self.memory_panel.android_bridge.delta;
             let filtered: Vec<_> = self.memory_panel.android_bridge.modules
                 .iter()
-                .filter(|m| filter.is_empty() || m.name.to_lowercase().contains(&filter) || m.pathname.to_lowercase().contains(&filter))
+                .filter(|m| {
+                    if game_only && !m.is_game_module {
+                        return false;
+                    }
+                    filter.is_empty() || m.name.to_lowercase().contains(&filter) || m.pathname.to_lowercase().contains(&filter)
+                })
                 .cloned()
                 .collect();
 
@@ -6454,7 +6464,7 @@ impl CrosshairApp {
                                 ui.end_row();
 
                                 for m in &filtered {
-                                    let is_active = m.name == mod_name;
+                                    let is_active = m.name == mod_name && Some(m.base_address) == self.memory_panel.android_bridge.guest_module_base;
                                     let is_key_mod = m.name.contains("libil2cpp") || m.name.contains("libunity") || m.name.contains("libmain");
                                     let name_color = if is_active {
                                         Color32::from_rgb(80, 210, 120)
@@ -8869,6 +8879,8 @@ impl CrosshairApp {
                 exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
                 sort_level_ascending: None,
                 exact_search: false,
+                emulator_delta: None,
+                extra_modules: Vec::new(),
             });
             return;
         };
@@ -9010,6 +9022,8 @@ impl CrosshairApp {
                     exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
                     sort_level_ascending: None,
                     exact_search: false,
+                    emulator_delta: None,
+                    extra_modules: Vec::new(),
                 });
                 return;
             }
@@ -9023,8 +9037,9 @@ impl CrosshairApp {
         } else {
             Vec::new()
         };
-        if self.memory_panel.android_bridge.is_connected {
-            if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+        let (emulator_delta, extra_modules) = if self.memory_panel.android_bridge.is_connected {
+            let delta = self.memory_panel.android_bridge.delta;
+            let extras = if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
                 let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
                     "libil2cpp.so".to_string()
                 } else {
@@ -9037,10 +9052,16 @@ impl CrosshairApp {
                         .find(|m| m.name == mod_name)
                         .map(|m| m.size)
                         .unwrap_or(64 * 1024 * 1024);
-                    modules.push((tag, host_base, size));
+                    modules.push((tag.clone(), host_base, size));
                 }
-            }
-        }
+                vec![(tag, host_base)]
+            } else {
+                Vec::new()
+            };
+            (delta, extras)
+        } else {
+            (None, Vec::new())
+        };
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 scan_pointer_map_and_paths_to_targets_must_end(
@@ -9055,6 +9076,7 @@ impl CrosshairApp {
                     &must_end,
                     worker_progress,
                     limits.exhaustive,
+                    emulator_delta,
                 )
             }))
             .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
@@ -9111,6 +9133,8 @@ impl CrosshairApp {
             exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
             sort_level_ascending: None,
             exact_search: false,
+            emulator_delta,
+            extra_modules,
         });
     }
 
@@ -9789,6 +9813,7 @@ impl CrosshairApp {
                 base: 0,
                 module: Some((path.module.clone(), path.module_offset)),
                 offsets: path.offsets.iter().map(|&o| o as isize).collect(),
+                delta: None,
             });
         let address = pointer
             .as_ref()
@@ -12113,6 +12138,9 @@ impl CrosshairApp {
                     && dialog.last_live_refresh.elapsed() >= Duration::from_millis(50);
                 let refresh_pid = self.memory_panel.process_pid;
                 let mut module_cache = HashMap::<String, usize>::new();
+                for (name, base) in &dialog.extra_modules {
+                    module_cache.insert(name.clone(), *base);
+                }
                 egui::ScrollArea::both().show_rows(ui, 24.0, visible_indices.len(), |ui, rows| {
                     if refresh_visible_values {
                         if let Some(pid) = refresh_pid {
@@ -12133,6 +12161,7 @@ impl CrosshairApp {
                                             base,
                                             module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
                                             offsets: candidate.path.offsets.iter().map(|&o| o as isize).collect(),
+                                            delta: dialog.emulator_delta,
                                         };
                                         candidate.resolved_address = resolve_memory_address(pid, base, Some(&pointer)).ok();
                                     } else {
@@ -12403,6 +12432,7 @@ impl CrosshairApp {
                 let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
                 dialog.status = "Scanning memory...".to_owned();
                 let exhaustive = dialog.exhaustive_scan;
+                let emulator_delta = dialog.emulator_delta;
                 thread::spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         scan_pointer_map_and_paths_to_targets_must_end(
@@ -12417,6 +12447,7 @@ impl CrosshairApp {
                             &must_end,
                             worker_progress,
                             exhaustive,
+                            emulator_delta,
                         )
                     }))
                     .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
@@ -12646,6 +12677,7 @@ impl CrosshairApp {
                     base,
                     module: Some((path.module.clone(), path.module_offset)),
                     offsets: path.offsets.into_iter().map(|o| o as isize).collect(),
+                    delta: None,
                 };
                 if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
                     let orig_target = dialog.candidate_targets.get(&index).copied();
@@ -13047,6 +13079,7 @@ impl CrosshairApp {
                             base,
                             module: Some((path.module.clone(), path.module_offset)),
                             offsets: path.offsets.iter().map(|&o| o as isize).collect(),
+                            delta: None,
                         };
                         resolve_memory_address(pid, base, Some(&pointer)).ok()
                     } else {
@@ -13206,6 +13239,7 @@ impl CrosshairApp {
                                 base,
                                 module: Some((path.module.clone(), path.module_offset)),
                                 offsets: path.offsets.iter().map(|&o| o as isize).collect(),
+                                delta: None,
                             };
                             resolve_memory_address(pid, base, Some(&pointer)).ok()
                         }),
@@ -13348,6 +13382,7 @@ impl CrosshairApp {
                                     path.module_offset,
                                 )),
                                 offsets: path.offsets.iter().map(|&o| o as isize).collect(),
+                                delta: None,
                             },
                         ));
                         ui.close();
@@ -13437,14 +13472,19 @@ impl CrosshairApp {
             "Validating {} pointer path(s)...",
             candidates.len()
         );
+        let emulator_delta = dialog.emulator_delta;
+        let extra_modules = dialog.extra_modules.clone();
         thread::spawn(move || {
             let candidates_fallback = candidates.clone();
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
+                let mut modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
                     .collect();
+                for (name, base) in &extra_modules {
+                    modules_map.insert(name.to_ascii_lowercase(), *base);
+                }
 
                 let pointer_width = process_pointer_width(pid).unwrap_or(8);
                 let _val_width = value_type.width();
@@ -13495,7 +13535,12 @@ impl CrosshairApp {
                                 broken_path = true;
                                 break;
                             }
-                            curr_addr = next_ptr.wrapping_add(offset);
+                            let next_effective = if let Some(delta) = emulator_delta {
+                                (next_ptr as isize).wrapping_add(delta) as usize
+                            } else {
+                                next_ptr
+                            };
+                            curr_addr = next_effective.wrapping_add(offset);
                         }
                         if broken_path {
                             candidate.valid = Some(false);
@@ -13656,6 +13701,9 @@ impl CrosshairApp {
         };
         let mut added = 0usize;
         let mut module_cache = HashMap::<String, usize>::new();
+        for (name, base) in &dialog.extra_modules {
+            module_cache.insert(name.clone(), *base);
+        }
         for &index in slice {
             let Some(candidate) = dialog.candidates.get(index) else {
                 continue;
@@ -13676,6 +13724,7 @@ impl CrosshairApp {
                 base,
                 module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
                 offsets: candidate.path.offsets.iter().map(|&o| o as isize).collect(),
+                delta: dialog.emulator_delta,
             };
             let address = candidate
                 .resolved_address
@@ -14105,13 +14154,7 @@ impl CrosshairApp {
             ui.add_space(8.0);
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
         });
-        if dialog.status.contains("armed") && dialog.hits.is_empty() {
-            ui.label(
-                RichText::new("Lưu ý: Nếu game chạy trên giả lập (MuMu/LDPlayer), Hardware Breakpoint Windows không bắt được lệnh guest do CPU ảo (VT-x) cách ly.")
-                    .weak()
-                    .color(Color32::from_rgb(255, 170, 80)),
-            );
-        }
+
         ui.horizontal_wrapped(|ui| {
             if dialog.active.is_some() {
                 if ui.button("Stop").clicked() {
@@ -18065,6 +18108,7 @@ impl CrosshairApp {
                     base: 0,
                     module: Some((module_name, module_offset)),
                     offsets,
+                    delta: None,
                 })
             } else {
                 let Some(base) = parse_memory_address(addr_str) else {
@@ -18075,6 +18119,7 @@ impl CrosshairApp {
                     base,
                     module: None,
                     offsets,
+                    delta: None,
                 })
             }
         } else {
@@ -18099,6 +18144,7 @@ impl CrosshairApp {
                         base: 0,
                         module: Some((module_name, module_offset)),
                         offsets: Vec::new(),
+                        delta: None,
                     });
                     saved.frozen = None;
                 }
@@ -18116,6 +18162,7 @@ impl CrosshairApp {
                 base: 0,
                 module: Some((mod_name, mod_off)),
                 offsets: Vec::new(),
+                delta: None,
             });
             if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
                 saved.address = base;
@@ -18271,6 +18318,8 @@ impl CrosshairApp {
             action.label(),
             input_count
         );
+        let emulator_delta = dialog.emulator_delta;
+        let extra_modules = dialog.extra_modules.clone();
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 filter_stable_pointer_candidates(
@@ -18283,6 +18332,8 @@ impl CrosshairApp {
                     exact,
                     range,
                     exact_text,
+                    emulator_delta,
+                    extra_modules,
                 )
             }))
             .unwrap_or_else(|_| Err(std::io::Error::other("Pointer filter thread encountered an error")))
@@ -19349,6 +19400,7 @@ impl CrosshairApp {
                         base: 0,
                         module: Some((mod_name, mod_off)),
                         offsets: Vec::new(),
+                        delta: None,
                     }),
                     frozen: None,
                     saved_to_library: false,
@@ -19375,6 +19427,7 @@ impl CrosshairApp {
                 base: 0,
                 module: Some((mod_name, mod_off)),
                 offsets: Vec::new(),
+                delta: None,
             });
             self.memory_panel.saved.push(SavedMemoryAddress {
                 address: candidate.address,
@@ -19429,6 +19482,7 @@ impl CrosshairApp {
                     base: 0,
                     module: Some((mod_name, mod_off)),
                     offsets: Vec::new(),
+                    delta: None,
                 });
                 Some((address, pointer))
             } else {
@@ -22494,6 +22548,7 @@ fn resolved_entity_candidate_address(pid: u32, dialog: &EntityListDialog) -> Res
             base: 0,
             module: Some((path.module.clone(), path.module_offset)),
             offsets: path.offsets.iter().map(|&o| o as isize).collect(),
+            delta: None,
         };
         return resolve_memory_address(pid, 0, Some(&pointer)).map_err(|error| error.to_string());
     }
@@ -23956,6 +24011,7 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
             base,
             module: module_spec,
             offsets,
+            delta: None,
         })
     } else {
         let (module, offset_expr) = text.split_once('+')?;
@@ -23966,6 +24022,7 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
                 base: 0,
                 module: Some((module.to_owned(), offset)),
                 offsets: Vec::new(),
+                delta: None,
             })
         } else {
             None
@@ -24477,12 +24534,17 @@ fn filter_stable_pointer_candidates(
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
     exact_text: Option<String>,
+    emulator_delta: Option<isize>,
+    extra_modules: Vec<(String, usize)>,
 ) -> std::io::Result<Vec<StablePointerCandidate>> {
-    let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
+    let mut modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
         .unwrap_or_default()
         .into_iter()
         .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
         .collect();
+    for (name, base) in &extra_modules {
+        modules_map.insert(name.to_ascii_lowercase(), *base);
+    }
     let pointer_width = process_pointer_width(pid).unwrap_or(8);
     let mut surviving = Vec::with_capacity(candidates.len());
 
@@ -24518,7 +24580,12 @@ fn filter_stable_pointer_candidates(
                     broken = true;
                     break;
                 }
-                curr_addr = next_ptr.wrapping_add(offset);
+                let next_effective = if let Some(delta) = emulator_delta {
+                    (next_ptr as isize).wrapping_add(delta) as usize
+                } else {
+                    next_ptr
+                };
+                curr_addr = next_effective.wrapping_add(offset);
             }
             if broken {
                 continue;
@@ -24646,7 +24713,12 @@ fn resolve_memory_address(
                 "null pointer in chain",
             ));
         }
-        address = next.wrapping_add_signed(*offset);
+        let next_effective = if let Some(delta) = pointer.delta {
+            (next as isize).wrapping_add(delta) as usize
+        } else {
+            next
+        };
+        address = next_effective.wrapping_add_signed(*offset);
     }
     Ok(address)
 }
