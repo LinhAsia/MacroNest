@@ -229,10 +229,17 @@ pub fn adb_connect(adb: &Path, target: &str) -> Result<String, String> {
     }
     let res = run_adb_command(adb, &["connect", clean])?;
     if res.contains("connected") || res.contains("already connected") {
+        // Request root immediately on connection
+        let _ = run_adb_command(adb, &["-s", clean, "root"]);
         Ok(res.trim().to_string())
     } else {
         Err(res.trim().to_string())
     }
+}
+
+pub fn adb_request_root(adb: &Path, target: &str) -> Result<String, String> {
+    let clean = target.trim();
+    run_adb_command(adb, &["-s", clean, "root"])
 }
 
 /// Lists online ADB devices.
@@ -452,12 +459,40 @@ pub fn get_android_memory_maps(
     target: &str,
     pid: u32,
 ) -> Result<Vec<AndroidMemoryModule>, String> {
-    let cmd = format!("cat /proc/{pid}/maps");
-    let out = run_adb_command(adb, &["-s", target, "shell", &cmd])?;
-    if out.trim().is_empty() {
-        return Err(format!("Could not read /proc/{pid}/maps (process may require root or has exited)"));
+    // Try reading with su -c, then su 0, then direct cat
+    let commands = [
+        format!("su -c 'cat /proc/{pid}/maps'"),
+        format!("su 0 cat /proc/{pid}/maps"),
+        format!("cat /proc/{pid}/maps"),
+    ];
+
+    let mut last_err = String::new();
+    for cmd in &commands {
+        if let Ok(out) = run_adb_command(adb, &["-s", target, "shell", cmd]) {
+            let trimmed = out.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.contains("Permission denied") {
+                last_err = trimmed.to_string();
+                continue;
+            }
+            if trimmed.contains("not found") && !trimmed.contains("r-xp") && !trimmed.contains("rw-p") {
+                continue;
+            }
+
+            let modules = parse_android_maps(trimmed);
+            if !modules.is_empty() {
+                return Ok(modules);
+            }
+        }
     }
-    Ok(parse_android_maps(&out))
+
+    if last_err.contains("Permission denied") {
+        Err("Permission denied: Bật Root trong Cài đặt giả lập (MuMu Settings -> Root ON)".to_string())
+    } else {
+        Err(format!("Could not read /proc/{pid}/maps"))
+    }
 }
 
 /// Reads memory directly from Android `/proc/<pid>/mem`.
@@ -469,32 +504,37 @@ pub fn read_android_memory_bytes(
     size: usize,
 ) -> Result<Vec<u8>, String> {
     let clamped_size = size.clamp(1, 1024);
-    // Use xxd or od or dd to read memory bytes safely
-    let cmd = format!(
+    let subcmd = format!(
         "dd if=/proc/{pid}/mem bs=1 skip={address} count={clamped_size} 2>/dev/null | xxd -p || xxd -s {address} -l {clamped_size} -p /proc/{pid}/mem 2>/dev/null"
     );
-    let out = run_adb_command(adb, &["-s", target, "shell", &cmd])?;
-    let hex_clean: String = out.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    if hex_clean.is_empty() {
-        return Err("Memory read failed or returned empty bytes".to_string());
-    }
+    let commands = [
+        format!("su -c \"{subcmd}\""),
+        format!("su 0 sh -c \"{subcmd}\""),
+        subcmd,
+    ];
 
-    let mut bytes = Vec::new();
-    for chunk in hex_clean.as_bytes().chunks(2) {
-        if chunk.len() == 2 {
-            if let Ok(b_str) = std::str::from_utf8(chunk) {
-                if let Ok(byte) = u8::from_str_radix(b_str, 16) {
-                    bytes.push(byte);
+    for cmd in &commands {
+        if let Ok(out) = run_adb_command(adb, &["-s", target, "shell", cmd]) {
+            let hex_clean: String = out.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+            if !hex_clean.is_empty() {
+                let mut bytes = Vec::new();
+                for chunk in hex_clean.as_bytes().chunks(2) {
+                    if chunk.len() == 2 {
+                        if let Ok(b_str) = std::str::from_utf8(chunk) {
+                            if let Ok(byte) = u8::from_str_radix(b_str, 16) {
+                                bytes.push(byte);
+                            }
+                        }
+                    }
+                }
+                if !bytes.is_empty() {
+                    return Ok(bytes);
                 }
             }
         }
     }
 
-    if bytes.is_empty() {
-        Err("Could not parse hex bytes from memory read".to_string())
-    } else {
-        Ok(bytes)
-    }
+    Err("Could not read memory bytes (permission denied or unmapped address)".to_string())
 }
 
 /// Calculates translation delta between Windows Host Address (HVA) and Android Guest Address (GVA).

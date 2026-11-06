@@ -6249,13 +6249,26 @@ impl CrosshairApp {
         let is_connected = self.memory_panel.android_bridge.is_connected;
 
         // Status line
+        let status_str = self.memory_panel.android_bridge.status.clone();
+        let is_err = status_str.to_lowercase().contains("permission denied")
+            || status_str.to_lowercase().contains("failed")
+            || status_str.to_lowercase().contains("error");
+
         ui.horizontal(|ui| {
-            let status_color = if is_connected {
+            let status_color = if is_err {
+                Color32::from_rgb(255, 120, 80)
+            } else if is_connected {
                 Color32::from_rgb(80, 210, 120)
             } else {
                 Color32::from_rgb(180, 180, 190)
             };
-            ui.label(RichText::new(&self.memory_panel.android_bridge.status).color(status_color));
+            ui.label(RichText::new(&status_str).color(status_color));
+
+            if is_err && status_str.to_lowercase().contains("permission denied") {
+                if ui.button(self.tr("Request Root (adb root)", "Cấp quyền Root (adb root)")).clicked() {
+                    self.android_grant_root_and_reload();
+                }
+            }
         });
         ui.add_space(2.0);
 
@@ -6309,27 +6322,25 @@ impl CrosshairApp {
             self.tr("Select Android Process...", "Chọn tiến trình Android...").to_string()
         };
 
+        let filter_hint = self.tr("Filter...", "Lọc...");
         ui.horizontal(|ui| {
             ui.label(self.tr("Process:", "Tiến trình:"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.process_search)
+                    .hint_text(filter_hint)
+                    .desired_width(120.0),
+            );
+            if !self.memory_panel.android_bridge.process_search.is_empty() {
+                if ui.small_button("Clear").clicked() {
+                    self.memory_panel.android_bridge.process_search.clear();
+                }
+            }
+
             egui::ComboBox::from_id_salt("android-proc-combo")
                 .selected_text(current_label)
-                .width(320.0)
+                .width(280.0)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("Search:", "Tìm:"));
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.memory_panel.android_bridge.process_search)
-                                .hint_text("PID / Name...")
-                                .desired_width(180.0),
-                        );
-                        if !self.memory_panel.android_bridge.process_search.is_empty() {
-                            if ui.small_button("Clear").clicked() {
-                                self.memory_panel.android_bridge.process_search.clear();
-                            }
-                        }
-                    });
-                    ui.separator();
-
                     let filter = self.memory_panel.android_bridge.process_search.trim().to_lowercase();
                     let matching: Vec<_> = self.memory_panel.android_bridge.processes
                         .iter()
@@ -6552,8 +6563,8 @@ impl CrosshairApp {
             Some(p) => p.clone(),
             None => return,
         };
-        let target = &self.memory_panel.android_bridge.selected_target;
-        match crate::android_bridge::get_android_memory_maps(&adb, target, pid) {
+        let target = self.memory_panel.android_bridge.selected_target.clone();
+        match crate::android_bridge::get_android_memory_maps(&adb, &target, pid) {
             Ok(mods) => {
                 let count = mods.len();
                 if let Some(pri) = mods.iter().find(|m| m.name.contains("libil2cpp") || m.name.contains("libneox") || m.name.contains("libunity")) {
@@ -6570,8 +6581,23 @@ impl CrosshairApp {
                 self.android_auto_sync_delta();
             }
             Err(err) => {
-                self.memory_panel.android_bridge.status = format!("Failed to load maps: {err}");
+                self.memory_panel.android_bridge.modules.clear();
+                self.memory_panel.android_bridge.guest_module_name.clear();
+                self.memory_panel.android_bridge.guest_module_base = None;
+                self.memory_panel.android_bridge.status = err;
             }
+        }
+    }
+
+    fn android_grant_root_and_reload(&mut self) {
+        let adb = match &self.memory_panel.android_bridge.adb_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let target = self.memory_panel.android_bridge.selected_target.clone();
+        let _ = crate::android_bridge::adb_request_root(&adb, &target);
+        if let Some(pid) = self.memory_panel.android_bridge.selected_pid {
+            self.android_load_maps(pid);
         }
     }
 
