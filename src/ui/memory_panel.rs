@@ -6400,6 +6400,18 @@ impl CrosshairApp {
                 if ui.button(RichText::new(self.tr("Auto-Sync Delta", "Tự động tính Delta")).strong()).clicked() {
                     self.android_auto_sync_delta();
                 }
+
+                if let Some(cand_addr) = self.memory_panel.selected_results.iter().next().and_then(|&idx| self.memory_panel.candidates.get(idx)).map(|c| c.address) {
+                    if ui.button(RichText::new(self.tr("Set Selected as Base", "Gán dòng chọn làm Base")).strong()).clicked() {
+                        if let Some(guest_base) = self.memory_panel.android_bridge.guest_module_base {
+                            let delta = cand_addr as isize - guest_base as isize;
+                            self.memory_panel.android_bridge.host_base_address = Some(cand_addr);
+                            self.memory_panel.android_bridge.delta = Some(delta);
+                            self.memory_panel.android_bridge.auto_sync_status = format!("Synced Base = 0x{cand_addr:X}");
+                            self.sync_android_module_to_scan_modules();
+                        }
+                    }
+                }
             });
 
             if let Some(delta) = self.memory_panel.android_bridge.delta {
@@ -6668,6 +6680,7 @@ impl CrosshairApp {
                     self.memory_panel.android_bridge.host_base_address = Some(first_host);
                     self.memory_panel.android_bridge.delta = Some(delta);
                     self.memory_panel.android_bridge.auto_sync_status = format!("Found host base 0x{first_host:X}");
+                    self.sync_android_module_to_scan_modules();
                     return;
                 }
             }
@@ -6677,6 +6690,28 @@ impl CrosshairApp {
             "Attach emulator in Memory Scanner to auto-sync",
             "Chọn tiến trình giả lập ở Memory Scanner để tự động đồng bộ"
         ).to_string();
+    }
+
+    fn sync_android_module_to_scan_modules(&mut self) {
+        if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+            let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
+                "libil2cpp.so".to_string()
+            } else {
+                self.memory_panel.android_bridge.guest_module_name.clone()
+            };
+            let tag = format!("Android::{mod_name}");
+            let size = self.memory_panel.android_bridge.modules
+                .iter()
+                .find(|m| m.name == mod_name)
+                .map(|m| m.size)
+                .unwrap_or(64 * 1024 * 1024);
+            if let Some(existing) = self.memory_panel.scan_modules.iter_mut().find(|(n, _, _)| n == &tag) {
+                existing.1 = host_base;
+                existing.2 = size;
+            } else {
+                self.memory_panel.scan_modules.push((tag, host_base, size));
+            }
+        }
     }
 
     fn android_read_memory(&mut self) {
@@ -8953,7 +8988,7 @@ impl CrosshairApp {
         let expected_text_values = text_targets.into_iter().collect::<HashMap<_, _>>();
         let progress = Arc::new(AtomicUsize::new(0));
         let limits = self.pointer_scan_limits();
-        let modules = match process_modules(pid) {
+        let mut modules = match process_modules(pid) {
             Ok(modules) => modules,
             Err(error) => {
                 let status = format!("Unable to list process modules: {error}");
@@ -9008,6 +9043,24 @@ impl CrosshairApp {
         } else {
             Vec::new()
         };
+        if self.memory_panel.android_bridge.is_connected {
+            if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+                let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
+                    "libil2cpp.so".to_string()
+                } else {
+                    self.memory_panel.android_bridge.guest_module_name.clone()
+                };
+                let tag = format!("Android::{mod_name}");
+                if !modules.iter().any(|(n, _, _)| n == &tag) {
+                    let size = self.memory_panel.android_bridge.modules
+                        .iter()
+                        .find(|m| m.name == mod_name)
+                        .map(|m| m.size)
+                        .unwrap_or(64 * 1024 * 1024);
+                    modules.push((tag, host_base, size));
+                }
+            }
+        }
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 scan_pointer_map_and_paths_to_targets_must_end(
@@ -12348,7 +12401,25 @@ impl CrosshairApp {
                     .map_err(|_| "Pointer search encountered an error".to_string());
                     let _ = tx.send(StablePointerJobResult { pid, result });
                 });
-            } else if let Ok(modules) = process_modules(pid) {
+            } else if let Ok(mut modules) = process_modules(pid) {
+                if self.memory_panel.android_bridge.is_connected {
+                    if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+                        let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
+                            "libil2cpp.so".to_string()
+                        } else {
+                            self.memory_panel.android_bridge.guest_module_name.clone()
+                        };
+                        let tag = format!("Android::{mod_name}");
+                        if !modules.iter().any(|(n, _, _)| n == &tag) {
+                            let size = self.memory_panel.android_bridge.modules
+                                .iter()
+                                .find(|m| m.name == mod_name)
+                                .map(|m| m.size)
+                                .unwrap_or(64 * 1024 * 1024);
+                            modules.push((tag, host_base, size));
+                        }
+                    }
+                }
                 let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
                 dialog.status = "Scanning memory...".to_owned();
                 let exhaustive = dialog.exhaustive_scan;
@@ -14054,6 +14125,13 @@ impl CrosshairApp {
             ui.add_space(8.0);
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
         });
+        if dialog.status.contains("armed") && dialog.hits.is_empty() {
+            ui.label(
+                RichText::new("Lưu ý: Nếu game chạy trên giả lập (MuMu/LDPlayer), Hardware Breakpoint Windows không bắt được lệnh guest do CPU ảo (VT-x) cách ly.")
+                    .weak()
+                    .color(Color32::from_rgb(255, 170, 80)),
+            );
+        }
         ui.horizontal_wrapped(|ui| {
             if dialog.active.is_some() {
                 if ui.button("Stop").clicked() {

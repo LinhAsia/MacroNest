@@ -375,34 +375,39 @@ pub fn parse_android_maps(maps_content: &str) -> Vec<AndroidMemoryModule> {
             pathname.to_string()
         };
 
-        // For .so files or known named memory, group by file to identify primary base address
+        // For .so files or known named memory, group contiguous sections by file to identify primary base address
         if clean_name.ends_with(".so")
             || clean_name.ends_with(".apk")
             || clean_name.starts_with('[')
         {
-            let entry = modules_map
-                .entry(clean_name.clone())
-                .or_insert((start, end, 0, perms.to_string(), pathname.to_string()));
-            if start < entry.0 {
-                entry.0 = start;
+            if let Some(entry) = modules_map.get_mut(&clean_name) {
+                if start >= entry.0 && start.saturating_sub(entry.1) < 256 * 1024 * 1024 {
+                    if end > entry.1 {
+                        entry.1 = end;
+                    }
+                    entry.2 += end.saturating_sub(start);
+                    if perms.contains('x') {
+                        entry.3 = perms.to_string();
+                    }
+                    continue;
+                }
+            } else {
+                modules_map.insert(
+                    clean_name.clone(),
+                    (start, end, end.saturating_sub(start), perms.to_string(), pathname.to_string()),
+                );
+                continue;
             }
-            if end > entry.1 {
-                entry.1 = end;
-            }
-            entry.2 += end.saturating_sub(start);
-            if perms.contains('x') {
-                entry.3 = perms.to_string();
-            }
-        } else {
-            standalone_sections.push(AndroidMemoryModule {
-                name: clean_name,
-                base_address: start,
-                end_address: end,
-                size: end.saturating_sub(start),
-                permissions: perms.to_string(),
-                pathname: pathname.to_string(),
-            });
         }
+
+        standalone_sections.push(AndroidMemoryModule {
+            name: clean_name,
+            base_address: start,
+            end_address: end,
+            size: end.saturating_sub(start),
+            permissions: perms.to_string(),
+            pathname: pathname.to_string(),
+        });
     }
 
     let mut result = Vec::new();
