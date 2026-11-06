@@ -104,6 +104,8 @@ pub enum MacroAction {
     SetDataTable,
     ReadMemory,
     WriteMemory,
+    #[serde(alias = "AobScan", alias = "ScanAOB", alias = "AOBScan")]
+    ScanAob,
     #[serde(alias = "ScanMemoryInstruction", alias = "InstructionScan", alias = "ScanMemory")]
     ScanInstruction,
     #[serde(alias = "StopScanInstruction", alias = "StopInstructionScan", alias = "StopScan")]
@@ -1453,6 +1455,24 @@ mod tests {
         let stop_json = serde_json::to_string(&stop_step).expect("serialize stop scan step");
         let restored_stop: MacroStep = serde_json::from_str(&stop_json).expect("deserialize stop scan step");
         assert_eq!(restored_stop.action, MacroAction::StopInstructionScan);
+
+    }
+
+    #[test]
+    fn test_scan_aob_serialization() {
+        let aob_step = MacroStep {
+            action: MacroAction::ScanAob,
+            key: "48 89 5C 24 ?? ?? 48 8B + 0x10".to_string(),
+            if_variable_name: "target_addr".to_string(),
+            memory_value_type: MemoryValueType::F32,
+            ..MacroStep::default()
+        };
+        let aob_json = serde_json::to_string(&aob_step).expect("serialize aob scan step");
+        let restored_aob: MacroStep = serde_json::from_str(&aob_json).expect("deserialize aob scan step");
+        assert_eq!(restored_aob.action, MacroAction::ScanAob);
+        assert_eq!(restored_aob.key, "48 89 5C 24 ?? ?? 48 8B + 0x10");
+        assert_eq!(restored_aob.if_variable_name, "target_addr");
+        assert_eq!(restored_aob.memory_value_type, MemoryValueType::F32);
     }
 
     #[test]

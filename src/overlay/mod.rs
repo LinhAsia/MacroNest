@@ -30030,6 +30030,10 @@ mod windows_overlay {
                 execute_write_memory_action_step(step);
             }
 
+            MacroAction::ScanAob => {
+                execute_scan_aob_action_step(step);
+            }
+
             MacroAction::ScanInstruction => {
                 execute_scan_instruction_action_step(step, preset_id);
             }
@@ -30440,6 +30444,7 @@ mod windows_overlay {
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
                 MacroAction::WriteMemory => execute_write_memory_action_step(step),
+                MacroAction::ScanAob => execute_scan_aob_action_step(step),
                 MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
                 MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
 
@@ -31334,6 +31339,7 @@ mod windows_overlay {
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
                 MacroAction::WriteMemory => execute_write_memory_action_step(step),
+                MacroAction::ScanAob => execute_scan_aob_action_step(step),
                 MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
                 MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
 
@@ -33558,6 +33564,109 @@ mod windows_overlay {
             },
         };
         let _ = crate::process_memory::write_scan_value(pid, address, value);
+    }
+
+    fn execute_scan_aob_action_step(step: &MacroStep) {
+        let target_var = step.if_variable_name.trim();
+        if target_var.is_empty() {
+            return;
+        }
+        let raw_key = interpolate_variables(&step.key);
+        let trimmed = raw_key.trim();
+        if trimmed.is_empty() {
+            set_variable_value(target_var, 0.0);
+            TEXT_VARIABLES.lock().remove(target_var);
+            return;
+        }
+
+        let (pattern_str, offset_math) = if let Some(plus_idx) = trimmed.rfind('+') {
+            let after = trimmed[plus_idx + 1..].trim();
+            if let Some(offset) = usize::from_str_radix(
+                after.strip_prefix("0x").or_else(|| after.strip_prefix("0X")).unwrap_or(after),
+                16,
+            )
+            .ok()
+            .or_else(|| after.parse::<usize>().ok())
+            {
+                (trimmed[..plus_idx].trim(), offset as isize)
+            } else {
+                (trimmed, 0isize)
+            }
+        } else if let Some(minus_idx) = trimmed.rfind('-') {
+            let after = trimmed[minus_idx + 1..].trim();
+            if let Some(offset) = usize::from_str_radix(
+                after.strip_prefix("0x").or_else(|| after.strip_prefix("0X")).unwrap_or(after),
+                16,
+            )
+            .ok()
+            .or_else(|| after.parse::<usize>().ok())
+            {
+                (trimmed[..minus_idx].trim(), -(offset as isize))
+            } else {
+                (trimmed, 0isize)
+            }
+        } else {
+            (trimmed, 0isize)
+        };
+
+        let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
+        let Some(pid) = target_pid else {
+            set_variable_value(target_var, 0.0);
+            TEXT_VARIABLES.lock().remove(target_var);
+            return;
+        };
+
+        let options = crate::process_memory::MemoryScanOptions {
+            writable: true,
+            executable: true,
+            copy_on_write: false,
+            active_memory_only: true,
+            mem_private: true,
+            mem_image: true,
+            mem_mapped: true,
+            alignment: None,
+        };
+
+        let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let addrs = crate::process_memory::scan_aob_memory_addresses(pid, pattern_str, 10, options, progress)
+            .unwrap_or_default();
+
+        if let Some(&first) = addrs.first() {
+            let final_addr = (first as isize).wrapping_add(offset_math) as usize;
+            let hex_str = format!("0x{:X}", final_addr);
+
+            set_variable_value(target_var, final_addr as f64);
+            TEXT_VARIABLES.lock().insert(target_var.to_string(), hex_str.clone());
+
+            set_variable_value(&format!("{target_var}_addr"), final_addr as f64);
+            TEXT_VARIABLES.lock().insert(format!("{target_var}_addr"), hex_str.clone());
+            set_variable_value(&format!("{target_var}_address"), final_addr as f64);
+            TEXT_VARIABLES.lock().insert(format!("{target_var}_hex"), hex_str);
+            set_variable_value(&format!("{target_var}_count"), addrs.len() as f64);
+            TEXT_VARIABLES.lock().insert(format!("{target_var}_count"), addrs.len().to_string());
+
+            if let Ok(val_str) = crate::process_memory::read_value(pid, final_addr, step.memory_value_type) {
+                TEXT_VARIABLES.lock().insert(format!("{target_var}_val"), val_str.clone());
+                TEXT_VARIABLES.lock().insert(format!("{target_var}_value"), val_str.clone());
+                if let Ok(num) = val_str.parse::<f64>() {
+                    set_variable_value(&format!("{target_var}_val"), num);
+                    set_variable_value(&format!("{target_var}_value"), num);
+                }
+            }
+        } else {
+            set_variable_value(target_var, 0.0);
+            TEXT_VARIABLES.lock().remove(target_var);
+            set_variable_value(&format!("{target_var}_addr"), 0.0);
+            TEXT_VARIABLES.lock().remove(&format!("{target_var}_addr"));
+            set_variable_value(&format!("{target_var}_address"), 0.0);
+            TEXT_VARIABLES.lock().remove(&format!("{target_var}_hex"));
+            set_variable_value(&format!("{target_var}_val"), 0.0);
+            TEXT_VARIABLES.lock().remove(&format!("{target_var}_val"));
+            set_variable_value(&format!("{target_var}_value"), 0.0);
+            TEXT_VARIABLES.lock().remove(&format!("{target_var}_value"));
+            set_variable_value(&format!("{target_var}_count"), 0.0);
+            TEXT_VARIABLES.lock().remove(&format!("{target_var}_count"));
+        }
     }
 
     pub(crate) fn store_scanned_instruction_addresses(var_name: &str, addresses: &[usize], target_count: usize) {

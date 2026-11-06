@@ -10135,6 +10135,7 @@ impl CrosshairApp {
             MacroAction::SetDataTable => "SetDataTable",
             MacroAction::ReadMemory => "ReadMemory",
             MacroAction::WriteMemory => "WriteMemory",
+            MacroAction::ScanAob => "ScanAOB",
             MacroAction::ScanInstruction => "ScanInstruction",
             MacroAction::StopInstructionScan => "StopInstructionScan",
             MacroAction::OcrSearch => "OcrSearch",
@@ -10454,6 +10455,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.write_memory",
                 "Write one value to an address in the selected process.",
             ),
+            MacroAction::ScanAob => (
+                "macro_action_tooltip.scan_aob",
+                "Scan memory for an Array of Bytes (AOB) pattern and save the address to a variable.",
+            ),
             MacroAction::ScanInstruction => (
                 "macro_action_tooltip.scan_instruction",
                 "Scan addresses accessed by an instruction in target process and store them into variables.",
@@ -10638,6 +10643,7 @@ impl CrosshairApp {
             MacroAction::SetDataTable => 0xe228,
             MacroAction::ReadMemory => 0xe30a,
             MacroAction::WriteMemory => 0xe3c9,
+            MacroAction::ScanAob => 0xe8b6,
             MacroAction::ScanInstruction => 0xe8b6,
             MacroAction::StopInstructionScan => 0xe047,
             MacroAction::OcrSearch => 0xe8b6,
@@ -10813,6 +10819,7 @@ impl CrosshairApp {
             MacroAction::SetDataTable => ("macro_action_short_label.set_data_table", "DataTable"),
             MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadMemory"),
             MacroAction::WriteMemory => ("macro_action_short_label.write_memory", "WriteMemory"),
+            MacroAction::ScanAob => ("macro_action_short_label.scan_aob", "ScanAOB"),
             MacroAction::ScanInstruction => ("macro_action_short_label.scan_instruction", "ScanInst"),
             MacroAction::StopInstructionScan => ("macro_action_short_label.stop_instruction_scan", "StopScan"),
             MacroAction::DrawGeometry => ("macro_action_short_label.draw_geometry", "DrawGeo"),
@@ -11086,6 +11093,7 @@ impl CrosshairApp {
                 | MacroAction::SetDataTable
                 | MacroAction::ReadMemory
                 | MacroAction::WriteMemory
+                | MacroAction::ScanAob
                 | MacroAction::ScanInstruction
                 | MacroAction::BackgroundClick
                 | MacroAction::BackgroundMouseMove

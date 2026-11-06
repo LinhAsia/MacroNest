@@ -290,6 +290,53 @@ impl CrosshairApp {
                         .selectable_value(&mut step.memory_value_type, MemoryValueType::F64, "Double (8 Bytes)")
                         .changed();
                 });
+
+            if step.action == MacroAction::ScanAob {
+                let aob_response = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.key,
+                    ui.id().with("memory-aob-pattern"),
+                    180.0,
+                    420.0,
+                    21.0,
+                    21.0,
+                    "AOB pattern (e.g. 48 89 5C 24 ?? ?? + 0x10)",
+                    false,
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Array of Bytes (AOB) hex pattern with ?? wildcards and optional offset math (e.g. 48 89 ?? ?? + 0x10).",
+                    "Mẫu byte hex AOB với ký tự đại diện ?? và hỗ trợ cộng offset (ví dụ: 48 89 ?? ?? + 0x10).",
+                ));
+                changed |= aob_response.changed();
+
+                ui.label("→");
+                let var_len = step.if_variable_name.chars().count();
+                let normal_w = if var_len == 0 {
+                    24.0
+                } else {
+                    (var_len as f32 * 7.5 + 14.0).clamp(24.0, 85.0)
+                };
+                let var_resp = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.if_variable_name,
+                    ui.id().with("scanaob-var-name"),
+                    normal_w,
+                    110.0,
+                    21.0,
+                    21.0,
+                    Self::tr_lang(language, "var", "biến"),
+                    false,
+                );
+                changed |= var_resp.changed();
+                var_resp.on_hover_text(Self::tr_lang(
+                    language,
+                    "Output variable name.\n- {var}: found address (0xHEX)\n- {var}_addr: address (0xHEX)\n- {var}_val: value at address (selected type)\n- {var}_count: number of matches found",
+                    "Tên biến nhận kết quả.\n- {var}: địa chỉ tìm thấy (0xHEX)\n- {var}_addr: địa chỉ (0xHEX)\n- {var}_val: giá trị tại địa chỉ theo type đã chọn\n- {var}_count: số lượng địa chỉ tìm thấy",
+                ));
+                return;
+            }
+
             let address_response = Self::render_variable_text_edit(
                     ui,
                     &mut step.key,
@@ -4577,6 +4624,7 @@ impl CrosshairApp {
         &[
             MacroAction::ReadMemory,
             MacroAction::WriteMemory,
+            MacroAction::ScanAob,
             MacroAction::ScanInstruction,
             MacroAction::StopInstructionScan,
             MacroAction::Follow3DTarget,
@@ -10896,7 +10944,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanAob | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
                                                           live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
@@ -13177,7 +13225,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanAob | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
                                                           live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
@@ -16663,7 +16711,7 @@ if supports_move_mouse || show_detection_tuning {
                                                  }
                                                  step.wait_for_completion = true;
                                              }
-                                                       });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
+                                                       });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanAob | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
                                                            live_sync |= Self::render_memory_step_fields(
                                                                ui,
                                                                step,
@@ -18725,10 +18773,15 @@ if supports_move_mouse || show_detection_tuning {
                 }
             }
         }
-        if step.action == MacroAction::ReadMemory {
+        if step.action == MacroAction::ReadMemory || step.action == MacroAction::ScanAob {
             let name = step.if_variable_name.trim();
             if !name.is_empty() {
                 vars.insert(name.to_owned());
+                if step.action == MacroAction::ScanAob {
+                    vars.insert(format!("{name}_addr"));
+                    vars.insert(format!("{name}_val"));
+                    vars.insert(format!("{name}_count"));
+                }
             }
             Self::extract_braced_vars(&step.key, vars);
         }
@@ -22466,6 +22519,7 @@ if supports_move_mouse || show_detection_tuning {
             MacroAction::StopAudioSense,
             MacroAction::ReadMemory,
             MacroAction::WriteMemory,
+            MacroAction::ScanAob,
             MacroAction::ScanInstruction,
             MacroAction::StopInstructionScan,
             MacroAction::StartVisionSearch,
