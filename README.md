@@ -158,14 +158,14 @@ Variable names support computed `{}` parts. Setting `item[{i}]` while `i = 3` wr
 | `mouse.y` | Current Y coordinate of the mouse | `mouse.y` |
 | `mouse.sensitivity` | Current system mouse sensitivity speed | `mouse.sensitivity` |
 | `volume.level` | Current system volume level (0 to 100) | `volume.level` |
-| `window.x` / `window.left` | X coordinate of target window's left edge | `window.x` |
-| `window.y` / `window.top` | Y coordinate of target window's top edge | `window.y` |
-| `window.right` | X coordinate of target window's right edge | `window.right` |
-| `window.bottom` | Y coordinate of target window's bottom edge | `window.bottom` |
-| `window.width` | Width of the target window | `window.width` |
-| `window.height` | Height of the target window | `window.height` |
-| `window.centerX` | X coordinate of the target window's center | `window.centerX` |
-| `window.centerY` | Y coordinate of the target window's center | `window.centerY` |
+| `window.x` / `window.left` | X coordinate of window's left edge (default active window, or pass title: `window.x(Android 1)`) | `window.x(Android 1)` |
+| `window.y` / `window.top` | Y coordinate of window's top edge (`window.y(Android 1)`) | `window.y(Android 1)` |
+| `window.right` | X coordinate of window's right edge (`window.right(Android 1)`) | `window.right` |
+| `window.bottom` | Y coordinate of window's bottom edge (`window.bottom(Android 1)`) | `window.bottom` |
+| `window.width` | Width of the window (`window.width(Android 1)`) | `window.width` |
+| `window.height` | Height of the window (`window.height(Android 1)`) | `window.height` |
+| `window.centerX` | X coordinate of the window's center (`window.centerX(Android 1)`) | `window.centerX` |
+| `window.centerY` | Y coordinate of the window's center (`window.centerY(Android 1)`) | `window.centerY` |
 
 ### Built-in Variables (System and Text)
 

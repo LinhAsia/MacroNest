@@ -158,14 +158,14 @@ Tên biến hỗ trợ các phần tính toán lồng `{}`. Gán `item[{i}]` khi
 | `mouse.y` | Tọa độ Y hiện tại của con trỏ chuột | `mouse.y` |
 | `mouse.sensitivity` | Tốc độ nhạy chuột hiện tại của hệ thống | `mouse.sensitivity` |
 | `volume.level` | Mức âm lượng hiện tại của hệ thống (0 đến 100) | `volume.level` |
-| `window.x` / `window.left` | Tọa độ X cạnh trái của cửa sổ mục tiêu | `window.x` |
-| `window.y` / `window.top` | Tọa độ Y cạnh trên của cửa sổ mục tiêu | `window.y` |
-| `window.right` | Tọa độ X cạnh phải của cửa sổ mục tiêu | `window.right` |
-| `window.bottom` | Tọa độ Y cạnh dưới của cửa sổ mục tiêu | `window.bottom` |
-| `window.width` | Chiều rộng của cửa sổ mục tiêu | `window.width` |
-| `window.height` | Chiều cao của cửa sổ mục tiêu | `window.height` |
-| `window.centerX` | Tọa độ X tâm điểm của cửa sổ mục tiêu | `window.centerX` |
-| `window.centerY` | Tọa độ Y tâm điểm của cửa sổ mục tiêu | `window.centerY` |
+| `window.x` / `window.left` | Tọa độ X cạnh trái của cửa sổ (mặc định cửa sổ active, hoặc truyền tên: `window.x(Android 1)`) | `window.x(Android 1)` |
+| `window.y` / `window.top` | Tọa độ Y cạnh trên của cửa sổ (`window.y(Android 1)`) | `window.y(Android 1)` |
+| `window.right` | Tọa độ X cạnh phải của cửa sổ (`window.right(Android 1)`) | `window.right` |
+| `window.bottom` | Tọa độ Y cạnh dưới của cửa sổ (`window.bottom(Android 1)`) | `window.bottom` |
+| `window.width` | Chiều rộng của cửa sổ (`window.width(Android 1)`) | `window.width` |
+| `window.height` | Chiều cao của cửa sổ (`window.height(Android 1)`) | `window.height` |
+| `window.centerX` | Tọa độ X tâm điểm của cửa sổ (`window.centerX(Android 1)`) | `window.centerX` |
+| `window.centerY` | Tọa độ Y tâm điểm của cửa sổ (`window.centerY(Android 1)`) | `window.centerY` |
 
 ### Biến Có sẵn (Hệ thống và Văn bản)
 

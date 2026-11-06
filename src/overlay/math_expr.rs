@@ -99,11 +99,23 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         let bytes = expr_str.as_bytes();
         while func_start_idx > 0
             && (bytes[func_start_idx - 1].is_ascii_alphanumeric()
-                || bytes[func_start_idx - 1] == b'_')
+                || bytes[func_start_idx - 1] == b'_'
+                || bytes[func_start_idx - 1] == b'.')
         {
             func_start_idx -= 1;
         }
-        let func_name = &expr_str[func_start_idx..open_idx];
+        let raw_func_name = &expr_str[func_start_idx..open_idx];
+        let func_name = if !raw_func_name.is_empty()
+            && raw_func_name
+                .chars()
+                .next()
+                .map_or(false, |c| c.is_ascii_alphabetic() || c == '_')
+        {
+            raw_func_name
+        } else {
+            func_start_idx = open_idx;
+            ""
+        };
 
         if let Some(close_offset) = expr_str[open_idx..].find(')') {
             let close_idx = open_idx + close_offset;
@@ -112,6 +124,76 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                 let args = split_expression_arguments(sub_expr);
                 let func_name_lower = func_name.to_ascii_lowercase();
                 let replacement = match func_name_lower.as_str() {
+                    "window.x" | "window_x" | "window.left" | "window_left" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| r.left as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.y" | "window_y" | "window.top" | "window_top" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| r.top as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.width" | "window_width" | "window.w" | "window_w" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| (r.right - r.left).max(0) as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.height" | "window_height" | "window.h" | "window_h" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| (r.bottom - r.top).max(0) as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.centerx" | "window_centerx" | "window.cx" | "window_cx" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| (r.left + (r.right - r.left) / 2) as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.centery" | "window_centery" | "window.cy" | "window_cy" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| (r.top + (r.bottom - r.top) / 2) as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.right" | "window_right" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| r.right as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.bottom" | "window_bottom" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let val = get_window_rect_for_target(target_arg)
+                            .map(|r| r.bottom as f64)
+                            .unwrap_or(0.0);
+                        val.to_string()
+                    }
+                    "window.title" | "window_title" => {
+                        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+                        let target = resolve_expression_window_target(target_arg);
+                        let title = if target.is_empty() {
+                            crate::window_list::find_window_handle(None)
+                                .and_then(window_title)
+                                .unwrap_or_default()
+                        } else {
+                            crate::window_list::find_window_handle(Some(&target))
+                                .and_then(window_title)
+                                .unwrap_or_default()
+                        };
+                        quote_expression_text(&title)
+                    }
                     "substr" => quote_expression_text(&evaluate_substr_expression(&args)),
                     "charat" => quote_expression_text(&evaluate_char_at_expression(&args)),
                     "concat" => quote_expression_text(&evaluate_concat_expression(&args)),
@@ -846,6 +928,21 @@ fn evaluate_text_function_expression(expr: &str) -> Option<String> {
         )
     } else if func_name.eq_ignore_ascii_case("table_cell") {
         get_table_cell(&args)
+    } else if func_name.eq_ignore_ascii_case("window.title")
+        || func_name.eq_ignore_ascii_case("window_title")
+    {
+        let target_arg = args.first().map(|s| s.as_str()).unwrap_or("");
+        let target = resolve_expression_window_target(target_arg);
+        let title = if target.is_empty() {
+            crate::window_list::find_window_handle(None)
+                .and_then(window_title)
+                .unwrap_or_default()
+        } else {
+            crate::window_list::find_window_handle(Some(&target))
+                .and_then(window_title)
+                .unwrap_or_default()
+        };
+        Some(title)
     } else {
         None
     }
@@ -859,7 +956,11 @@ fn parse_expression_function_call(expr: &str) -> Option<(&str, Vec<String>)> {
     if func_name.is_empty()
         || !func_name
             .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
+        || !func_name
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_alphabetic() || c == '_')
     {
         return None;
     }
@@ -933,6 +1034,49 @@ fn evaluate_len_expression(args: &[String]) -> usize {
     args.first()
         .map(|arg| resolve_expression_argument_text(arg).chars().count())
         .unwrap_or(0)
+}
+
+pub(crate) fn resolve_expression_window_target(arg: &str) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Some(unquoted) = trimmed
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|v| v.strip_suffix('\''))
+        })
+    {
+        return interpolate_variables(unquoted);
+    }
+    let interpolated = interpolate_variables(trimmed);
+    if interpolated == trimmed {
+        let text_vars = TEXT_VARIABLES.lock();
+        if let Some(val) = text_vars.get(trimmed) {
+            return val.clone();
+        }
+    }
+    interpolated
+}
+
+pub(crate) fn get_window_rect_for_target(arg: &str) -> Option<RECT> {
+    let target = resolve_expression_window_target(arg);
+    let hwnd = if target.is_empty() {
+        crate::window_list::find_window_handle(None)?
+    } else {
+        crate::window_list::find_window_handle(Some(&target))?
+    };
+    let mut rect = RECT::default();
+    unsafe {
+        if GetWindowRect(hwnd, &mut rect).is_ok() {
+            Some(rect)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1463,17 +1607,7 @@ fn get_object_property_value(token: &str) -> Option<i32> {
     }
 
     if obj_name_raw.eq_ignore_ascii_case("window") {
-        let hwnd = unsafe { GetForegroundWindow() };
-        if hwnd.0.is_null() {
-            return Some(0);
-        }
-
-        let mut rect = RECT::default();
-        unsafe {
-            if GetWindowRect(hwnd, &mut rect).is_err() {
-                return Some(0);
-            }
-        }
+        let rect = get_window_rect_for_target("").unwrap_or_default();
 
         if prop_name.eq_ignore_ascii_case("x") || prop_name.eq_ignore_ascii_case("left") {
             return Some(rect.left);
@@ -1925,5 +2059,28 @@ mod tests {
         CUSTOM_TABLES_STORE.lock().clear();
         RUNTIME_VARIABLES.lock().clear();
         TEXT_VARIABLES.lock().clear();
+    }
+
+    #[test]
+    fn test_window_expression_syntax() {
+        // Non-existent window should return 0.0 safely without panic
+        assert_eq!(evaluate_math_expression_f64("window.x(NonExistentWindow_XYZ)"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.x(\"NonExistentWindow_XYZ\")"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.x(NonExistentWindow_XYZ) + 15"), 15.0);
+        assert_eq!(evaluate_math_expression_f64("window.width(NonExistentWindow_XYZ) * 2"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.centerX(NonExistentWindow_XYZ)"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.centerY(NonExistentWindow_XYZ)"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.right(NonExistentWindow_XYZ)"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.bottom(NonExistentWindow_XYZ)"), 0.0);
+        assert_eq!(resolve_text_variable_value("window.title(NonExistentWindow_XYZ)"), Some(String::new()));
+
+        // Interpolation with variable containing window name
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.insert("my_win".to_string(), "NonExistentWindow_XYZ".to_string());
+        }
+        assert_eq!(evaluate_math_expression_f64("window.x({my_win}) + 20"), 20.0);
+        assert_eq!(evaluate_math_expression_f64("window.x(my_win) + 20"), 20.0);
+        TEXT_VARIABLES.lock().remove("my_win");
     }
 }
