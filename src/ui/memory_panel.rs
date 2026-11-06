@@ -6632,7 +6632,22 @@ impl CrosshairApp {
             return;
         }
 
+        #[cfg(windows)]
+        let host_pid = self.memory_panel.process_pid.or_else(|| {
+            let procs = list_process_details().unwrap_or_default();
+            let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu"];
+            procs.into_iter().find(|p| {
+                let lower = p.name.to_lowercase();
+                emu_names.iter().any(|&emu| lower.contains(emu))
+            }).map(|p| {
+                self.memory_panel.process_pid = Some(p.pid);
+                self.memory_panel.process_selector = format!("pid:{}:{}", p.pid, p.name);
+                p.pid
+            })
+        });
+        #[cfg(not(windows))]
         let host_pid = self.memory_panel.process_pid;
+
         if let Some(h_pid) = host_pid {
             let hex_pattern = magic[..8.min(magic.len())].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
             let options = MemoryScanOptions {
