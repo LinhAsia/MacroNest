@@ -511,8 +511,11 @@ impl CrosshairApp {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         ui.add_sized([24.0, 18.0], egui::Label::new(format!("P{}", idx + 1)));
                         let x_id = ui.make_persistent_id((preset_id, object_id, idx, "poly-x"));
+                        let is_long_x = x_val.chars().count() > 14 || x_val.contains('\n');
+                        let exp_w_x = if is_long_x { (x_val.chars().count() as f32 * 7.5 + 32.0).clamp(180.0, 340.0) } else { 140.0 };
+                        let exp_h_x = if is_long_x { 48.0 } else { 18.0 };
                         let response_x = Self::render_variable_text_edit(
-                            ui, x_val, x_id, 80.0, 120.0, 18.0, 18.0, "", false,
+                            ui, x_val, x_id, 80.0, exp_w_x, 18.0, exp_h_x, "", is_long_x,
                         );
                         points_changed |= response_x.changed();
                         Self::apply_vietnamese_input_if_changed(
@@ -525,8 +528,11 @@ impl CrosshairApp {
 
                         ui.add_sized([16.0, 18.0], egui::Label::new("Y"));
                         let y_id = ui.make_persistent_id((preset_id, object_id, idx, "poly-y"));
+                        let is_long_y = y_val.chars().count() > 14 || y_val.contains('\n');
+                        let exp_w_y = if is_long_y { (y_val.chars().count() as f32 * 7.5 + 32.0).clamp(180.0, 340.0) } else { 140.0 };
+                        let exp_h_y = if is_long_y { 48.0 } else { 18.0 };
                         let response_y = Self::render_variable_text_edit(
-                            ui, y_val, y_id, 80.0, 120.0, 18.0, 18.0, "", false,
+                            ui, y_val, y_id, 80.0, exp_w_y, 18.0, exp_h_y, "", is_long_y,
                         );
                         points_changed |= response_y.changed();
                         Self::apply_vietnamese_input_if_changed(
@@ -1055,16 +1061,19 @@ impl CrosshairApp {
                             egui::Label::new(Self::tr_lang(language, "Text", "Text")),
                         );
                         let text_id = ui.make_persistent_id((preset_id, object_id, "label-text"));
+                        let is_long_text = spec.text.chars().count() > 20 || spec.text.contains('\n');
+                        let exp_w_text = if is_long_text { 340.0 } else { 280.0 };
+                        let exp_h_text = if is_long_text { 48.0 } else { Self::GEOMETRY_FIELD_HEIGHT };
                         let response = Self::render_interpolated_text_edit(
                             ui,
                             &mut spec.text,
                             text_id,
                             120.0,
-                            280.0,
+                            exp_w_text,
                             Self::GEOMETRY_FIELD_HEIGHT,
-                            Self::GEOMETRY_FIELD_HEIGHT,
+                            exp_h_text,
                             "Text",
-                            false,
+                            is_long_text,
                         );
                         changed |= response.changed();
                         Self::apply_vietnamese_input_if_changed(
@@ -1482,8 +1491,15 @@ impl CrosshairApp {
         vietnamese_input_mode: VietnameseInputMode,
     ) -> bool {
         let mut changed = false;
-        let width = width.min(Self::GEOMETRY_FIELD_WIDTH);
-        let expanded_width = expanded_width.min(Self::GEOMETRY_FIELD_EXPANDED_WIDTH);
+        let is_long = expr.chars().count() > 14 || expr.contains('\n');
+        let norm_w = (expr.chars().count() as f32 * 7.0 + 16.0).clamp(width.min(Self::GEOMETRY_FIELD_WIDTH), 160.0);
+        let exp_w = if is_long {
+            (expr.chars().count() as f32 * 7.5 + 36.0).clamp(240.0, 420.0)
+        } else {
+            expanded_width.max(160.0)
+        };
+        let exp_h = if is_long { 48.0 } else { Self::GEOMETRY_FIELD_HEIGHT };
+
         ui.add_sized(
             [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
             egui::Label::new(Self::geometry_label_text(language, label)),
@@ -1493,12 +1509,12 @@ impl CrosshairApp {
             ui,
             expr,
             id,
-            width,
-            expanded_width,
+            norm_w,
+            exp_w,
             Self::GEOMETRY_FIELD_HEIGHT,
-            Self::GEOMETRY_FIELD_HEIGHT,
+            exp_h,
             "",
-            false,
+            is_long,
         );
         changed |= response.changed();
         Self::apply_vietnamese_input_if_changed(
@@ -1533,10 +1549,23 @@ impl CrosshairApp {
         group_id_override: Option<u32>,
     ) -> bool {
         let mut changed = false;
-        let width_a = width_a.min(Self::GEOMETRY_FIELD_WIDTH);
-        let expanded_width_a = expanded_width_a.min(Self::GEOMETRY_FIELD_EXPANDED_WIDTH);
-        let width_b = width_b.min(Self::GEOMETRY_FIELD_WIDTH);
-        let expanded_width_b = expanded_width_b.min(Self::GEOMETRY_FIELD_EXPANDED_WIDTH);
+        let is_long_a = expr_a.chars().count() > 14 || expr_a.contains('\n');
+        let norm_w_a = (expr_a.chars().count() as f32 * 7.0 + 16.0).clamp(width_a.min(Self::GEOMETRY_FIELD_WIDTH), 160.0);
+        let exp_w_a = if is_long_a {
+            (expr_a.chars().count() as f32 * 7.5 + 36.0).clamp(240.0, 420.0)
+        } else {
+            expanded_width_a.max(160.0)
+        };
+        let exp_h_a = if is_long_a { 48.0 } else { Self::GEOMETRY_FIELD_HEIGHT };
+
+        let is_long_b = expr_b.chars().count() > 14 || expr_b.contains('\n');
+        let norm_w_b = (expr_b.chars().count() as f32 * 7.0 + 16.0).clamp(width_b.min(Self::GEOMETRY_FIELD_WIDTH), 160.0);
+        let exp_w_b = if is_long_b {
+            (expr_b.chars().count() as f32 * 7.5 + 36.0).clamp(240.0, 420.0)
+        } else {
+            expanded_width_b.max(160.0)
+        };
+        let exp_h_b = if is_long_b { 48.0 } else { Self::GEOMETRY_FIELD_HEIGHT };
 
         if !label_a.is_empty() {
             ui.add_sized(
@@ -1548,12 +1577,12 @@ impl CrosshairApp {
                 ui,
                 expr_a,
                 id_a,
-                width_a,
-                expanded_width_a,
+                norm_w_a,
+                exp_w_a,
                 Self::GEOMETRY_FIELD_HEIGHT,
-                Self::GEOMETRY_FIELD_HEIGHT,
+                exp_h_a,
                 "",
-                false,
+                is_long_a,
             );
             changed |= response_a.changed();
             Self::apply_vietnamese_input_if_changed(
@@ -1580,12 +1609,12 @@ impl CrosshairApp {
                     ui,
                     expr_b,
                     id_b,
-                    width_b,
-                    expanded_width_b,
+                    norm_w_b,
+                    exp_w_b,
                     Self::GEOMETRY_FIELD_HEIGHT,
-                    Self::GEOMETRY_FIELD_HEIGHT,
+                    exp_h_b,
                     "",
-                    false,
+                    is_long_b,
                 );
                 changed |= response_b.changed();
                 Self::apply_vietnamese_input_if_changed(
@@ -1709,16 +1738,19 @@ impl CrosshairApp {
             if allow_color_expression {
                 let color_expr_id =
                     ui.make_persistent_id((preset_id, object_id, label, "color-expr"));
+                let is_long_c = expr.chars().count() > 14 || expr.contains('\n');
+                let exp_w_c = if is_long_c { (expr.chars().count() as f32 * 7.5 + 36.0).clamp(180.0, 340.0) } else { 160.0 };
+                let exp_h_c = if is_long_c { 48.0 } else { Self::GEOMETRY_FIELD_HEIGHT };
                 let expr_response = Self::render_variable_text_edit(
                     ui,
                     expr,
                     color_expr_id,
                     Self::GEOMETRY_FIELD_WIDTH,
-                    Self::GEOMETRY_FIELD_EXPANDED_WIDTH,
+                    exp_w_c,
                     Self::GEOMETRY_FIELD_HEIGHT,
-                    Self::GEOMETRY_FIELD_HEIGHT,
+                    exp_h_c,
                     "{A} hoặc #RRGGBB",
-                    false,
+                    is_long_c,
                 );
                 changed |= expr_response.changed();
                 Self::apply_vietnamese_input_if_changed(

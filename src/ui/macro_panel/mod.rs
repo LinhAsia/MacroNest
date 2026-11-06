@@ -25544,7 +25544,11 @@ if supports_move_mouse || show_detection_tuning {
         let prev_padding = ui.spacing().button_padding;
         ui.spacing_mut().interact_size.y = animated_height;
         let font_size = 14.0;
-        ui.spacing_mut().button_padding.y = ((animated_height - font_size) / 2.0 - 0.5).max(0.0);
+        if is_multiline {
+            ui.spacing_mut().button_padding.y = 2.0;
+        } else {
+            ui.spacing_mut().button_padding.y = ((animated_height - font_size) / 2.0 - 0.5).max(0.0);
+        }
         let prev_inactive = ui.visuals().widgets.inactive;
         let prev_hovered = ui.visuals().widgets.hovered;
         let prev_active = ui.visuals().widgets.active;
