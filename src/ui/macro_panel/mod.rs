@@ -296,8 +296,8 @@ impl CrosshairApp {
                     ui,
                     &mut step.key,
                     ui.id().with("memory-aob-pattern"),
-                    180.0,
-                    420.0,
+                    140.0,
+                    360.0,
                     21.0,
                     21.0,
                     "AOB pattern (e.g. 48 89 5C 24 ?? ?? + 0x10)",
@@ -309,6 +309,52 @@ impl CrosshairApp {
                     "Mẫu byte hex AOB với ký tự đại diện ?? và hỗ trợ cộng offset (ví dụ: 48 89 ?? ?? + 0x10).",
                 ));
                 changed |= aob_response.changed();
+
+                let filter_op_label = if step.aob_filter_operator.is_empty() || step.aob_filter_operator == "Any" {
+                    Self::tr_lang(language, "Any val", "Mọi giá trị")
+                } else {
+                    &step.aob_filter_operator
+                };
+                egui::ComboBox::from_id_salt(ui.id().with("aob-filter-op"))
+                    .width(55.0)
+                    .selected_text(filter_op_label)
+                    .show_ui(ui, |ui| {
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, String::new(), Self::tr_lang(language, "Any val", "Mọi giá trị")).changed();
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, "!=".to_string(), "!=").changed();
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, "==".to_string(), "==").changed();
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, ">".to_string(), ">").changed();
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, "<".to_string(), "<").changed();
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, ">=".to_string(), ">=").changed();
+                        changed |= ui.selectable_value(&mut step.aob_filter_operator, "<=".to_string(), "<=").changed();
+                    })
+                    .response
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Filter matched addresses by value at memory location (e.g. != 0 to skip zeroes)",
+                        "Lọc các địa chỉ tìm được theo giá trị trong RAM (ví dụ: != 0 để bỏ qua giá trị 0)",
+                    ));
+
+                if !step.aob_filter_operator.is_empty() && step.aob_filter_operator != "Any" {
+                    let fval_len = step.aob_filter_value.chars().count();
+                    let normal_fw = if fval_len == 0 { 28.0 } else { (fval_len as f32 * 7.5 + 14.0).clamp(28.0, 80.0) };
+                    let fval_resp = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.aob_filter_value,
+                        ui.id().with("aob-filter-val"),
+                        normal_fw,
+                        95.0,
+                        21.0,
+                        21.0,
+                        "0",
+                        false,
+                    );
+                    changed |= fval_resp.changed();
+                    fval_resp.on_hover_text(Self::tr_lang(
+                        language,
+                        "Value to compare against (e.g. 0)",
+                        "Giá trị cần so sánh để lọc (ví dụ: 0)",
+                    ));
+                }
 
                 ui.label("→");
                 let var_len = step.if_variable_name.chars().count();
@@ -331,8 +377,8 @@ impl CrosshairApp {
                 changed |= var_resp.changed();
                 var_resp.on_hover_text(Self::tr_lang(
                     language,
-                    "Output variable name.\n- {var}: found address (0xHEX)\n- {var}_addr: address (0xHEX)\n- {var}_val: value at address (selected type)\n- {var}_count: number of matches found",
-                    "Tên biến nhận kết quả.\n- {var}: địa chỉ tìm thấy (0xHEX)\n- {var}_addr: địa chỉ (0xHEX)\n- {var}_val: giá trị tại địa chỉ theo type đã chọn\n- {var}_count: số lượng địa chỉ tìm thấy",
+                    "Output variable name.\n- {var}: found address (0xHEX)\n- {var}_addr: address (0xHEX)\n- {var}_val: value at address (selected type)\n- {var}_count: number of matching addresses after filter",
+                    "Tên biến nhận kết quả.\n- {var}: địa chỉ tìm thấy (0xHEX)\n- {var}_addr: địa chỉ (0xHEX)\n- {var}_val: giá trị tại địa chỉ theo type đã chọn\n- {var}_count: số lượng địa chỉ sau khi lọc",
                 ));
                 return;
             }

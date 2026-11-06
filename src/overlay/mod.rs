@@ -33628,11 +33628,58 @@ mod windows_overlay {
         };
 
         let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let addrs = crate::process_memory::scan_aob_memory_addresses(pid, pattern_str, 10, options, progress)
+        let addrs = crate::process_memory::scan_aob_memory_addresses(pid, pattern_str, 25, options, progress)
             .unwrap_or_default();
 
-        if let Some(&first) = addrs.first() {
-            let final_addr = (first as isize).wrapping_add(offset_math) as usize;
+        let filter_op = step.aob_filter_operator.trim();
+        let has_filter = !filter_op.is_empty() && filter_op != "Any";
+        let filter_val_str = interpolate_variables(&step.aob_filter_value);
+        let filter_val_trimmed = filter_val_str.trim();
+
+        let mut filtered: Vec<(usize, String)> = Vec::new();
+        for base_addr in addrs {
+            let final_addr = (base_addr as isize).wrapping_add(offset_math) as usize;
+            let val_str = crate::process_memory::read_value(pid, final_addr, step.memory_value_type)
+                .unwrap_or_default();
+
+            if has_filter {
+                let matches_filter = if let (Ok(v_num), Ok(f_num)) = (
+                    val_str.parse::<f64>(),
+                    filter_val_trimmed.parse::<f64>().or_else(|_| {
+                        let eval = evaluate_math_expression_f64(filter_val_trimmed);
+                        if eval.is_finite() { Ok(eval) } else { Err(()) }
+                    }),
+                ) {
+                    match filter_op {
+                        ">" => v_num > f_num,
+                        "<" => v_num < f_num,
+                        "=" | "==" => (v_num - f_num).abs() < 1e-9,
+                        ">=" => v_num >= f_num,
+                        "<=" => v_num <= f_num,
+                        "!=" => (v_num - f_num).abs() >= 1e-9,
+                        _ => true,
+                    }
+                } else {
+                    match filter_op {
+                        ">" => val_str.as_str() > filter_val_trimmed,
+                        "<" => val_str.as_str() < filter_val_trimmed,
+                        "=" | "==" => val_str == filter_val_trimmed,
+                        ">=" => val_str.as_str() >= filter_val_trimmed,
+                        "<=" => val_str.as_str() <= filter_val_trimmed,
+                        "!=" => val_str != filter_val_trimmed,
+                        _ => true,
+                    }
+                };
+
+                if !matches_filter {
+                    continue;
+                }
+            }
+
+            filtered.push((final_addr, val_str));
+        }
+
+        if let Some((final_addr, val_str)) = filtered.first().cloned() {
             let hex_str = format!("0x{:X}", final_addr);
 
             set_variable_value(target_var, final_addr as f64);
@@ -33642,16 +33689,14 @@ mod windows_overlay {
             TEXT_VARIABLES.lock().insert(format!("{target_var}_addr"), hex_str.clone());
             set_variable_value(&format!("{target_var}_address"), final_addr as f64);
             TEXT_VARIABLES.lock().insert(format!("{target_var}_hex"), hex_str);
-            set_variable_value(&format!("{target_var}_count"), addrs.len() as f64);
-            TEXT_VARIABLES.lock().insert(format!("{target_var}_count"), addrs.len().to_string());
+            set_variable_value(&format!("{target_var}_count"), filtered.len() as f64);
+            TEXT_VARIABLES.lock().insert(format!("{target_var}_count"), filtered.len().to_string());
 
-            if let Ok(val_str) = crate::process_memory::read_value(pid, final_addr, step.memory_value_type) {
-                TEXT_VARIABLES.lock().insert(format!("{target_var}_val"), val_str.clone());
-                TEXT_VARIABLES.lock().insert(format!("{target_var}_value"), val_str.clone());
-                if let Ok(num) = val_str.parse::<f64>() {
-                    set_variable_value(&format!("{target_var}_val"), num);
-                    set_variable_value(&format!("{target_var}_value"), num);
-                }
+            TEXT_VARIABLES.lock().insert(format!("{target_var}_val"), val_str.clone());
+            TEXT_VARIABLES.lock().insert(format!("{target_var}_value"), val_str.clone());
+            if let Ok(num) = val_str.parse::<f64>() {
+                set_variable_value(&format!("{target_var}_val"), num);
+                set_variable_value(&format!("{target_var}_value"), num);
             }
         } else {
             set_variable_value(target_var, 0.0);

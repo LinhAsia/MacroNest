@@ -451,6 +451,10 @@ pub struct MacroStep {
     #[serde(default)]
     pub memory_write_value: String,
     #[serde(default)]
+    pub aob_filter_operator: String,
+    #[serde(default)]
+    pub aob_filter_value: String,
+    #[serde(default)]
     pub ai_response_provider: AiResponseProvider,
     #[serde(default)]
     pub ai_response_web_search: bool,
@@ -691,6 +695,8 @@ impl Default for MacroStep {
             memory_target_window: None,
             memory_value_type: MemoryValueType::default(),
             memory_write_value: String::new(),
+            aob_filter_operator: String::new(),
+            aob_filter_value: String::new(),
             ai_response_provider: AiResponseProvider::Groq,
             ai_response_web_search: false,
             ai_response_use_default_prompt: true,
@@ -1465,6 +1471,8 @@ mod tests {
             key: "48 89 5C 24 ?? ?? 48 8B + 0x10".to_string(),
             if_variable_name: "target_addr".to_string(),
             memory_value_type: MemoryValueType::F32,
+            aob_filter_operator: "!=".to_string(),
+            aob_filter_value: "0".to_string(),
             ..MacroStep::default()
         };
         let aob_json = serde_json::to_string(&aob_step).expect("serialize aob scan step");
@@ -1473,6 +1481,8 @@ mod tests {
         assert_eq!(restored_aob.key, "48 89 5C 24 ?? ?? 48 8B + 0x10");
         assert_eq!(restored_aob.if_variable_name, "target_addr");
         assert_eq!(restored_aob.memory_value_type, MemoryValueType::F32);
+        assert_eq!(restored_aob.aob_filter_operator, "!=");
+        assert_eq!(restored_aob.aob_filter_value, "0");
     }
 
     #[test]
