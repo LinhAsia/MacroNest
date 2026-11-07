@@ -8517,8 +8517,8 @@ impl CrosshairApp {
                                                                             let clean = rounded.trim_end_matches('0').trim_end_matches('.');
                                                                             clean.to_string()
                                                                         }
-                                                                    } else if trimmed.chars().count() > 14 {
-                                                                        let short: String = trimmed.chars().take(12).collect();
+                                                                    } else if trimmed.chars().count() > 20 {
+                                                                        let short: String = trimmed.chars().take(18).collect();
                                                                         format!("{short}…")
                                                                     } else {
                                                                         trimmed.to_string()
@@ -8587,7 +8587,7 @@ impl CrosshairApp {
                                                             active_vars_expanded = true;
                                                         }
                                                         let mut copied_var_info: Option<(String, String)> = None;
-                                                        let render_badge = |ui: &mut egui::Ui, item: &ActiveVarBadgeData, copied_var_info: &mut Option<(String, String)>| {
+                                                        let render_badge = |ui: &mut egui::Ui, item: &ActiveVarBadgeData, b_width: f32, copied_var_info: &mut Option<(String, String)>| {
                                                             let (
                                                                 fill_color,
                                                                 stroke_color,
@@ -8598,35 +8598,19 @@ impl CrosshairApp {
                                                             let badge_hover_id = ui.make_persistent_id(
                                                                 (group.id, preset.id, "var-badge-hover", &item.var_name),
                                                             );
-                                                            let frame_resp = egui::Frame::none()
-                                                                .fill(fill_color)
-                                                                .stroke(egui::Stroke::new(
-                                                                    1.0,
-                                                                    stroke_color,
-                                                                ))
-                                                                .inner_margin(
-                                                                    egui::Margin::symmetric(6, 2),
-                                                                )
-                                                                .rounding(4.0)
-                                                                .show(ui, |ui| {
-                                                                    ui.add(
-                                                                        egui::Label::new(
-                                                                            RichText::new(
-                                                                                &item.display_text,
-                                                                            )
-                                                                            .size(11.0)
-                                                                            .strong()
-                                                                            .color(text_color),
-                                                                        )
-                                                                        .wrap_mode(
-                                                                            egui::TextWrapMode::Truncate,
-                                                                        ),
-                                                                    );
-                                                                });
-                                                            let badge_resp = ui.interact(
-                                                                frame_resp.response.rect,
-                                                                badge_hover_id,
+                                                            let actual_width = b_width.min(available_vars_width.max(16.0));
+                                                            let (rect, badge_resp) = ui.allocate_exact_size(
+                                                                vec2(actual_width, 18.0),
                                                                 egui::Sense::click(),
+                                                            );
+                                                            ui.painter().rect_filled(rect, 4.0, fill_color);
+                                                            ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, stroke_color), egui::StrokeKind::Outside);
+                                                            ui.painter().text(
+                                                                rect.center(),
+                                                                egui::Align2::CENTER_CENTER,
+                                                                &item.display_text,
+                                                                badge_font.clone(),
+                                                                text_color,
                                                             );
                                                             let hovered = badge_resp.hovered();
                                                             if hovered != item.is_hovered {
@@ -8687,7 +8671,7 @@ impl CrosshairApp {
                                                                         0.0
                                                                     })
                                                                     .max(0.0);
-                                                            for (item, badge_width) in badge_items
+                                                            for (item, &badge_width) in badge_items
                                                                 .iter()
                                                                 .zip(badge_widths.iter())
                                                             {
@@ -8697,7 +8681,7 @@ impl CrosshairApp {
                                                                 {
                                                                     break;
                                                                 }
-                                                                render_badge(ui, item, &mut copied_var_info);
+                                                                render_badge(ui, item, badge_width, &mut copied_var_info);
                                                                 consumed_width += badge_width + 4.0;
                                                                 preview_badge_count += 1;
                                                             }
@@ -8739,10 +8723,12 @@ impl CrosshairApp {
                                                             ui.horizontal_wrapped(|ui| {
                                                                 ui.spacing_mut().item_spacing =
                                                                     vec2(4.0, 4.0);
-                                                                for item in
-                                                                    badge_items.iter().skip(preview_badge_count)
+                                                                for (item, &badge_width) in badge_items
+                                                                    .iter()
+                                                                    .zip(badge_widths.iter())
+                                                                    .skip(preview_badge_count)
                                                                 {
-                                                                    render_badge(ui, item, &mut copied_var_info);
+                                                                    render_badge(ui, item, badge_width, &mut copied_var_info);
                                                                 }
                                                             });
                                                         }
@@ -19091,10 +19077,45 @@ if supports_move_mouse || show_detection_tuning {
                 }
                 let is_func_call = peek_idx < len && chars[peek_idx] == '(';
 
+                if is_func_call {
+                    let lower = trimmed.to_ascii_lowercase();
+                    if lower.starts_with("window.") || lower.starts_with("window_") {
+                        // Window property functions take a window title as argument, not variable names
+                        let mut depth = 0;
+                        let mut j = peek_idx;
+                        let mut arg_content = String::new();
+                        while j < len {
+                            if chars[j] == '(' {
+                                depth += 1;
+                            } else if chars[j] == ')' {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            if depth >= 1 && chars[j] != '(' {
+                                arg_content.push(chars[j]);
+                            }
+                            j += 1;
+                        }
+                        // If window title argument contains explicit variable interpolation like {var}, extract it:
+                        if arg_content.contains('{') {
+                            Self::extract_braced_vars(&arg_content, vars);
+                        }
+                        if j < len {
+                            i = j + 1;
+                        } else {
+                            i = len;
+                        }
+                        continue;
+                    }
+                }
+
                 if !trimmed.is_empty()
                     && !is_func_call
                     && !trimmed.chars().next().unwrap().is_ascii_digit()
                     && !Self::is_builtin_expression_identifier(trimmed)
+                    && !crate::overlay::is_builtin_property_name(trimmed)
                 {
                     vars.insert(trimmed.to_string());
                 }
@@ -26276,6 +26297,28 @@ mod tests {
         assert!(vars.contains("h"), "variable h should be extracted");
         assert!(vars.contains("x"), "variable x should be extracted");
         assert!(vars.contains("y"), "variable y should be extracted");
+    }
+
+    #[test]
+    fn extract_vars_from_expression_ignores_window_targets() {
+        let mut vars = std::collections::HashSet::new();
+        CrosshairApp::extract_vars_from_expression(
+            "Window.x(Android 2) + (Window.width(Android 2) / 2)",
+            &mut vars,
+        );
+        assert!(!vars.contains("Android"), "window title should not be extracted as var");
+        assert!(!vars.contains("Window.x"), "window function should not be extracted");
+        assert!(!vars.contains("Window.width"), "window function should not be extracted");
+        assert!(vars.is_empty(), "expected no active variables in pure window geometry expression");
+
+        // With variable interpolation inside window call and additional variable
+        let mut vars2 = std::collections::HashSet::new();
+        CrosshairApp::extract_vars_from_expression(
+            "Window.x({win_name}) + delta_x",
+            &mut vars2,
+        );
+        assert!(vars2.contains("win_name"), "interpolated var in window title should be extracted");
+        assert!(vars2.contains("delta_x"), "expression variable should be extracted");
     }
 }
 
