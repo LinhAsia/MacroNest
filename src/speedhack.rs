@@ -1,7 +1,6 @@
 //! Speedhack module: hooks time functions (QueryPerformanceCounter, GetTickCount64)
 //! in the target process to accelerate or decelerate game simulation time, identical to Cheat Engine's speedhack.
 
-#![allow(dead_code)]
 
 #[cfg(windows)]
 mod imp {

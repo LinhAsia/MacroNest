@@ -820,36 +820,6 @@ pub fn parse_must_end_offsets(text: &str) -> Vec<usize> {
 }
 
 impl PointerMap {
-    #[allow(dead_code)]
-    pub fn paths_to(
-        &self,
-        target: usize,
-        max_offset: usize,
-        max_depth: usize,
-        result_limit: usize,
-    ) -> Vec<PointerPath> {
-        self.paths_to_with_options(&[target], max_offset, max_depth, result_limit, &[], false)
-    }
-
-    #[allow(dead_code)]
-    pub fn paths_to_with_must_end(
-        &self,
-        targets: &[usize],
-        max_offset: usize,
-        max_depth: usize,
-        result_limit: usize,
-        must_end_offsets: &[usize],
-    ) -> Vec<PointerPath> {
-        self.paths_to_with_options(
-            targets,
-            max_offset,
-            max_depth,
-            result_limit,
-            must_end_offsets,
-            false,
-        )
-    }
-
     pub fn paths_to_with_options(
         &self,
         targets: &[usize],
@@ -872,52 +842,12 @@ impl PointerMap {
         )
     }
 
-    #[allow(dead_code)]
-    pub fn paths_to_any(
-        &self,
-        targets: &[usize],
-        max_offset: usize,
-        max_depth: usize,
-        result_limit: usize,
-    ) -> Vec<PointerPath> {
-        self.paths_to_with_options(targets, max_offset, max_depth, result_limit, &[], false)
-    }
-
     #[cfg(test)]
     pub fn new_for_test(pointers: Vec<(usize, usize)>, modules: Vec<(String, usize, usize)>) -> Self {
         Self { pointers, modules }
     }
 }
 
-
-#[allow(dead_code)]
-pub fn scan_pointer_paths_to_targets_with_budget(
-    pid: u32,
-    targets: &[usize],
-    modules: &[(String, usize, usize)],
-    pointer_width: usize,
-    max_offset: usize,
-    max_depth: usize,
-    result_limit: usize,
-    max_bytes: usize,
-    progress: Arc<AtomicUsize>,
-) -> io::Result<Vec<(usize, Vec<PointerPath>)>> {
-    scan_pointer_map_and_paths_to_targets_must_end(
-        pid,
-        targets,
-        modules,
-        pointer_width,
-        max_offset,
-        max_depth,
-        result_limit,
-        max_bytes,
-        &[],
-        progress,
-        false,
-        None,
-    )
-    .map(|(_, paths)| paths)
-}
 
 pub fn scan_pointer_map_and_paths_to_targets_must_end(
     pid: u32,
@@ -2755,25 +2685,6 @@ fn text_bytes_equal(
     }
 }
 
-pub fn filter_scan_candidates(
-    pid: u32,
-    candidates: Vec<ScanCandidate>,
-    value_type: ScanValueType,
-    comparison: ScanComparison,
-    exact: Option<ScanValue>,
-    range: Option<(ScanValue, ScanValue)>,
-) -> io::Result<Vec<ScanCandidate>> {
-    filter_scan_candidates_with_progress(
-        pid,
-        candidates,
-        value_type,
-        comparison,
-        exact,
-        range,
-        None,
-    )
-}
-
 pub fn filter_scan_candidates_with_progress(
     pid: u32,
     mut candidates: Vec<ScanCandidate>,
@@ -3155,36 +3066,6 @@ fn filter_candidate_slice(
         }
     }
     Ok(write)
-}
-
-pub fn refresh_scan_candidates(
-    pid: u32,
-    candidates: &mut [ScanCandidate],
-    value_type: ScanValueType,
-) -> io::Result<()> {
-    with_cached_read_process(pid, |process| {
-        let mut page = [0; PAGE_BYTES];
-        let mut index = 0;
-        while index < candidates.len() {
-            let page_base = candidates[index].address & !(PAGE_BYTES - 1);
-            let mut end = index + 1;
-            while end < candidates.len() && candidates[end].address < page_base + PAGE_BYTES {
-                end += 1;
-            }
-            if let Ok(count) = process.read(page_base, &mut page) {
-                for candidate in &mut candidates[index..end] {
-                    let offset = candidate.address - page_base;
-                    if offset + value_type.width() <= count
-                        && let Some(current) = value_type.decode(&page[offset..])
-                    {
-                        candidate.set_current(current);
-                    }
-                }
-            }
-            index = end;
-        }
-        Ok(())
-    })
 }
 
 fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<ScanRegion> {

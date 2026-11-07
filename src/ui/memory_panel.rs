@@ -23999,15 +23999,6 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
     }
 }
 
-fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<isize>)> {
-    let spec = parse_pointer_spec(text)?;
-    let (module, offset) = spec.module?;
-    if spec.offsets.is_empty() {
-        return None;
-    }
-    Some((module, offset, spec.offsets))
-}
-
 fn parse_memory_address_term(text: &str) -> Option<usize> {
     let (digits, radix) = text
         .strip_prefix("0x")
@@ -25523,6 +25514,14 @@ mod tests {
 
     #[test]
     fn parses_pasted_pointer_expression() {
+        let parse_pointer_expression = |text: &str| -> Option<(String, usize, Vec<isize>)> {
+            let spec = parse_pointer_spec(text)?;
+            let (module, offset) = spec.module?;
+            if spec.offsets.is_empty() {
+                return None;
+            }
+            Some((module, offset, spec.offsets))
+        };
         assert_eq!(
             parse_pointer_expression("the-hust-banhmi.exe+6389C60 [258, 180, 354]"),
             Some((

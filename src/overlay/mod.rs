@@ -26601,15 +26601,6 @@ mod windows_overlay {
         frame.read_value(pid, expression, value_type).ok()
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn evaluate_esp_expression_address(
-        pid: u32,
-        expression: &str,
-    ) -> Option<usize> {
-        let mut frame = EspReadFrame::default();
-        frame.resolve_address(pid, expression, false).map(|(_, addr)| addr)
-    }
-
     pub(crate) fn evaluate_esp_preset_entity_addresses(
         pid: u32,
         preset: &crate::model::EspPreset,
@@ -26734,34 +26725,6 @@ mod windows_overlay {
             crate::model::MemoryValueType::I64 => i64::from_le_bytes(bytes.try_into().ok()?) as f32,
             crate::model::MemoryValueType::F64 => f64::from_le_bytes(bytes.try_into().ok()?) as f32,
         })
-    }
-
-    #[allow(dead_code)]
-    fn read_esp_numeric_value(
-        pid: u32,
-        address: usize,
-        value_type: crate::model::MemoryValueType,
-    ) -> std::io::Result<f32> {
-        use crate::process_memory::{ScanValue, ScanValueType};
-
-        let scan_type = match value_type {
-            crate::model::MemoryValueType::I8 => ScanValueType::I8,
-            crate::model::MemoryValueType::I16 => ScanValueType::I16,
-            crate::model::MemoryValueType::I32 => ScanValueType::I32,
-            crate::model::MemoryValueType::F32 => ScanValueType::F32,
-            crate::model::MemoryValueType::I64 => ScanValueType::I64,
-            crate::model::MemoryValueType::F64 => ScanValueType::F64,
-        };
-        Ok(
-            match crate::process_memory::read_scan_value(pid, address, scan_type)? {
-                ScanValue::I8(value) => value as f32,
-                ScanValue::I16(value) => value as f32,
-                ScanValue::I32(value) => value as f32,
-                ScanValue::F32(value) => value,
-                ScanValue::I64(value) => value as f32,
-                ScanValue::F64(value) => value as f32,
-            },
-        )
     }
 
     fn read_esp_view_inputs(

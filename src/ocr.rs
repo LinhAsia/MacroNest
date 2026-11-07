@@ -225,10 +225,6 @@ pub fn ocr_assets_disk_usage_bytes() -> u64 {
     0
 }
 
-pub fn has_any_ocr_assets() -> bool {
-    ocr_assets_disk_usage_bytes() > 0
-}
-
 #[cfg(windows)]
 pub fn are_all_language_packs_installed() -> bool {
     OCR_LANGUAGE_PACKS

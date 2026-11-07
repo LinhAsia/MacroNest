@@ -20,12 +20,6 @@ pub(crate) fn copy_rgba_to_bgra(src: &[u8], dst: &mut [u8]) {
     }
 }
 
-pub(crate) fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {
-    let mut bgra = vec![0u8; rgba.len()];
-    copy_rgba_to_bgra(rgba, &mut bgra);
-    bgra
-}
-
 pub(crate) unsafe fn add_tray_icon(hwnd: HWND) -> Result<()> {
     let mut data = notify_icon(hwnd);
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
@@ -127,9 +121,10 @@ mod tests {
     }
 
     #[test]
-    fn rgba_to_bgra_swaps_red_and_blue_channels() {
+    fn copy_rgba_to_bgra_swaps_red_and_blue_channels() {
         let rgba = vec![255, 128, 64, 200, 10, 20, 30, 40];
-        let bgra = super::rgba_to_bgra(&rgba);
+        let mut bgra = vec![0u8; 8];
+        super::copy_rgba_to_bgra(&rgba, &mut bgra);
         assert_eq!(bgra, vec![64, 128, 255, 200, 30, 20, 10, 40]);
     }
 }
