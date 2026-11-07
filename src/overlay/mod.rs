@@ -414,6 +414,14 @@ mod windows_overlay {
     pub static ACTIVE_ESP_SCAN_SESSION: AtomicU64 = AtomicU64::new(0);
     pub static ACTIVE_ESP_SCAN_PRESET_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+    static QUICK_KEY_MASCOT_ACTIVE: AtomicBool = AtomicBool::new(false);
+    static MOUSE_PATH_DRAW_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+    static MOUSE_RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
+    static MACRO_RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
+    static VISION_CAPTURE_MOUSE_BLOCKED: AtomicBool = AtomicBool::new(false);
+    static MOUSE_MOVE_LOCKS_ANY: AtomicBool = AtomicBool::new(false);
+    static SCREEN_DRAW_ACTIVE: AtomicBool = AtomicBool::new(false);
+
     #[derive(Default, Clone)]
     struct RuntimeDropSelfRecord {
         state: crate::model::EspRuntimeDropSelfState,
@@ -5485,6 +5493,32 @@ mod windows_overlay {
             LAST_MOUSE_MOVE_TIME_MS.store(info.time as u64, Ordering::Relaxed);
 
             let message = wparam.0 as u32;
+
+            // Fast lock-free bypass for WM_MOUSEMOVE: keeps mouse movement silky-smooth and immune to hook lock contention.
+            if message == WM_MOUSEMOVE && !is_vision_capture_mouse_blocked() {
+                if handle_locked_mouse_move(info.pt) {
+                    return LRESULT(1);
+                }
+
+                if MOUSE_RECORDING_ACTIVE.load(Ordering::Relaxed) {
+                    record_mouse_event(message, &info);
+                }
+
+                if screen_draw_active() && screen_draw_color_pick_mode_active() {
+                    set_screen_draw_color_pick_cursor();
+                }
+
+                if handle_mascot_global_drag(message, info.pt) {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
+
+                if QUICK_KEY_MASCOT_ACTIVE.load(Ordering::Relaxed) {
+                    wake_command_queue();
+                }
+
+                return CallNextHookEx(None, code, wparam, lparam);
+            }
+
             if message == WM_MOUSEWHEEL {
                 let delta = ((info.mouseData >> 16) & 0xFFFF) as i16;
                 let mut hook_state = HOOK_STATE.lock();
@@ -5549,7 +5583,11 @@ mod windows_overlay {
                     }
                 }
             }
-            let active_mouse_path_draw_capture = HOOK_STATE.lock().mouse_path_draw_capture.clone();
+            let active_mouse_path_draw_capture = if MOUSE_PATH_DRAW_CAPTURE_ACTIVE.load(Ordering::Relaxed) {
+                HOOK_STATE.lock().mouse_path_draw_capture.clone()
+            } else {
+                None
+            };
             if let Some(draw_capture) = active_mouse_path_draw_capture {
                 match message {
                     WM_LBUTTONDOWN => {
@@ -5642,20 +5680,6 @@ mod windows_overlay {
                 return LRESULT(1);
             }
 
-            // 1. Immediately bypass WM_MOUSEMOVE to keep mouse movement extremely smooth and lock-free!
-
-            if message == WM_MOUSEMOVE && !is_vision_capture_mouse_blocked() {
-                if handle_locked_mouse_move(info.pt) {
-                    return LRESULT(1);
-                }
-
-                let mascot_active = { HOOK_STATE.lock().quick_key_mascot_active };
-                if mascot_active {
-                    wake_command_queue();
-                }
-
-                return CallNextHookEx(None, code, wparam, lparam);
-            }
 
             // 2. If MacroNest UI is in the foreground, bypass all mouse events.
 
@@ -6129,10 +6153,12 @@ mod windows_overlay {
                 .as_ref()
                 .is_some_and(|session| session.preset_id == preset_id)
             {
+                MOUSE_RECORDING_ACTIVE.store(false, Ordering::Release);
                 guard
                     .take()
                     .map(|session| (session.preset_id, session.events))
             } else {
+                MOUSE_RECORDING_ACTIVE.store(true, Ordering::Release);
                 *guard = Some(MouseRecordingSession {
                     preset_id,
                     last_event_at: Instant::now(),
@@ -6161,7 +6187,7 @@ mod windows_overlay {
     }
 
     fn is_mouse_path_draw_capture_active() -> bool {
-        HOOK_STATE.lock().mouse_path_draw_capture.is_some()
+        MOUSE_PATH_DRAW_CAPTURE_ACTIVE.load(Ordering::Relaxed)
     }
 
     fn begin_mouse_path_draw_capture(preset_id: u32, preset_name: String) {
@@ -6171,9 +6197,11 @@ mod windows_overlay {
                 preset_id,
                 preset_name,
             });
+            MOUSE_PATH_DRAW_CAPTURE_ACTIVE.store(true, Ordering::Release);
         }
 
         *MOUSE_RECORDING.lock() = None;
+        MOUSE_RECORDING_ACTIVE.store(false, Ordering::Release);
         request_ui_repaint();
     }
 
@@ -6181,9 +6209,11 @@ mod windows_overlay {
         {
             let mut hook_state = HOOK_STATE.lock();
             hook_state.mouse_path_draw_capture = None;
+            MOUSE_PATH_DRAW_CAPTURE_ACTIVE.store(false, Ordering::Release);
         }
 
         *MOUSE_RECORDING.lock() = None;
+        MOUSE_RECORDING_ACTIVE.store(false, Ordering::Release);
         set_gpu_overlay_layer_shapes(OverlayLayer::MouseTrail, Vec::new());
         show_ui_window_native();
         if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
@@ -6209,6 +6239,7 @@ mod windows_overlay {
                 dirty: true,
                 movement_only: true,
             });
+            MOUSE_RECORDING_ACTIVE.store(true, Ordering::Release);
         }
 
         if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
@@ -6227,6 +6258,7 @@ mod windows_overlay {
     fn finish_mouse_path_draw_capture() {
         let active = {
             let mut hook_state = HOOK_STATE.lock();
+            MOUSE_PATH_DRAW_CAPTURE_ACTIVE.store(false, Ordering::Release);
             hook_state.mouse_path_draw_capture.take()
         };
         let Some(active) = active else {
@@ -6236,6 +6268,7 @@ mod windows_overlay {
             .lock()
             .take()
             .map(|session| (session.preset_id, session.events));
+        MOUSE_RECORDING_ACTIVE.store(false, Ordering::Release);
         set_gpu_overlay_layer_shapes(OverlayLayer::MouseTrail, Vec::new());
         show_ui_window_native();
         if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
@@ -6373,6 +6406,9 @@ mod windows_overlay {
     }
 
     fn record_macro_mouse_event(message: u32, info: &MSLLHOOKSTRUCT) {
+        if !MACRO_RECORDING_ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
         let mut guard = MACRO_RECORDING.lock();
         let Some(session) = guard.as_mut() else {
             return;
@@ -6469,8 +6505,10 @@ mod windows_overlay {
             if guard.is_some() {
                 let session = guard.take().unwrap();
                 if session.preset_id == preset_id {
+                    MACRO_RECORDING_ACTIVE.store(false, Ordering::Release);
                     Some((session.group_id, session.preset_id, true))
                 } else {
+                    MACRO_RECORDING_ACTIVE.store(true, Ordering::Release);
                     *guard = Some(MacroRecordingSession {
                         group_id,
                         preset_id,
@@ -6481,6 +6519,7 @@ mod windows_overlay {
                     Some((session.group_id, session.preset_id, false))
                 }
             } else {
+                MACRO_RECORDING_ACTIVE.store(true, Ordering::Release);
                 *guard = Some(MacroRecordingSession {
                     group_id,
                     preset_id,
@@ -6557,6 +6596,9 @@ mod windows_overlay {
     }
 
     fn record_mouse_event(message: u32, info: &MSLLHOOKSTRUCT) {
+        if !MOUSE_RECORDING_ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
         let mut guard = MOUSE_RECORDING.lock();
         let Some(session) = guard.as_mut() else {
             return;
@@ -7546,9 +7588,13 @@ mod windows_overlay {
     }
 
     fn handle_locked_mouse_move(point: POINT) -> bool {
+        if !MOUSE_MOVE_LOCKS_ANY.load(Ordering::Relaxed) {
+            return false;
+        }
         let maybe_allowed = {
             let mut hook_state = HOOK_STATE.lock();
             if !hook_state.mouse_move_locks.any() {
+                MOUSE_MOVE_LOCKS_ANY.store(false, Ordering::Release);
                 return false;
             }
 
@@ -7618,7 +7664,7 @@ mod windows_overlay {
     }
 
     fn is_vision_capture_mouse_blocked() -> bool {
-        HOOK_STATE.lock().vision_capture_mouse_blocked
+        VISION_CAPTURE_MOUSE_BLOCKED.load(Ordering::Relaxed)
     }
 
     fn is_keyboard_arrow_mouse_key(key_name: &str) -> bool {
@@ -10439,8 +10485,9 @@ mod windows_overlay {
                     ensure_quick_key_display_mascot_positions(runtime);
                     {
                         let mut hook_state = HOOK_STATE.lock();
-                        hook_state.quick_key_mascot_active =
-                            enabled && mode == QuickKeyDisplayMode::Mascot;
+                        let mascot_active = enabled && mode == QuickKeyDisplayMode::Mascot;
+                        hook_state.quick_key_mascot_active = mascot_active;
+                        QUICK_KEY_MASCOT_ACTIVE.store(mascot_active, Ordering::Release);
                     }
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
@@ -10708,6 +10755,7 @@ mod windows_overlay {
                 } => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.vision_capture_mouse_blocked = blocked;
+                    VISION_CAPTURE_MOUSE_BLOCKED.store(blocked, Ordering::Release);
                     hook_state.vision_capture_is_region_mode = is_region_mode;
                     hook_state.vision_capture_completed_region = None;
                     if !blocked {
@@ -12032,8 +12080,7 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_active() -> bool {
-        let state = SCREEN_DRAW_STATE.lock();
-        state.active
+        SCREEN_DRAW_ACTIVE.load(Ordering::Relaxed)
     }
 
     pub fn screen_draw_get_capturing_region() -> bool {
@@ -12640,6 +12687,7 @@ mod windows_overlay {
         }
         let crosshair_draw_finished = finish_crosshair_draw_session(state);
         state.active = false;
+        SCREEN_DRAW_ACTIVE.store(false, Ordering::Release);
         state.current_stroke = None;
         state.current_stroke_updated_at = None;
         state.current_stroke_release_seen_at = None;
@@ -12723,6 +12771,7 @@ mod windows_overlay {
 
     fn activate_screen_draw(state: &mut ScreenDrawState, captured_frame: Option<Vec<u8>>) {
         state.active = true;
+        SCREEN_DRAW_ACTIVE.store(true, Ordering::Release);
         state.freeze_frame = captured_frame;
         state.capturing_region = false;
         state.capture_trigger = None;
@@ -14031,6 +14080,7 @@ mod windows_overlay {
     fn set_screen_draw_region_capture_mouse_blocked(blocked: bool, is_region_mode: bool) {
         let mut hook_state = HOOK_STATE.lock();
         hook_state.vision_capture_mouse_blocked = blocked;
+        VISION_CAPTURE_MOUSE_BLOCKED.store(blocked, Ordering::Release);
         hook_state.vision_capture_is_region_mode = blocked && is_region_mode;
         hook_state.vision_capture_anchor = None;
         hook_state.vision_capture_completed_region = None;
@@ -31846,6 +31896,7 @@ mod windows_overlay {
         reconcile_active_hold_mouse_macros();
 
         if delay_ms == 0 {
+            cooperative_macro_step_yield();
             return !macro_runtime_target_matches(
                 target_window_title,
                 extra_target_window_titles,
@@ -31906,6 +31957,31 @@ mod windows_overlay {
             || macro_force_stop_requested(preset_id)
             || (!defer_stop_until_loop_end
                 && current_hold_run_release_requested(preset_id, run_token))
+    }
+
+    fn cooperative_macro_step_yield() {
+        thread_local! {
+            static LAST_YIELD: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+        }
+        let now = Instant::now();
+        let should_sleep = LAST_YIELD.with(|cell| {
+            if let Some(last) = cell.get() {
+                if now.duration_since(last) >= Duration::from_millis(5) {
+                    cell.set(Some(now));
+                    true
+                } else {
+                    false
+                }
+            } else {
+                cell.set(Some(now));
+                false
+            }
+        });
+        if should_sleep {
+            thread::sleep(Duration::from_millis(1));
+        } else {
+            std::thread::yield_now();
+        }
     }
 
     fn cooperative_zero_delay_loop_yield(delay_ms: u64, last_yield: &mut Instant) {
@@ -31980,6 +32056,7 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> bool {
         if delay_ms == 0 {
+            cooperative_macro_step_yield();
             if is_ui_in_foreground() {
                 return true;
             }
@@ -35478,6 +35555,7 @@ mod windows_overlay {
                 let mut hook_state = HOOK_STATE.lock();
                 hook_state.mouse_move_locks = MouseMoveLockCounts::default();
                 hook_state.mouse_move_locks.add(mask);
+        MOUSE_MOVE_LOCKS_ANY.store(true, Ordering::Release);
                 hook_state.active_hold_macros.insert(
                     preset_id,
                     ActiveHoldMacro {
@@ -35951,6 +36029,7 @@ mod windows_overlay {
             return;
         }
         hook_state.mouse_move_locks.add(mask);
+        MOUSE_MOVE_LOCKS_ANY.store(true, Ordering::Release);
         if hook_state.mouse_move_lock_anchor.is_none() {
             let mut point = POINT::default();
             if unsafe { GetCursorPos(&mut point) }.is_ok() {
@@ -35995,6 +36074,7 @@ mod windows_overlay {
         }
 
         hook_state.mouse_move_locks.remove(mask);
+        MOUSE_MOVE_LOCKS_ANY.store(hook_state.mouse_move_locks.any(), Ordering::Release);
         if !hook_state.mouse_move_locks.any() {
             hook_state.mouse_move_lock_anchor = None;
         }
@@ -39987,6 +40067,7 @@ mod windows_overlay {
     }
 
     fn set_step_geometry_spec(preset_id: u32, absolute_step_index: usize, spec: &GeometrySpec) {
+        let current_shape = geometry_render_shape_from_spec(spec);
         let mut should_refresh = false;
         {
             let mut hook_state = HOOK_STATE.lock();
@@ -40000,7 +40081,6 @@ mod windows_overlay {
                 hook_state.active_geometry_steps.insert(key, spec.clone());
             }
 
-            let current_shape = geometry_render_shape_from_spec(spec);
             let shape_changed = match (&current_shape, hook_state.rendered_geometry_steps.get(&key))
             {
                 (Some(current), Some(rendered)) => current != rendered,
@@ -40037,20 +40117,29 @@ mod windows_overlay {
     }
 
     fn clear_geometry_overlay() {
-        {
+        let had_active = {
             let mut hook_state = HOOK_STATE.lock();
-            hook_state.active_geometry_preset_ids.clear();
-            hook_state.active_geometry_preset_owner_ids.clear();
-            hook_state.active_geometry_preset_owner_expires.clear();
-            hook_state.active_geometry_preset_instances.clear();
-            hook_state.active_geometry_preset_activation_order.clear();
-            hook_state.active_geometry_steps.clear();
-            hook_state.rendered_geometry_steps.clear();
-            hook_state.geometry_overlay_dirty = false;
-            hook_state.active_geometry_steps_expires.clear();
-            hook_state.last_geometry_overlay_refresh_at = None;
+            let had = !hook_state.active_geometry_preset_ids.is_empty()
+                || !hook_state.active_geometry_preset_owner_ids.is_empty()
+                || !hook_state.active_geometry_steps.is_empty()
+                || !hook_state.rendered_geometry_steps.is_empty();
+            if had {
+                hook_state.active_geometry_preset_ids.clear();
+                hook_state.active_geometry_preset_owner_ids.clear();
+                hook_state.active_geometry_preset_owner_expires.clear();
+                hook_state.active_geometry_preset_instances.clear();
+                hook_state.active_geometry_preset_activation_order.clear();
+                hook_state.active_geometry_steps.clear();
+                hook_state.rendered_geometry_steps.clear();
+                hook_state.active_geometry_steps_expires.clear();
+                hook_state.geometry_overlay_dirty = false;
+                hook_state.last_geometry_overlay_refresh_at = Some(Instant::now());
+            }
+            had
+        };
+        if had_active {
+            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
         }
-        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
     pub(crate) fn clear_geometry_overlay_now() {
