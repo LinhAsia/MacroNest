@@ -18351,8 +18351,9 @@ mod windows_overlay {
             regions,
             preview_regions,
             static_geometry_shapes,
-            dynamic_geometry_shapes,
+            mut dynamic_geometry_shapes,
             capture_region_preview_active,
+            preview_geometry_spec,
         ) = {
             let mut hook_state = HOOK_STATE.lock();
             // Clear expired geometries
@@ -18397,8 +18398,15 @@ mod windows_overlay {
                 hook_state.vision_capture_mouse_blocked
                     && (hook_state.vision_capture_is_region_mode
                         || !hook_state.vision_capture_preview_regions.is_empty()),
+                hook_state.preview_geometry_spec.clone(),
             )
         };
+
+        if let Some(spec) = preview_geometry_spec {
+            if let Some(shape) = geometry_render_shape_from_spec(&spec) {
+                dynamic_geometry_shapes.push(shape);
+            }
+        }
         // Check active crosshair expiration
         let crosshair_expired = {
             let mut hook_state = HOOK_STATE.lock();
@@ -34131,7 +34139,7 @@ mod windows_overlay {
     }
 
     #[cfg(test)]
-    mod tests {
+    pub(crate) mod tests {
         use super::*;
         pub(crate) static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -38803,18 +38811,12 @@ mod windows_overlay {
     }
 
     fn geometry_overlay_dynamic_shapes(hook_state: &mut HookState) -> Vec<GeometryRenderShape> {
-        let mut shapes = hook_state
+        hook_state
             .rendered_geometry_steps
             .iter()
             .filter(|(key, _)| hook_state.active_geometry_steps.contains_key(key))
             .map(|(_, shape)| shape.clone())
-            .collect::<Vec<_>>();
-        if let Some(spec) = &hook_state.preview_geometry_spec
-            && let Some(shape) = geometry_render_shape_from_spec(spec)
-        {
-            shapes.push(shape);
-        }
-        shapes
+            .collect::<Vec<_>>()
     }
 
     fn geometry_shape_refresh_interval(shape: &GeometryRenderShape) -> Duration {
@@ -40232,6 +40234,7 @@ mod windows_overlay {
 
     fn invalidate_runtime_open_window_snapshot() {
         *OPEN_WINDOW_SNAPSHOT.lock() = None;
+        crate::window_list::invalidate_window_handle_cache();
     }
 
     unsafe fn collect_selector_match_candidates(
@@ -41744,6 +41747,7 @@ mod tests {
 
     #[test]
     fn test_resolve_memory_action_target_variable_with_offset() {
+        let _guard = super::windows_overlay::tests::TEST_MUTEX.lock().unwrap();
         use super::windows_overlay::resolve_memory_action_target;
         use crate::overlay::set_text_variable_value;
 

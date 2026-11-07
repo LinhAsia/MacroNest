@@ -2096,6 +2096,25 @@ mod tests {
         assert_eq!(evaluate_math_expression_f64("window.bottom(NonExistentWindow_XYZ)"), 0.0);
         assert_eq!(resolve_text_variable_value("window.title(NonExistentWindow_XYZ)"), Some(String::new()));
 
+        // Window height tests
+        assert_eq!(evaluate_math_expression_f64("window.height(NonExistentWindow_XYZ)"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.height(\"NonExistentWindow_XYZ\")"), 0.0);
+        assert_eq!(evaluate_math_expression_f64("window.h(NonExistentWindow_XYZ)"), 0.0);
+
+        // Complex expressions with window lookups
+        assert_eq!(
+            super::evaluate_interpolated_math_expression("{Window.x(Android 2) + (Window.width(Android 2) / 2)}"),
+            0
+        );
+        assert_eq!(
+            super::evaluate_interpolated_math_expression("{Window.y(Android 2) + (Window.height(Android 2) / 2)}"),
+            0
+        );
+        assert_eq!(
+            super::evaluate_interpolated_math_expression("{Window.y(Android 2) + ("),
+            0
+        );
+
         // Interpolation with variable containing window name
         {
             let mut text_vars = TEXT_VARIABLES.lock();

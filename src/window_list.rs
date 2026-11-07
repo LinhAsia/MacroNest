@@ -417,6 +417,24 @@ mod windows_impl {
         true.into()
     }
 
+    #[derive(Clone, Copy)]
+    struct WindowHandleCacheEntry {
+        hwnd: Option<isize>,
+        cached_at: std::time::Instant,
+    }
+
+    static WINDOW_HANDLE_CACHE: Lazy<Mutex<std::collections::HashMap<(String, bool), WindowHandleCacheEntry>>> =
+        Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+    pub fn invalidate_window_handle_cache() {
+        WINDOW_HANDLE_CACHE.lock().clear();
+    }
+
+    #[cfg(test)]
+    pub fn is_window_handle_cache_empty() -> bool {
+        WINDOW_HANDLE_CACHE.lock().is_empty()
+    }
+
     pub(crate) fn find_window_handle(title: Option<&str>) -> Option<HWND> {
         match title {
             Some(selector) => find_window_by_candidate_chain(selector, false),
@@ -433,19 +451,60 @@ mod windows_impl {
         title_or_selector: &str,
         match_duplicate_window_titles: bool,
     ) -> Option<HWND> {
-        find_window_by_candidate_exact(title_or_selector)
-            .or_else(|| find_window_by_candidate(title_or_selector, match_duplicate_window_titles))
+        let trimmed = title_or_selector.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let key = (trimmed.to_string(), match_duplicate_window_titles);
+        let now = std::time::Instant::now();
+        {
+            let cache = WINDOW_HANDLE_CACHE.lock();
+            if let Some(entry) = cache.get(&key) {
+                let ttl = if entry.hwnd.is_some() {
+                    std::time::Duration::from_millis(1000)
+                } else {
+                    std::time::Duration::from_millis(350)
+                };
+                if now.duration_since(entry.cached_at) < ttl {
+                    if let Some(h_val) = entry.hwnd {
+                        let h = HWND(h_val as *mut _);
+                        if unsafe { IsWindow(Some(h)).as_bool() } {
+                            return Some(h);
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        let result = find_window_by_candidate_exact(trimmed)
+            .or_else(|| find_window_by_candidate(trimmed, match_duplicate_window_titles))
             .or_else(|| {
                 // If the exact HWND selector no longer exists (e.g. process restarted or title changed),
                 // fall back to matching by base window title so reconnection works seamlessly.
-                if looks_like_window_selector(title_or_selector) {
-                    let base = selector_base_title(title_or_selector);
+                if looks_like_window_selector(trimmed) {
+                    let base = selector_base_title(trimmed);
                     if !base.is_empty() {
                         return find_window_by_candidate(base, true);
                     }
                 }
                 None
-            })
+            });
+
+        {
+            let mut cache = WINDOW_HANDLE_CACHE.lock();
+            cache.insert(
+                key,
+                WindowHandleCacheEntry {
+                    hwnd: result.map(|h| h.0 as isize),
+                    cached_at: now,
+                },
+            );
+        }
+
+        result
     }
 
     fn capture_window_preview_with_candidates_impl(
@@ -1823,6 +1882,10 @@ mod fallback {
         Vec::new()
     }
 
+    pub fn invalidate_window_handle_cache() {}
+    #[cfg(test)]
+    pub fn is_window_handle_cache_empty() -> bool { true }
+
     pub fn process_id_for_window(_selector: Option<&str>) -> Option<u32> {
         None
     }
@@ -2062,6 +2125,27 @@ mod tests {
 
         // Clean up
         crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[test]
+    fn test_window_handle_caching_and_invalidation() {
+        invalidate_window_handle_cache();
+
+        // Looking up non-existent window should return None and cache the negative result
+        let start = std::time::Instant::now();
+        assert_eq!(find_window_handle(Some("NonExistentWindow_ABC_XYZ_123")), None);
+        let first_duration = start.elapsed();
+
+        // Second lookup must be nearly instant due to negative cache
+        let start2 = std::time::Instant::now();
+        assert_eq!(find_window_handle(Some("NonExistentWindow_ABC_XYZ_123")), None);
+        let second_duration = start2.elapsed();
+
+        assert!(second_duration <= first_duration);
+
+        // Invalidation clears cache
+        invalidate_window_handle_cache();
+        assert!(is_window_handle_cache_empty());
     }
 }
 
