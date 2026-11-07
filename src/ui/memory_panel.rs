@@ -18962,7 +18962,7 @@ impl CrosshairApp {
 
         let scan_options = if self.memory_panel.scan_scope_all {
             MemoryScanOptions {
-                writable: true,
+                writable: false,
                 executable: true,
                 copy_on_write: true,
                 active_memory_only: false,
@@ -18972,10 +18972,9 @@ impl CrosshairApp {
                 alignment: None,
             }
         } else {
-            let exec = self.memory_panel.scan_executable || !self.memory_panel.scan_writable;
             MemoryScanOptions {
-                writable: self.memory_panel.scan_writable,
-                executable: exec,
+                writable: false,
+                executable: true,
                 copy_on_write: self.memory_panel.scan_copy_on_write,
                 active_memory_only: self.memory_panel.scan_active_memory_only,
                 mem_private: self.memory_panel.scan_mem_private,
@@ -19198,7 +19197,12 @@ impl CrosshairApp {
                                 let addr_str = selected.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
                                 RichText::new(format!("1 (Unique!){}", addr_str)).color(Color32::from_rgb(90, 240, 140)).strong()
                             } else if selected.match_count > 1 {
-                                RichText::new(format!("{} {}", selected.match_count, self.tr("results", "kết quả"))).color(Color32::from_rgb(240, 205, 80))
+                                let count_display = if selected.match_count >= 25 {
+                                    format!("{}+", selected.match_count)
+                                } else {
+                                    selected.match_count.to_string()
+                                };
+                                RichText::new(format!("{} {}", count_display, self.tr("results", "kết quả"))).color(Color32::from_rgb(240, 205, 80))
                             } else {
                                 RichText::new(format!("0 {}", self.tr("results", "kết quả"))).color(Color32::from_rgb(140, 140, 140))
                             };
@@ -24840,6 +24844,19 @@ fn format_aob_tokens_to_string(tokens: &[Option<u8>]) -> (String, usize) {
     (parts.join(" "), wc)
 }
 
+fn add_aob_candidate(
+    candidates: &mut Vec<(String, String, usize)>,
+    seen: &mut HashSet<String>,
+    len: usize,
+    label: String,
+    mutated: &[Option<u8>],
+) {
+    let (pat, wc) = format_aob_tokens_to_string(mutated);
+    if wc > 0 && wc < len && seen.insert(pat.clone()) {
+        candidates.push((label, pat, wc));
+    }
+}
+
 pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String, usize)> {
     let tokens = parse_manual_aob_tokens(input_aob);
     if tokens.is_empty() {
@@ -24884,7 +24901,6 @@ pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String,
         // Step 2: Progressive reduction - replace ?? back with original non-zero values
         let m = non_zero_indices.len();
         if m >= 2 {
-            // Restore in progressive percentages: 25%, 50%, 75%
             let percentages = if m >= 4 {
                 vec![25, 50, 75]
             } else {
@@ -24975,7 +24991,6 @@ pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String,
             }
 
             // Mask multi-byte non-zero runs (>= 4 bytes: pointers, float/double fields, timestamps)
-            // while preserving small scalar flags (< 4 bytes) and all 00 bytes
             let mut cluster_mutated = tokens.clone();
             let mut run_start: Option<usize> = None;
             let mut run_len = 0;
@@ -25071,69 +25086,243 @@ pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String,
                 }
             }
         }
-    } else {
-        // Strategy 2: Code instructions (few or no zero bytes)
-        // Keep opcode (+00), mask operands
-        if len >= 2 {
+
+        // Mask all zeros, keep non-zero bytes as anchors
+        let mut mask_zeros = tokens.clone();
+        for &idx in &zero_indices {
+            mask_zeros[idx] = None;
+        }
+        add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask all zeros (keep {} non-zeros)", non_zero_indices.len()), &mask_zeros);
+    }
+
+    // Strategy 2: Code instructions & opcodes (CALL, JMP, Jcc, REX, ModR/M, RIP-relative)
+    // CALL / JMP rel32 (E8 / E9 xx xx xx xx)
+    for i in 0..len {
+        if (tokens[i] == Some(0xE8) || tokens[i] == Some(0xE9)) && i + 4 < len {
             let mut mutated = tokens.clone();
-            for i in 1..len {
+            for k in 1..=4 {
+                mutated[i + k] = None;
+            }
+            let op_name = if tokens[i] == Some(0xE8) { "CALL" } else { "JMP" };
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask {} rel32 displacement (+{:02X}..+{:02X})", op_name, i + 1, i + 4), &mutated);
+        }
+    }
+
+    // Jcc rel32 (0F 80..8F xx xx xx xx)
+    for i in 0..len {
+        if tokens[i] == Some(0x0F) && i + 5 < len {
+            if let Some(second) = tokens[i + 1] {
+                if (0x80..=0x8F).contains(&second) {
+                    let mut mutated = tokens.clone();
+                    for k in 2..=5 {
+                        mutated[i + k] = None;
+                    }
+                    add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask Jcc rel32 displacement (+{:02X}..+{:02X})", i + 2, i + 5), &mutated);
+                }
+            }
+        }
+    }
+
+    // Short jumps (70..7F, EB xx)
+    for i in 0..len {
+        if let Some(b) = tokens[i] {
+            if ((0x70..=0x7F).contains(&b) || b == 0xEB) && i + 1 < len {
+                let mut mutated = tokens.clone();
+                mutated[i + 1] = None;
+                add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask short jump offset (+{:02X})", i + 1), &mutated);
+            }
+        }
+    }
+
+    // x64 REX instructions (48 8B, 48 89, 48 8D, 48 39, 48 3B, 48 85, 48 C7, etc.)
+    for i in 0..len {
+        if let Some(rex) = tokens[i] {
+            if (0x48..=0x4F).contains(&rex) && i + 2 < len {
+                let mut mutated_modrm = tokens.clone();
+                mutated_modrm[i + 2] = None;
+                add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask ModR/M register byte (+{:02X})", i + 2), &mutated_modrm);
+
+                if i + 6 < len {
+                    let mut mutated_disp = tokens.clone();
+                    for k in 3..=6 {
+                        mutated_disp[i + k] = None;
+                    }
+                    add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask RIP displacement (+{:02X}..+{:02X})", i + 3, i + 6), &mutated_disp);
+                }
+            }
+        }
+    }
+
+    // Keep opcode (+00), mask operands
+    if len >= 2 {
+        let mut mutated = tokens.clone();
+        for i in 1..len {
+            mutated[i] = None;
+        }
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push((format!("Keep opcode (+00), mask operands"), pat, wc));
+        }
+    }
+
+    // Progressive code masks (keep 25%, 33%, 50%, 66%, 75% of instructions)
+    if len >= 4 {
+        for pct in [25, 33, 50, 66, 75] {
+            let keep_count = ((len * pct + 50) / 100).clamp(1, len.saturating_sub(1));
+            let mut mutated = tokens.clone();
+            for i in keep_count..len {
                 mutated[i] = None;
             }
             let (pat, wc) = format_aob_tokens_to_string(&mutated);
             if seen.insert(pat.clone()) {
-                candidates.push((format!("Keep opcode (+00), mask operands"), pat, wc));
-            }
-        }
-
-        // Progressive code masks (keep 25%, 50%, 75% of instructions)
-        if len >= 4 {
-            for pct in [25, 50, 75] {
-                let keep_count = ((len * pct + 50) / 100).clamp(1, len.saturating_sub(1));
-                let mut mutated = tokens.clone();
-                for i in keep_count..len {
-                    mutated[i] = None;
-                }
-                let (pat, wc) = format_aob_tokens_to_string(&mutated);
-                if seen.insert(pat.clone()) {
-                    candidates.push((
-                        format!("Narrow: Keep {}% code ({} wildcards)", pct, wc),
-                        pat,
-                        wc,
-                    ));
-                }
-            }
-        }
-
-        // Suffix 4-byte displacement (typical call/jump offset or immediate)
-        if len >= 5 {
-            let mut mutated = tokens.clone();
-            for k in (len - 4)..len {
-                mutated[k] = None;
-            }
-            let (pat, wc) = format_aob_tokens_to_string(&mutated);
-            if seen.insert(pat.clone()) {
                 candidates.push((
-                    format!("Mask call/jump displacement (+{:02X}..+{:02X})", len - 4, len - 1),
+                    format!("Narrow: Keep {}% code ({} wildcards)", pct, wc),
                     pat,
                     wc,
                 ));
             }
-        }
 
-        // Suffix 8-byte pointer (typical 64-bit absolute address or QWORD immediate)
-        if len >= 10 {
+            let mut mutated_tail = tokens.clone();
+            for i in 0..(len - keep_count) {
+                mutated_tail[i] = None;
+            }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Narrow: Keep tail {}% code ({} wildcards)", pct, mutated_tail.iter().filter(|t| t.is_none()).count()), &mutated_tail);
+        }
+    }
+
+    // Suffix 4-byte displacement (typical call/jump offset or immediate)
+    if len >= 5 {
+        let mut mutated = tokens.clone();
+        for k in (len - 4)..len {
+            mutated[k] = None;
+        }
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push((
+                format!("Mask call/jump displacement (+{:02X}..+{:02X})", len - 4, len - 1),
+                pat,
+                wc,
+            ));
+        }
+    }
+
+    // Suffix 8-byte pointer (typical 64-bit absolute address or QWORD immediate)
+    if len >= 10 {
+        let mut mutated = tokens.clone();
+        for k in (len - 8)..len {
+            mutated[k] = None;
+        }
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push((
+                format!("Mask 64-bit displacement (+{:02X}..+{:02X})", len - 8, len - 1),
+                pat,
+                wc,
+            ));
+        }
+    }
+
+    // Strategy 3: Sliding 4-Byte (Dword) Masks (32-bit offset/imm/pointer)
+    if len >= 5 {
+        for i in 0..=len - 4 {
             let mut mutated = tokens.clone();
-            for k in (len - 8)..len {
-                mutated[k] = None;
+            for k in 0..4 {
+                mutated[i + k] = None;
             }
-            let (pat, wc) = format_aob_tokens_to_string(&mutated);
-            if seen.insert(pat.clone()) {
-                candidates.push((
-                    format!("Mask 64-bit displacement (+{:02X}..+{:02X})", len - 8, len - 1),
-                    pat,
-                    wc,
-                ));
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask 4B (Dword) @ +{:02X}..+{:02X}", i, i + 3), &mutated);
+        }
+    }
+
+    // Strategy 4: Sliding 8-Byte (Qword) Masks (64-bit pointer/address)
+    if len >= 10 {
+        for i in 0..=len - 8 {
+            let mut mutated = tokens.clone();
+            for k in 0..8 {
+                mutated[i + k] = None;
             }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask 8B (Qword) @ +{:02X}..+{:02X}", i, i + 7), &mutated);
+        }
+    }
+
+    // Strategy 5: Sliding 2-Byte Masks (16-bit word / short offset)
+    if len >= 4 {
+        for i in 0..=len - 2 {
+            let mut mutated = tokens.clone();
+            mutated[i] = None;
+            mutated[i + 1] = None;
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask 2B @ +{:02X}..+{:02X}", i, i + 1), &mutated);
+        }
+    }
+
+    // Strategy 6: Sliding 1-Byte Masks (Single variable byte)
+    if len >= 3 {
+        for i in 0..len {
+            let mut mutated = tokens.clone();
+            mutated[i] = None;
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask 1B @ +{:02X}", i), &mutated);
+        }
+    }
+
+    // Strategy 7: Header & Trailer Signature Anchors
+    for keep in [2, 3, 4, 6, 8] {
+        if keep < len {
+            let mut mutated_head = tokens.clone();
+            for i in keep..len {
+                mutated_head[i] = None;
+            }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Keep Header {}B, mask rest", keep), &mutated_head);
+
+            let mut mutated_tail = tokens.clone();
+            for i in 0..(len - keep) {
+                mutated_tail[i] = None;
+            }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Keep Trailer {}B, mask front", keep), &mutated_tail);
+        }
+    }
+
+    for (h_keep, t_keep) in [(2, 2), (3, 3), (4, 4), (6, 4), (4, 6)] {
+        if h_keep + t_keep < len {
+            let mut mutated = tokens.clone();
+            for i in h_keep..(len - t_keep) {
+                mutated[i] = None;
+            }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Keep Header {}B + Trailer {}B (mask middle)", h_keep, t_keep), &mutated);
+        }
+    }
+
+    // Strategy 8: Alternating / Stride Permutations
+    if len >= 4 {
+        let mut mutated_even = tokens.clone();
+        for i in (0..len).step_by(2) {
+            mutated_even[i] = None;
+        }
+        add_aob_candidate(&mut candidates, &mut seen, len, "Mask even bytes (stride 2)".to_string(), &mutated_even);
+
+        let mut mutated_odd = tokens.clone();
+        for i in (1..len).step_by(2) {
+            mutated_odd[i] = None;
+        }
+        add_aob_candidate(&mut candidates, &mut seen, len, "Mask odd bytes (stride 2)".to_string(), &mutated_odd);
+    }
+
+    // Strategy 9: Aligned Struct Field Masks
+    if len >= 8 {
+        for chunk_start in (0..=len.saturating_sub(4)).step_by(4) {
+            let mut mutated = tokens.clone();
+            for k in 0..4 {
+                mutated[chunk_start + k] = None;
+            }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask 32-bit field offsets [+{:02X}..+{:02X}]", chunk_start, chunk_start + 3), &mutated);
+        }
+    }
+
+    if len >= 16 {
+        for chunk_start in (0..=len.saturating_sub(8)).step_by(8) {
+            let mut mutated = tokens.clone();
+            for k in 0..8 {
+                mutated[chunk_start + k] = None;
+            }
+            add_aob_candidate(&mut candidates, &mut seen, len, format!("Mask 64-bit pointer slots [+{:02X}..+{:02X}]", chunk_start, chunk_start + 7), &mutated);
         }
     }
 
@@ -25203,6 +25392,29 @@ mod tests {
         assert!(struct_candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Narrow: Keep")));
         // Must NOT have single-byte placeholder mutations like "?? 00 00 00 ... 56 49 ..."
         assert!(!struct_candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Wildcard 1 byte")));
+        assert!(struct_candidates.len() >= 25);
+    }
+
+    #[test]
+    fn test_generate_aob_wildcard_candidates_diverse() {
+        let x64_call_code = "E8 12 34 56 78 48 8B 05 90 AB CD EF 0F 84 44 33 22 11";
+        let candidates = generate_aob_wildcard_candidates(x64_call_code);
+        assert!(candidates.len() >= 20);
+        // CALL rel32
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("CALL rel32")));
+        // Jcc rel32
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Jcc rel32")));
+        // REX ModR/M & RIP disp
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("ModR/M") || lbl.contains("RIP displacement")));
+        // Sliding 4B
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Mask 4B (Dword)")));
+        // Sliding 1B
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Mask 1B")));
+        // Header & Trailer anchors
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Keep Header")));
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Keep Trailer")));
+        // Stride
+        assert!(candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("stride 2")));
     }
 
     #[test]
