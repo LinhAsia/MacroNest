@@ -713,7 +713,7 @@ impl CrosshairApp {
                 });
         } else {
             Grid::new((preset_id, object_id, "geometry-spec-grid"))
-                .num_columns(4)
+                .num_columns(2)
                 .spacing([Self::GEOMETRY_GRID_SPACING_X, 6.0])
                 .min_col_width(0.0)
                 .show(ui, |ui| match spec.shape {
@@ -1379,7 +1379,7 @@ impl CrosshairApp {
 
         {
             Grid::new((preset_id, object_id, "geometry-spec-grid-2"))
-                .num_columns(4)
+                .num_columns(2)
                 .spacing([Self::GEOMETRY_GRID_SPACING_X, 6.0])
                 .min_col_width(0.0)
                 .show(ui, |ui| {
@@ -1572,39 +1572,40 @@ impl CrosshairApp {
                 [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
                 egui::Label::new(Self::geometry_label_text(language, label_a)),
             );
-            let id_a = ui.make_persistent_id((preset_id, object_id, row_id, "expr-a"));
-            let response_a = Self::render_variable_text_edit(
-                ui,
-                expr_a,
-                id_a,
-                norm_w_a,
-                exp_w_a,
-                Self::GEOMETRY_FIELD_HEIGHT,
-                exp_h_a,
-                "",
-                is_long_a,
-            );
-            changed |= response_a.changed();
-            Self::apply_vietnamese_input_if_changed(
-                &response_a,
-                vietnamese_input_enabled,
-                vietnamese_input_mode,
-                expr_a,
-            );
-            Self::render_variable_suggestions(ui, &response_a, expr_a, &[], language);
         } else {
-            ui.label("");
             ui.label("");
         }
 
-        if !label_b.is_empty() {
-            ui.add_sized(
-                [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
-                egui::Label::new(Self::geometry_label_text(language, label_b)),
-            );
-            let id_b = ui.make_persistent_id((preset_id, object_id, row_id, "expr-b"));
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
+
+            if !label_a.is_empty() {
+                let id_a = ui.make_persistent_id((preset_id, object_id, row_id, "expr-a"));
+                let response_a = Self::render_variable_text_edit(
+                    ui,
+                    expr_a,
+                    id_a,
+                    norm_w_a,
+                    exp_w_a,
+                    Self::GEOMETRY_FIELD_HEIGHT,
+                    exp_h_a,
+                    "",
+                    is_long_a,
+                );
+                changed |= response_a.changed();
+                Self::apply_vietnamese_input_if_changed(
+                    &response_a,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    expr_a,
+                );
+                Self::render_variable_suggestions(ui, &response_a, expr_a, &[], language);
+            }
+
+            if !label_b.is_empty() {
+                ui.add_space(8.0);
+                ui.label(Self::geometry_label_text(language, label_b));
+                let id_b = ui.make_persistent_id((preset_id, object_id, row_id, "expr-b"));
                 let response_b = Self::render_variable_text_edit(
                     ui,
                     expr_b,
@@ -1624,41 +1625,38 @@ impl CrosshairApp {
                     expr_b,
                 );
                 Self::render_variable_suggestions(ui, &response_b, expr_b, &[], language);
+            }
 
-                if pair_index != 255 {
-                    let capture_kind = if pair_index == 1 {
-                        MouseCaptureKind::GeometrySecondaryPos
-                    } else {
-                        MouseCaptureKind::GeometryPrimaryPos
-                    };
-                    if ui
-                        .add_sized(
-                            [24.0, 21.0],
-                            Button::new(Self::material_icon_text(0xe55f, 16.0)),
-                        )
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Pick coordinates from screen",
-                            "Lấy tọa độ từ màn hình",
-                        ))
-                        .clicked()
-                    {
-                        *begin_mouse_move_absolute_capture_target =
-                            Some(MouseMoveAbsoluteCaptureTarget {
-                                group_id: group_id_override,
-                                preset_id,
-                                step_index: object_id as usize,
-                                capture_kind,
-                                extra_cond_index: None,
-                                is_hold_stop: false,
-                            });
-                    }
+            if pair_index != 255 {
+                let capture_kind = if pair_index == 1 {
+                    MouseCaptureKind::GeometrySecondaryPos
+                } else {
+                    MouseCaptureKind::GeometryPrimaryPos
+                };
+                if ui
+                    .add_sized(
+                        [24.0, 21.0],
+                        Button::new(Self::material_icon_text(0xe55f, 16.0)),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Pick coordinates from screen",
+                        "Lấy tọa độ từ màn hình",
+                    ))
+                    .clicked()
+                {
+                    *begin_mouse_move_absolute_capture_target =
+                        Some(MouseMoveAbsoluteCaptureTarget {
+                            group_id: group_id_override,
+                            preset_id,
+                            step_index: object_id as usize,
+                            capture_kind,
+                            extra_cond_index: None,
+                            is_hold_stop: false,
+                        });
                 }
-            });
-        } else {
-            ui.label("");
-            ui.label("");
-        }
+            }
+        });
 
         ui.end_row();
         changed

@@ -19021,37 +19021,40 @@ impl CrosshairApp {
     }
 
     fn render_manual_aob_wildcard_explorer(&mut self, ui: &mut egui::Ui) {
+        if self.memory_panel.aob_wildcard_scenarios.is_empty() && !self.memory_panel.aob_wildcard_scanning {
+            return;
+        }
+
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(self.tr("Auto Wildcard Permutations (??)", "Tự động thử nghiệm Wildcard (??)")).strong());
+                ui.label(RichText::new(self.tr("Auto Wildcard Permutations (??)", "Thử nghiệm Wildcard (??)")).strong());
                 if self.memory_panel.aob_wildcard_scanning {
                     ui.spinner();
                     ui.label(RichText::new(&self.memory_panel.aob_wildcard_status).color(Color32::from_rgb(90, 205, 250)));
-                    if ui.button(self.tr("Cancel", "Dừng")).clicked() {
+                    if ui.small_button(self.tr("Cancel", "Dừng")).clicked() {
                         self.memory_panel.aob_wildcard_cancel.store(true, Ordering::Relaxed);
                         self.memory_panel.aob_wildcard_scanning = false;
                         self.memory_panel.aob_wildcard_rx = None;
                     }
                 } else if !self.memory_panel.aob_wildcard_scenarios.is_empty() {
                     ui.label(RichText::new(&self.memory_panel.aob_wildcard_status).small().color(Color32::from_rgb(180, 220, 180)));
-                    if ui.button(self.tr("Rescan", "Quét lại")).clicked() {
+                    if ui.small_button(self.tr("Rescan", "Quét lại")).clicked() {
                         let src = self.memory_panel.aob_wildcard_source_input.clone();
                         if !src.is_empty() {
                             self.start_aob_wildcard_exploration(&src);
                         }
                     }
-                } else {
-                    ui.label(RichText::new(self.tr(
-                        "Paste an AOB above and click 'Auto Wildcard' to test patterns",
-                        "Dán mã AOB ở trên rồi bấm 'Tự động thử wildcard' để kiểm tra"
-                    )).small().weak());
+                    if ui.small_button(self.tr("Close", "Đóng")).clicked() {
+                        self.memory_panel.aob_wildcard_scenarios.clear();
+                        self.memory_panel.aob_wildcard_selected = None;
+                    }
                 }
             });
 
             if self.memory_panel.process_pid.is_none() {
                 ui.label(RichText::new(self.tr(
-                    "[!] No target process selected. Select a process above to scan memory and count matching addresses.",
-                    "[!] Chưa chọn Process. Hãy đính kèm hoặc chọn Process ở trên để app quét bộ nhớ và đếm số địa chỉ khớp."
+                    "Note: No target process selected. Address matches are not scanned in memory.",
+                    "Lưu ý: Chưa chọn Process. Không quét đếm địa chỉ khớp trong RAM."
                 )).small().color(Color32::from_rgb(255, 190, 80)));
             }
 
@@ -19071,14 +19074,14 @@ impl CrosshairApp {
                     }
                     if ui.selectable_label(
                         self.memory_panel.aob_wildcard_filter == AobWildcardFilter::UniqueOnly,
-                        RichText::new(format!("{} ({})", self.tr("Unique (1 match)", "Duy nhất (1 kết quả)"), unique_count))
+                        RichText::new(format!("{} ({})", self.tr("Unique (1)", "Duy nhất (1)"), unique_count))
                             .color(if unique_count > 0 { Color32::from_rgb(90, 240, 140) } else { Color32::from_rgb(150, 150, 150) }),
                     ).clicked() {
                         self.memory_panel.aob_wildcard_filter = AobWildcardFilter::UniqueOnly;
                     }
                     if ui.selectable_label(
                         self.memory_panel.aob_wildcard_filter == AobWildcardFilter::WithMatches,
-                        format!("{} ({})", self.tr("With Matches (>=1)", "Có kết quả (>= 1)"), with_matches),
+                        format!("{} ({})", self.tr("Matches (>=1)", "Có kết quả (>= 1)"), with_matches),
                     ).clicked() {
                         self.memory_panel.aob_wildcard_filter = AobWildcardFilter::WithMatches;
                     }
@@ -19099,20 +19102,8 @@ impl CrosshairApp {
 
                 egui::ScrollArea::vertical()
                     .id_salt("aob_wildcard_scenarios_scroll")
-                    .max_height(180.0)
+                    .max_height(160.0)
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(self.tr("Scenario / Case", "Trường hợp")).strong());
-                            ui.add_space(80.0);
-                            ui.label(RichText::new(self.tr("Wildcards", "Wildcard")).strong());
-                            ui.add_space(30.0);
-                            ui.label(RichText::new(self.tr("Address Results", "Số địa chỉ tìm được")).strong());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(RichText::new(self.tr("Actions", "Thao tác")).strong());
-                            });
-                        });
-                        ui.separator();
-
                         for (idx, scenario) in self.memory_panel.aob_wildcard_scenarios.iter().enumerate() {
                             let matches_filter = match filter {
                                 AobWildcardFilter::All => true,
@@ -19138,35 +19129,35 @@ impl CrosshairApp {
                                 ui.label(RichText::new(format!("{} x ??", scenario.wildcard_count)).small().color(Color32::from_rgb(180, 180, 180)));
 
                                 if self.memory_panel.process_pid.is_none() {
-                                    ui.label(RichText::new(self.tr("Not scanned", "Chưa quét")).small().weak());
+                                    ui.label(RichText::new(self.tr("Generated", "Đã tạo")).small().weak());
                                 } else if scenario.match_count == 1 {
                                     let addr_str = scenario.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
                                     ui.label(
-                                        RichText::new(format!("1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str))
+                                        RichText::new(format!("1 (Unique!){}", addr_str))
                                             .strong()
                                             .color(Color32::from_rgb(90, 240, 140))
                                     );
                                 } else if scenario.match_count > 1 {
                                     let limit_mark = if scenario.match_count >= 25 { "+" } else { "" };
                                     ui.label(
-                                        RichText::new(format!("{}{} {}", scenario.match_count, limit_mark, self.tr("results", "kết quả")))
+                                        RichText::new(format!("{}{}", scenario.match_count, limit_mark))
                                             .color(Color32::from_rgb(240, 205, 80))
                                     );
                                 } else {
                                     ui.label(
-                                        RichText::new(format!("0 {}", self.tr("results", "kết quả")))
+                                        RichText::new("0")
                                             .color(Color32::from_rgb(140, 140, 140))
                                     );
                                 }
 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(self.tr("-> Sample 1", "-> Mẫu 1")).on_hover_text(self.tr("Use this pattern in Sample 1", "Dán mã AOB này vào ô Mẫu 1")).clicked() {
+                                    if ui.small_button(self.tr("-> S1", "-> M1")).on_hover_text(self.tr("Use in Sample 1", "Dán vào Mẫu 1")).clicked() {
                                         use_as_sample_1 = Some(scenario.pattern.clone());
                                     }
-                                    if ui.button(self.tr("Copy", "Sao chép")).on_hover_text(self.tr("Copy this AOB pattern", "Sao chép mã AOB này")).clicked() {
+                                    if ui.small_button(self.tr("📋", "📋")).on_hover_text(self.tr("Copy pattern", "Sao chép mã")).clicked() {
                                         copy_pattern = Some((scenario.pattern.clone(), scenario.label.clone()));
                                     }
-                                    let show_btn = ui.button(RichText::new(self.tr("AOB Code", "Xem mã AOB")).color(Color32::from_rgb(90, 205, 250)));
+                                    let show_btn = ui.small_button(RichText::new(self.tr("View", "Xem")).color(Color32::from_rgb(90, 205, 250)));
                                     if show_btn.clicked() {
                                         selected_to_view = Some(scenario.clone());
                                     }
@@ -19181,7 +19172,7 @@ impl CrosshairApp {
                 if let Some((pat, lbl)) = copy_pattern {
                     ui.ctx().copy_text(pat);
                     self.memory_panel.manual_aob_feedback = Some((
-                        format!("{} ({})", self.tr("Copied AOB pattern to clipboard", "Đã sao chép mã AOB"), lbl),
+                        format!("{} ({})", self.tr("Copied AOB pattern", "Đã sao chép mã AOB"), lbl),
                         Instant::now(),
                     ));
                 }
@@ -19202,10 +19193,10 @@ impl CrosshairApp {
                     ui.add_space(4.0);
                     ui.group(|ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{}: {}", self.tr("Full AOB Code", "Mã AOB đầy đủ"), selected.label)).strong().color(Color32::from_rgb(90, 205, 250)));
+                            ui.label(RichText::new(format!("{}: {}", self.tr("Pattern", "Mẫu"), selected.label)).strong().color(Color32::from_rgb(90, 205, 250)));
                             let match_text = if selected.match_count == 1 {
                                 let addr_str = selected.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
-                                RichText::new(format!("1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str)).color(Color32::from_rgb(90, 240, 140)).strong()
+                                RichText::new(format!("1 (Unique!){}", addr_str)).color(Color32::from_rgb(90, 240, 140)).strong()
                             } else if selected.match_count > 1 {
                                 RichText::new(format!("{} {}", selected.match_count, self.tr("results", "kết quả"))).color(Color32::from_rgb(240, 205, 80))
                             } else {
@@ -19214,16 +19205,16 @@ impl CrosshairApp {
                             ui.label(match_text);
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button(self.tr("Hide", "Ẩn")).clicked() {
+                                if ui.small_button(self.tr("Hide", "Ẩn")).clicked() {
                                     close_preview = true;
                                 }
-                                if ui.button(self.tr("Use in Sample 2 ->", "Dán vào Mẫu 2 ->")).clicked() {
+                                if ui.small_button(self.tr("-> S2", "-> M2")).clicked() {
                                     apply_to_sample_2 = true;
                                 }
-                                if ui.button(self.tr("Use in Sample 1 ->", "Dán vào Mẫu 1 ->")).clicked() {
+                                if ui.small_button(self.tr("-> S1", "-> M1")).clicked() {
                                     apply_to_sample_1 = true;
                                 }
-                                if ui.button(RichText::new(self.tr("Copy Full AOB", "Sao chép mã AOB")).strong()).clicked() {
+                                if ui.small_button(RichText::new(self.tr("📋 Copy", "📋 Sao chép")).strong()).clicked() {
                                     copy_selected = true;
                                 }
                             });
@@ -19257,7 +19248,7 @@ impl CrosshairApp {
                     if copy_selected {
                         ui.ctx().copy_text(selected.pattern.clone());
                         self.memory_panel.manual_aob_feedback = Some((
-                            self.tr("Copied full AOB pattern to clipboard!", "Đã sao chép mã AOB đầy đủ vào bộ nhớ tạm!").to_string(),
+                            self.tr("Copied AOB pattern to clipboard!", "Đã sao chép mã AOB vào clipboard!").to_string(),
                             Instant::now(),
                         ));
                     }
@@ -19912,12 +19903,8 @@ impl CrosshairApp {
         if !self.memory_panel.show_manual_aob_compare {
             return;
         }
-        self.poll_aob_wildcard_job();
-        if self.memory_panel.aob_wildcard_scanning {
-            ctx.request_repaint_after(Duration::from_millis(80));
-        }
+
         let mut open = true;
-        let mut request_close = false;
         let screen_rect = ctx.screen_rect();
         let inset_bounds = screen_rect.shrink2(vec2(32.0, 32.0));
         let window = egui::Window::new(self.tr("Manual AOB Code Comparison", "So sánh mã AOB thủ công"))
@@ -19927,362 +19914,340 @@ impl CrosshairApp {
             .default_pos(screen_rect.center())
             .constrain_to(inset_bounds)
             .default_width(780.0)
-            .default_height(640.0)
-            .min_width(540.0)
-            .min_height(400.0);
+            .default_height(520.0)
+            .min_width(520.0)
+            .min_height(360.0);
 
         window.show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("manual-aob-dialog-scroll-area")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(self.tr(
-                        "Compare 2 AOB patterns and generate wildcards (??). Data remains saved until you close the app.",
-                        "So sánh 2 chuỗi mã AOB và tạo wildcard (??). Dữ liệu được lưu giữ cho đến khi tắt app."
-                    ))
-                    .small(),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(self.tr("Close", "Đóng")).clicked() {
-                        request_close = true;
-                    }
-                    if ui.button(self.tr("Swap (1 <-> 2)", "Đảo vị trí (1 <-> 2)")).clicked() {
-                        std::mem::swap(
-                            &mut self.memory_panel.manual_aob_input_1,
-                            &mut self.memory_panel.manual_aob_input_2,
-                        );
-                    }
-                    if ui.button(self.tr("Clear All", "Xóa tất cả")).clicked() {
-                        self.memory_panel.manual_aob_input_1.clear();
-                        self.memory_panel.manual_aob_input_2.clear();
-                    }
-                });
-            });
-            ui.add_space(4.0);
-
-            let tokens1 = parse_manual_aob_tokens(&self.memory_panel.manual_aob_input_1);
-            let tokens2 = parse_manual_aob_tokens(&self.memory_panel.manual_aob_input_2);
-
-            // AOB 1
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{} ({} bytes):", self.tr("AOB Sample 1", "Mẫu AOB 1"), tokens1.len())).strong());
-                    if ui.button(self.tr("Clear", "Xóa")).clicked() {
-                        self.memory_panel.manual_aob_input_1.clear();
-                    }
-                    if !tokens1.is_empty() {
-                        let btn = ui.button(
-                            RichText::new(self.tr("Auto Wildcard (??)", "Tự động thử wildcard ??"))
-                                .color(Color32::from_rgb(90, 205, 250))
-                        ).on_hover_text(self.tr(
-                            "Generate multiple wildcard permutations (??) from Sample 1 and scan memory to count address matches",
-                            "Tự động tạo các trường hợp wildcard (??) từ Mẫu 1 và quét bộ nhớ để đếm số địa chỉ tìm được"
-                        ));
-                        if btn.clicked() {
-                            let input = self.memory_panel.manual_aob_input_1.clone();
-                            self.start_aob_wildcard_exploration(&input);
-                        }
-                    }
-                });
-                let hint_1 = self.tr(
-                    "Paste or type AOB pattern 1 (e.g. 48 89 5C 24 08 57 ?? 48...)",
-                    "Dán hoặc nhập mã AOB 1 (ví dụ: 48 89 5C 24 08 57 ?? 48...)",
-                ).to_string();
-                ui.add_space(2.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("manual-aob-1-scroll")
-                    .max_height(80.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.memory_panel.manual_aob_input_1)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_rows(3)
-                                .desired_width(ui.available_width())
-                                .hint_text(hint_1),
-                        );
-                    });
-            });
-            ui.add_space(4.0);
-
-            // AOB 2
-            let hint_2 = self.tr(
-                "Paste or type AOB pattern 2 (e.g. 48 89 5C 24 10 57 ?? 48...)",
-                "Dán hoặc nhập mã AOB 2 (ví dụ: 48 89 5C 24 10 57 ?? 48...)",
-            ).to_string();
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{} ({} bytes):", self.tr("AOB Sample 2", "Mẫu AOB 2"), tokens2.len())).strong());
-                    if ui.button(self.tr("Clear", "Xóa")).clicked() {
-                        self.memory_panel.manual_aob_input_2.clear();
-                    }
-                    if !tokens2.is_empty() {
-                        let btn = ui.button(
-                            RichText::new(self.tr("Auto Wildcard (??)", "Tự động thử wildcard ??"))
-                                .color(Color32::from_rgb(90, 205, 250))
-                        ).on_hover_text(self.tr(
-                            "Generate multiple wildcard permutations (??) from Sample 2 and scan memory to count address matches",
-                            "Tự động tạo các trường hợp wildcard (??) từ Mẫu 2 và quét bộ nhớ để đếm số địa chỉ tìm được"
-                        ));
-                        if btn.clicked() {
-                            let input = self.memory_panel.manual_aob_input_2.clone();
-                            self.start_aob_wildcard_exploration(&input);
-                        }
-                    }
-                });
-                ui.add_space(2.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("manual-aob-2-scroll")
-                    .max_height(80.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.memory_panel.manual_aob_input_2)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_rows(3)
-                                .desired_width(ui.available_width())
-                                .hint_text(hint_2),
-                        );
-                    });
-            });
-            ui.add_space(4.0);
-
-            // Result
-            let min_len = tokens1.len().min(tokens2.len());
-            let (result_tokens, fixed_count, wildcard_count) =
-                compare_manual_aob_token_lists(&tokens1, &tokens2);
-            let result_pattern = result_tokens.join(" ");
-
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(self.tr("Comparison Result:", "Kết quả so sánh:")).strong());
-                    if !result_tokens.is_empty() {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} bytes | {} {} ({}%), {} {}",
-                                min_len,
-                                fixed_count,
-                                self.tr("matching", "khớp cố định"),
-                                if min_len > 0 { fixed_count * 100 / min_len } else { 0 },
-                                wildcard_count,
-                                self.tr("wildcards (??)", "wildcard (??)")
-                            ))
-                            .color(Color32::from_rgb(90, 205, 250)),
-                        );
-                    }
-                });
-
-                if tokens1.len() != tokens2.len() && !tokens1.is_empty() && !tokens2.is_empty() {
-                    ui.label(
-                        RichText::new(format!(
-                            "[!] {}: {} {} != {} {} ({} {})",
-                            self.tr("Length mismatch", "Độ dài 2 mẫu không bằng nhau"),
-                            tokens1.len(),
-                            self.tr("bytes in Sample 1", "byte ở Mẫu 1"),
-                            tokens2.len(),
-                            self.tr("bytes in Sample 2", "byte ở Mẫu 2"),
-                            self.tr("compared first", "đã so sánh"),
-                            min_len,
-                        ))
-                        .color(Color32::from_rgb(255, 190, 80)),
-                    );
-                }
-
-                ui.add_space(2.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("manual-aob-result-scroll")
-                    .max_height(90.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut result_pattern.as_str())
-                                .font(egui::TextStyle::Monospace)
-                                .desired_rows(3)
-                                .desired_width(ui.available_width()),
-                        );
-                    });
-
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(
-                            !result_pattern.is_empty(),
-                            egui::Button::new(self.tr("Copy Result", "Sao chép kết quả")),
-                        )
-                        .on_hover_text(self.tr(
-                            "Copy the merged AOB pattern to clipboard",
-                            "Sao chép mã AOB kết quả vào bộ nhớ tạm",
-                        ))
-                        .clicked()
-                    {
-                        ctx.copy_text(result_pattern.clone());
-                        self.memory_panel.manual_aob_feedback = Some((
-                            self.tr("Copied result AOB pattern to clipboard!", "Đã sao chép kết quả AOB vào clipboard!").to_string(),
-                            Instant::now(),
-                        ));
-                    }
-                    if ui
-                        .add_enabled(
-                            !result_pattern.is_empty(),
-                            egui::Button::new(self.tr("Use as Sample 1 ->", "Lấy kết quả làm Mẫu 1 ->")),
-                        )
-                        .on_hover_text(self.tr(
-                            "Put this result into Sample 1 so you can compare it with a 3rd sample in Sample 2",
-                            "Đưa kết quả này lên ô Mẫu 1 để bạn có thể tiếp tục so sánh với mẫu thứ 3 ở ô Mẫu 2",
-                        ))
-                        .clicked()
-                    {
-                        self.memory_panel.manual_aob_input_1 = result_pattern.clone();
-                        self.memory_panel.manual_aob_feedback = Some((
-                            self.tr("Moved result to Sample 1! Now enter Sample 3 into Sample 2 to continue.", "Đã đưa kết quả lên Mẫu 1! Giờ bạn nhập mẫu thứ 3 vào Mẫu 2 để so sánh tiếp.").to_string(),
-                            Instant::now(),
-                        ));
-                    }
-                    if ui
-                        .add_enabled(
-                            !result_pattern.is_empty(),
-                            egui::Button::new(self.tr("Use as Sample 2 ->", "Lấy kết quả làm Mẫu 2 ->")),
-                        )
-                        .on_hover_text(self.tr(
-                            "Put this result into Sample 2",
-                            "Đưa kết quả này vào ô Mẫu 2",
-                        ))
-                        .clicked()
-                    {
-                        self.memory_panel.manual_aob_input_2 = result_pattern.clone();
-                        self.memory_panel.manual_aob_feedback = Some((
-                            self.tr("Moved result to Sample 2!", "Đã đưa kết quả vào Mẫu 2!").to_string(),
-                            Instant::now(),
-                        ));
-                    }
-                    let saved_selected_count = self.memory_panel.selected_saved.len();
-                    if ui
-                        .add_enabled(
-                            !result_pattern.is_empty() && saved_selected_count > 0,
-                            egui::Button::new(self.tr("Apply to Selected Saved", "Lưu vào các địa chỉ đã chọn")),
-                        )
-                        .on_hover_text(self.tr(
-                            "Save this AOB pattern to selected addresses in your Address list",
-                            "Lưu mã AOB kết quả này vào các địa chỉ đang chọn trong danh sách lưu",
-                        ))
-                        .clicked()
-                    {
-                        for &sel_idx in &self.memory_panel.selected_saved {
-                            if let Some(entry) = self.memory_panel.saved.get_mut(sel_idx) {
-                                entry.aob_pattern = Some(result_pattern.clone());
+                    ui.horizontal(|ui| {
+                        if let Some((msg, time)) = &self.memory_panel.manual_aob_feedback {
+                            if time.elapsed() < Duration::from_secs(4) {
+                                ui.label(
+                                    RichText::new(format!("✓ {msg}"))
+                                        .color(Color32::from_rgb(100, 220, 130))
+                                        .strong(),
+                                );
                             }
                         }
-                        self.memory_panel.manual_aob_feedback = Some((
-                            format!("{} ({} {})", self.tr("Applied AOB pattern to", "Đã gắn mã AOB vào"), saved_selected_count, self.tr("addresses", "địa chỉ")),
-                            Instant::now(),
-                        ));
-                    }
-                    if !result_pattern.is_empty() {
-                        let btn = ui.button(
-                            RichText::new(self.tr("Auto Wildcard (??)", "Tự động thử wildcard ??"))
-                                .color(Color32::from_rgb(90, 205, 250))
-                        ).on_hover_text(self.tr(
-                            "Generate multiple wildcard permutations (??) from comparison result and scan memory to count address matches",
-                            "Tự động tạo các trường hợp wildcard (??) từ kết quả so sánh và quét bộ nhớ để đếm số địa chỉ tìm được"
-                        ));
-                        if btn.clicked() {
-                            let input = result_pattern.clone();
-                            self.start_aob_wildcard_exploration(&input);
-                        }
-                    }
-
-                    if let Some((msg, time)) = &self.memory_panel.manual_aob_feedback {
-                        if time.elapsed() < Duration::from_secs(4) {
-                            ui.label(
-                                RichText::new(format!("[OK] {msg}"))
-                                    .color(Color32::from_rgb(100, 220, 130))
-                                    .strong(),
-                            );
-                        }
-                    }
-                });
-            });
-
-            // Visual Byte Diff Grid
-            if min_len > 0 {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(self.tr(
-                        "Visual Byte Diff (16 bytes per row):",
-                        "Bảng so sánh trực quan từng byte (16 byte/hàng):",
-                    ))
-                    .strong(),
-                );
-                ui.add_space(2.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("manual-aob-grid-scroll")
-                    .max_height(140.0)
-                    .show(ui, |ui| {
-                        let total_rows = (min_len + 15) / 16;
-                        for r in 0..total_rows {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 3.0;
-                                ui.label(
-                                    RichText::new(format!("+{:03X}:", r * 16))
-                                        .monospace()
-                                        .color(Color32::from_rgb(140, 140, 140)),
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(self.tr("Clear All", "Xóa tất cả")).clicked() {
+                                self.memory_panel.manual_aob_input_1.clear();
+                                self.memory_panel.manual_aob_input_2.clear();
+                            }
+                            if ui.button(self.tr("Swap (1 ⇄ 2)", "Đảo (1 ⇄ 2)")).clicked() {
+                                std::mem::swap(
+                                    &mut self.memory_panel.manual_aob_input_1,
+                                    &mut self.memory_panel.manual_aob_input_2,
                                 );
-                                for col in 0..16 {
-                                    let idx = r * 16 + col;
-                                    if idx >= min_len {
-                                        break;
-                                    }
-                                    let b1_opt = tokens1.get(idx).copied().flatten();
-                                    let b2_opt = tokens2.get(idx).copied().flatten();
-                                    let byte_match = classify_manual_aob_byte_match(b1_opt, b2_opt);
-                                    let byte_text = &result_tokens[idx];
-                                    let (bg_color, fg_color) = match byte_match {
-                                        ManualAobByteMatch::SameByte => (
-                                            Color32::from_rgba_unmultiplied(50, 180, 80, 50),
-                                            Color32::from_rgb(120, 235, 150),
-                                        ),
-                                        ManualAobByteMatch::SameWildcard => (
-                                            Color32::TRANSPARENT,
-                                            Color32::from_rgb(220, 220, 220),
-                                        ),
-                                        ManualAobByteMatch::Different => (
-                                            Color32::from_rgba_unmultiplied(220, 50, 50, 75),
-                                            Color32::from_rgb(255, 120, 120),
-                                        ),
-                                    };
-                                    let hover_info = match byte_match {
-                                        ManualAobByteMatch::SameByte => {
-                                            format!("Byte {:02X} matches", b1_opt.unwrap_or(0))
-                                        }
-                                        ManualAobByteMatch::SameWildcard => {
-                                            "Both samples have wildcard (??)".to_string()
-                                        }
-                                        ManualAobByteMatch::Different => {
-                                            let s1 = b1_opt.map_or("??".to_string(), |b| format!("{:02X}", b));
-                                            let s2 = b2_opt.map_or("??".to_string(), |b| format!("{:02X}", b));
-                                            format!("Difference: Sample 1 [{s1}] != Sample 2 [{s2}]")
-                                        }
-                                    };
-                                    let label =
-                                        RichText::new(byte_text).monospace().color(fg_color);
-                                    let resp = ui.label(label).on_hover_text(hover_info);
-                                    if bg_color.a() > 0 {
-                                        ui.painter().rect_filled(
-                                            resp.rect.expand2(vec2(1.0, 0.0)),
-                                            2.0,
-                                            bg_color,
-                                        );
+                            }
+                        });
+                    });
+                    ui.add_space(4.0);
+
+                    let tokens1 = parse_manual_aob_tokens(&self.memory_panel.manual_aob_input_1);
+                    let tokens2 = parse_manual_aob_tokens(&self.memory_panel.manual_aob_input_2);
+
+                    // 2 Side-by-side Columns for Sample 1 and Sample 2
+                    ui.columns(2, |columns| {
+                        // Sample 1
+                        columns[0].group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("{}: {}B", self.tr("Sample 1", "Mẫu 1"), tokens1.len())).strong());
+                                if ui.small_button(self.tr("Clear", "Xóa")).clicked() {
+                                    self.memory_panel.manual_aob_input_1.clear();
+                                }
+                                if !tokens1.is_empty() {
+                                    let btn = ui.small_button(
+                                        RichText::new(self.tr("⚡ Wildcard", "⚡ Wildcard"))
+                                            .color(Color32::from_rgb(90, 205, 250))
+                                    ).on_hover_text(self.tr(
+                                        "Generate wildcard permutations from Sample 1",
+                                        "Thử nghiệm tạo các wildcard từ Mẫu 1"
+                                    ));
+                                    if btn.clicked() {
+                                        let input = self.memory_panel.manual_aob_input_1.clone();
+                                        self.start_aob_wildcard_exploration(&input);
                                     }
                                 }
                             });
-                        }
+                            ui.add_space(2.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("manual-aob-1-scroll")
+                                .max_height(75.0)
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut self.memory_panel.manual_aob_input_1)
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_rows(3)
+                                            .desired_width(ui.available_width())
+                                            .hint_text("48 89 5C 24 08 57 ??..."),
+                                    );
+                                });
+                        });
+
+                        // Sample 2
+                        columns[1].group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("{}: {}B", self.tr("Sample 2", "Mẫu 2"), tokens2.len())).strong());
+                                if ui.small_button(self.tr("Clear", "Xóa")).clicked() {
+                                    self.memory_panel.manual_aob_input_2.clear();
+                                }
+                                if !tokens2.is_empty() {
+                                    let btn = ui.small_button(
+                                        RichText::new(self.tr("⚡ Wildcard", "⚡ Wildcard"))
+                                            .color(Color32::from_rgb(90, 205, 250))
+                                    ).on_hover_text(self.tr(
+                                        "Generate wildcard permutations from Sample 2",
+                                        "Thử nghiệm tạo các wildcard từ Mẫu 2"
+                                    ));
+                                    if btn.clicked() {
+                                        let input = self.memory_panel.manual_aob_input_2.clone();
+                                        self.start_aob_wildcard_exploration(&input);
+                                    }
+                                }
+                            });
+                            ui.add_space(2.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("manual-aob-2-scroll")
+                                .max_height(75.0)
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut self.memory_panel.manual_aob_input_2)
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_rows(3)
+                                            .desired_width(ui.available_width())
+                                            .hint_text("48 89 5C 24 10 57 ??..."),
+                                    );
+                                });
+                        });
                     });
-            }
-            ui.add_space(4.0);
-            self.render_manual_aob_wildcard_explorer(ui);
-            });
+
+                    ui.add_space(4.0);
+
+                    // Comparison Result
+                    let min_len = tokens1.len().min(tokens2.len());
+                    let (result_tokens, fixed_count, wildcard_count) =
+                        compare_manual_aob_token_lists(&tokens1, &tokens2);
+                    let result_pattern = result_tokens.join(" ");
+
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(self.tr("Result:", "Kết quả:")).strong());
+                            if !result_tokens.is_empty() {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} bytes • {} matching ({}%) • {} wildcards (??)",
+                                        min_len,
+                                        fixed_count,
+                                        if min_len > 0 { fixed_count * 100 / min_len } else { 0 },
+                                        wildcard_count,
+                                    ))
+                                    .color(Color32::from_rgb(90, 205, 250)),
+                                );
+                            }
+                            if tokens1.len() != tokens2.len() && !tokens1.is_empty() && !tokens2.is_empty() {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "⚠ {} ({} ≠ {} B)",
+                                        self.tr("Length mismatch", "Lệch độ dài"),
+                                        tokens1.len(),
+                                        tokens2.len(),
+                                    ))
+                                    .color(Color32::from_rgb(255, 190, 80))
+                                    .small(),
+                                );
+                            }
+                        });
+
+                        ui.add_space(2.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("manual-aob-result-scroll")
+                            .max_height(75.0)
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut result_pattern.as_str())
+                                        .font(egui::TextStyle::Monospace)
+                                        .desired_rows(2)
+                                        .desired_width(ui.available_width())
+                                        .hint_text(self.tr("Merged AOB pattern with (??) wildcards will appear here...", "Mã AOB kết quả với ký tự wildcard (??) sẽ hiện ở đây...")),
+                                );
+                            });
+
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add_enabled(
+                                    !result_pattern.is_empty(),
+                                    egui::Button::new(self.tr("📋 Copy", "📋 Sao chép")),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Copy the merged AOB pattern to clipboard",
+                                    "Sao chép mã AOB kết quả vào bộ nhớ tạm",
+                                ))
+                                .clicked()
+                            {
+                                ctx.copy_text(result_pattern.clone());
+                                self.memory_panel.manual_aob_feedback = Some((
+                                    self.tr("Copied result AOB pattern!", "Đã sao chép kết quả AOB!").to_string(),
+                                    Instant::now(),
+                                ));
+                            }
+                            if ui
+                                .add_enabled(
+                                    !result_pattern.is_empty(),
+                                    egui::Button::new(self.tr("→ Sample 1", "→ Mẫu 1")),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Use result as Sample 1 to compare with next sample",
+                                    "Đưa kết quả lên Mẫu 1 để so sánh với mẫu tiếp theo",
+                                ))
+                                .clicked()
+                            {
+                                self.memory_panel.manual_aob_input_1 = result_pattern.clone();
+                                self.memory_panel.manual_aob_feedback = Some((
+                                    self.tr("Moved to Sample 1", "Đã chuyển lên Mẫu 1").to_string(),
+                                    Instant::now(),
+                                ));
+                            }
+                            if ui
+                                .add_enabled(
+                                    !result_pattern.is_empty(),
+                                    egui::Button::new(self.tr("→ Sample 2", "→ Mẫu 2")),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Use result as Sample 2",
+                                    "Đưa kết quả vào Mẫu 2",
+                                ))
+                                .clicked()
+                            {
+                                self.memory_panel.manual_aob_input_2 = result_pattern.clone();
+                                self.memory_panel.manual_aob_feedback = Some((
+                                    self.tr("Moved to Sample 2", "Đã chuyển vào Mẫu 2").to_string(),
+                                    Instant::now(),
+                                ));
+                            }
+                            let saved_selected_count = self.memory_panel.selected_saved.len();
+                            if ui
+                                .add_enabled(
+                                    !result_pattern.is_empty() && saved_selected_count > 0,
+                                    egui::Button::new(format!("{} ({})", self.tr("Apply to Selected", "Gắn vào mục đã chọn"), saved_selected_count)),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Save this AOB pattern to selected addresses in Address list",
+                                    "Lưu mã AOB kết quả này vào các địa chỉ đang chọn",
+                                ))
+                                .clicked()
+                            {
+                                for &sel_idx in &self.memory_panel.selected_saved {
+                                    if let Some(entry) = self.memory_panel.saved.get_mut(sel_idx) {
+                                        entry.aob_pattern = Some(result_pattern.clone());
+                                    }
+                                }
+                                self.memory_panel.manual_aob_feedback = Some((
+                                    format!("{} ({} {})", self.tr("Applied AOB pattern to", "Đã gắn mã AOB vào"), saved_selected_count, self.tr("addresses", "địa chỉ")),
+                                    Instant::now(),
+                                ));
+                            }
+                            if !result_pattern.is_empty() {
+                                let btn = ui.button(
+                                    RichText::new(self.tr("⚡ Auto Wildcard", "⚡ Tự động Wildcard"))
+                                        .color(Color32::from_rgb(90, 205, 250))
+                                );
+                                if btn.clicked() {
+                                    let input = result_pattern.clone();
+                                    self.start_aob_wildcard_exploration(&input);
+                                }
+                            }
+                        });
+                    });
+
+                    // Visual Byte Diff Grid
+                    if min_len > 0 {
+                        ui.add_space(3.0);
+                        ui.label(
+                            RichText::new(self.tr(
+                                "Visual Byte Diff (16 bytes per row):",
+                                "So sánh trực quan (16 byte/hàng):",
+                            ))
+                            .strong()
+                            .small(),
+                        );
+                        ui.add_space(2.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("manual-aob-grid-scroll")
+                            .max_height(120.0)
+                            .show(ui, |ui| {
+                                let total_rows = (min_len + 15) / 16;
+                                for r in 0..total_rows {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 3.0;
+                                        ui.label(
+                                            RichText::new(format!("+{:03X}:", r * 16))
+                                                .monospace()
+                                                .color(Color32::from_rgb(140, 140, 140)),
+                                        );
+                                        for col in 0..16 {
+                                            let idx = r * 16 + col;
+                                            if idx >= min_len {
+                                                break;
+                                            }
+                                            let b1_opt = tokens1.get(idx).copied().flatten();
+                                            let b2_opt = tokens2.get(idx).copied().flatten();
+                                            let byte_match = classify_manual_aob_byte_match(b1_opt, b2_opt);
+                                            let byte_text = &result_tokens[idx];
+                                            let (bg_color, fg_color) = match byte_match {
+                                                ManualAobByteMatch::SameByte => (
+                                                    Color32::from_rgba_unmultiplied(50, 180, 80, 50),
+                                                    Color32::from_rgb(120, 235, 150),
+                                                ),
+                                                ManualAobByteMatch::SameWildcard => (
+                                                    Color32::TRANSPARENT,
+                                                    Color32::from_rgb(220, 220, 220),
+                                                ),
+                                                ManualAobByteMatch::Different => (
+                                                    Color32::from_rgba_unmultiplied(220, 50, 50, 75),
+                                                    Color32::from_rgb(255, 120, 120),
+                                                ),
+                                            };
+                                            let hover_info = match byte_match {
+                                                ManualAobByteMatch::SameByte => {
+                                                    format!("Byte {:02X} matches", b1_opt.unwrap_or(0))
+                                                }
+                                                ManualAobByteMatch::SameWildcard => {
+                                                    "Both samples have wildcard (??)".to_string()
+                                                }
+                                                ManualAobByteMatch::Different => {
+                                                    let s1 = b1_opt.map_or("??".to_string(), |b| format!("{:02X}", b));
+                                                    let s2 = b2_opt.map_or("??".to_string(), |b| format!("{:02X}", b));
+                                                    format!("Difference: [{s1}] != [{s2}]")
+                                                }
+                                            };
+                                            let label =
+                                                RichText::new(byte_text).monospace().color(fg_color);
+                                            let resp = ui.label(label).on_hover_text(hover_info);
+                                            if bg_color.a() > 0 {
+                                                ui.painter().rect_filled(
+                                                    resp.rect.expand2(vec2(1.0, 0.0)),
+                                                    2.0,
+                                                    bg_color,
+                                                );
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+                    }
+
+                    ui.add_space(4.0);
+                    self.render_manual_aob_wildcard_explorer(ui);
+                });
         });
 
-        if !open || request_close {
+        if !open {
             self.memory_panel.show_manual_aob_compare = false;
         }
     }
