@@ -33674,6 +33674,8 @@ mod windows_overlay {
             mem_mapped: true,
             alignment: None,
             target_ranges: None,
+            isolate_guest_ram: false,
+            vm_allocation_base: None,
         };
 
         let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));

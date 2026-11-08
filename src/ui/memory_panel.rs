@@ -6795,6 +6795,8 @@ impl CrosshairApp {
                 mem_mapped: true,
                 alignment: Some(4096),
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             };
 
             let progress = Arc::new(AtomicUsize::new(0));
@@ -6809,6 +6811,8 @@ impl CrosshairApp {
                 let delta = first_host as isize - guest_base as isize;
                 self.memory_panel.android_bridge.host_base_address = Some(first_host);
                 self.memory_panel.android_bridge.delta = Some(delta);
+                self.memory_panel.android_bridge.vm_allocation_base =
+                    crate::process_memory::query_allocation_base(h_pid, first_host);
                 self.sync_android_module_to_scan_modules();
             }
         }
@@ -8116,6 +8120,8 @@ impl CrosshairApp {
                 mem_mapped: false,
                 alignment: None,
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             };
             let result = scan_aob_memory_range_with_progress(
                 pid,
@@ -8326,6 +8332,8 @@ impl CrosshairApp {
                 mem_mapped: false,
                 alignment: None,
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             };
             let mut successful = Vec::new();
             for item in items {
@@ -8683,19 +8691,29 @@ impl CrosshairApp {
             self.memory_panel.status = "Instruction is already in the code list".to_owned();
             return;
         }
+        let host_address = if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
+            address
+        } else if let Some(delta) = self.memory_panel.android_bridge.delta {
+            (address as isize + delta) as usize
+        } else {
+            address
+        };
+
         let (aob_signature, aob_target_offset) = match get_instruction_aob_signature(
             pid,
-            address,
+            host_address,
             self.state.memory_debugger_architecture,
             self.state.memory_aob_direction,
         ) {
             Ok(result) => result,
-            Err(error) => {
-                self.memory_panel.status = format!("Unable to save instruction AOB: {error}");
-                return;
+            Err(_) => {
+                let sig = crate::process_memory::read_memory_bytes(pid, host_address, 8)
+                    .map(|b| b.iter().map(|byte| format!("{byte:02X}")).collect::<Vec<_>>().join(" "))
+                    .unwrap_or_default();
+                (sig, 0)
             }
         };
-        let writes = instruction_writes_memory(pid, address).unwrap_or(writes);
+        let writes = instruction_writes_memory(pid, host_address).unwrap_or(writes);
         if let Some(index) = existing {
             let entry = &mut self.state.memory_code_list[index];
             entry.aob_signature = aob_signature;
@@ -18957,6 +18975,8 @@ impl CrosshairApp {
                 mem_mapped: true,
                 alignment: (!is_aob && self.memory_panel.fast_scan).then_some(alignment),
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             }
         } else {
             MemoryScanOptions {
@@ -18969,6 +18989,8 @@ impl CrosshairApp {
                 mem_mapped: self.memory_panel.scan_mem_mapped,
                 alignment: self.memory_panel.fast_scan.then_some(alignment),
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             }
         };
         if self.memory_panel.android_bridge.is_connected
@@ -18976,13 +18998,12 @@ impl CrosshairApp {
             && self.memory_panel.android_bridge.scan_game_ram_only
         {
             scan_options.mem_image = false;
-            let guest_ranges = crate::process_memory::find_emulator_guest_ram_ranges(
-                pid,
-                self.memory_panel.android_bridge.host_base_address,
-            );
-            if !guest_ranges.is_empty() {
-                scan_options.target_ranges = Some(Arc::new(guest_ranges));
-            }
+            scan_options.isolate_guest_ram = true;
+            let vm_alloc = self.memory_panel.android_bridge.vm_allocation_base.or_else(|| {
+                self.memory_panel.android_bridge.host_base_address
+                    .and_then(|addr| crate::process_memory::query_allocation_base(pid, addr))
+            });
+            scan_options.vm_allocation_base = vm_alloc;
         }
         let snapshot_for_filter = if action.comparison().is_some() && text_encoding.is_none() && self.memory_panel.candidates.is_empty() {
             self.memory_panel.raw_snapshot.clone()
@@ -19261,6 +19282,8 @@ impl CrosshairApp {
                 mem_mapped: true,
                 alignment: None,
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             }
         } else {
             MemoryScanOptions {
@@ -19273,6 +19296,8 @@ impl CrosshairApp {
                 mem_mapped: self.memory_panel.scan_mem_mapped,
                 alignment: None,
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             }
         };
 
@@ -19868,6 +19893,8 @@ impl CrosshairApp {
                         .max(1),
                 ),
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             }
         } else {
             MemoryScanOptions {
@@ -19886,6 +19913,8 @@ impl CrosshairApp {
                         .max(1),
                 ),
                 target_ranges: None,
+                isolate_guest_ram: false,
+                vm_allocation_base: None,
             }
         };
         let progress = Arc::clone(&self.memory_panel.scan_progress);

@@ -129,6 +129,7 @@ pub struct AndroidBridgeState {
     pub guest_module_name: String,
     pub host_base_address: Option<usize>,
     pub delta: Option<isize>,
+    pub vm_allocation_base: Option<usize>,
 }
 
 impl AndroidBridgeState {

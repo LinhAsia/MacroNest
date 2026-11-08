@@ -76,6 +76,8 @@ pub struct MemoryScanOptions {
     pub mem_mapped: bool,
     pub alignment: Option<usize>,
     pub target_ranges: Option<Arc<Vec<(usize, usize)>>>,
+    pub isolate_guest_ram: bool,
+    pub vm_allocation_base: Option<usize>,
 }
 
 impl Default for MemoryScanOptions {
@@ -90,6 +92,8 @@ impl Default for MemoryScanOptions {
             mem_mapped: false,
             alignment: Some(4),
             target_ranges: None,
+            isolate_guest_ram: false,
+            vm_allocation_base: None,
         }
     }
 }
@@ -504,6 +508,8 @@ pub fn scan_view_projection_candidates(
         mem_mapped: true,
         alignment: Some(4),
         target_ranges: None,
+        isolate_guest_ram: false,
+        vm_allocation_base: None,
     };
     let mut candidates = Vec::new();
     let mut remaining = max_bytes;
@@ -3125,6 +3131,30 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
             MEM_MAPPED => options.mem_mapped,
             _ => true,
         };
+        if options.isolate_guest_ram {
+            if information.kind == MEM_IMAGE {
+                if next <= address {
+                    break;
+                }
+                address = next;
+                continue;
+            }
+            if let Some(target_alloc) = options.vm_allocation_base {
+                if information.allocation_base as usize != target_alloc {
+                    if next <= address {
+                        break;
+                    }
+                    address = next;
+                    continue;
+                }
+            } else if information.region_size < 16 * 1024 * 1024 {
+                if next <= address {
+                    break;
+                }
+                address = next;
+                continue;
+            }
+        }
         if information.state == MEM_COMMIT
             && is_kind_allowed
             && readable
@@ -3168,86 +3198,32 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
     regions
 }
 
-/// Discovers and isolates the Android emulator's Guest VM RAM allocations in the host process.
-/// This includes the entire Android guest memory space (game heap, Unity objects, Dalvik, and .so modules),
-/// while strictly excluding Windows host DLLs (`MEM_IMAGE`) and small host GUI event allocations (eliminating mouse movement).
+/// Queries the AllocationBase for an address in a process.
 #[cfg(windows)]
-pub fn find_emulator_guest_ram_ranges(pid: u32, known_host_addr: Option<usize>) -> Vec<(usize, usize)> {
-    let Ok(process) = ScanProcess::open(pid, false) else {
-        return Vec::new();
+pub fn query_allocation_base(pid: u32, address: usize) -> Option<usize> {
+    let process = ScanProcess::open(pid, false).ok()?;
+    let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
+    let queried = unsafe {
+        VirtualQueryEx(
+            process.handle,
+            address as *const c_void,
+            information.as_mut_ptr(),
+            size_of::<MemoryBasicInformation>(),
+        )
     };
-
-    let target_alloc_base = known_host_addr.and_then(|addr| {
-        let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
-        let queried = unsafe {
-            VirtualQueryEx(
-                process.handle,
-                addr as *const c_void,
-                information.as_mut_ptr(),
-                size_of::<MemoryBasicInformation>(),
-            )
-        };
-        if queried != 0 {
-            let info = unsafe { information.assume_init() };
-            let base = info.allocation_base as usize;
-            if base != 0 {
-                Some(base)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    });
-
-    let mut ranges = Vec::new();
-    let mut address = 0usize;
-    loop {
-        let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
-        let queried = unsafe {
-            VirtualQueryEx(
-                process.handle,
-                address as *const c_void,
-                information.as_mut_ptr(),
-                size_of::<MemoryBasicInformation>(),
-            )
-        };
-        if queried == 0 {
-            break;
-        }
+    if queried != 0 {
         let info = unsafe { information.assume_init() };
-        let base = info.base_address as usize;
-        let Some(next) = base.checked_add(info.region_size) else {
-            break;
-        };
-
-        if info.state == MEM_COMMIT
-            && info.kind != MEM_IMAGE
-            && info.protect & PAGE_GUARD == 0
-        {
-            let alloc_base = info.allocation_base as usize;
-            let is_matched_alloc = target_alloc_base.map_or(false, |tb| alloc_base == tb);
-            // Guest VM physical RAM is allocated in large blocks (typically 2MB+, usually hundreds of MBs/GBs).
-            // Small host allocations (< 2MB) belong to the host Windows/Qt message loop and GUI mouse tracking.
-            let is_large_ram = info.region_size >= 2 * 1024 * 1024;
-
-            if is_matched_alloc || is_large_ram {
-                ranges.push((base, base + info.region_size));
-            }
+        let base = info.allocation_base as usize;
+        if base != 0 {
+            return Some(base);
         }
-
-        if next <= address {
-            break;
-        }
-        address = next;
     }
-
-    crate::android_bridge::merge_memory_ranges(ranges)
+    None
 }
 
 #[cfg(not(windows))]
-pub fn find_emulator_guest_ram_ranges(_pid: u32, _known_host_addr: Option<usize>) -> Vec<(usize, usize)> {
-    Vec::new()
+pub fn query_allocation_base(_pid: u32, _address: usize) -> Option<usize> {
+    None
 }
 
 fn active_scan_regions(
