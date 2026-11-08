@@ -3612,34 +3612,84 @@ pub fn capture_memory_snapshot(
     let alignment = options.alignment.unwrap_or(value_type.width()).max(1);
     let width = value_type.width();
 
-    let mut chunks = Vec::new();
-    let mut total_slots = 0usize;
-    let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
-
-    for region in regions {
-        let end = region.base.saturating_add(region.size);
-        let mut chunk_base = region.base;
-        while chunk_base < end {
-            let length = (end - chunk_base).min(SCAN_CHUNK_BYTES);
-            if let Ok(count) = process.read(chunk_base, &mut buffer[..length]) {
-                progress.fetch_add(count, Ordering::Relaxed);
-                if count >= width {
-                    let slots = (count - width) / alignment + 1;
-                    total_slots = total_slots.saturating_add(slots);
-                    chunks.push(RawMemorySnapshotChunk {
-                        base: chunk_base,
-                        data: buffer[..count].to_vec(),
-                        mask: None,
-                    });
-                }
-            }
-            chunk_base = chunk_base.saturating_add(length);
-        }
+    if regions.is_empty() {
+        return Ok(RawMemorySnapshot {
+            chunks: Vec::new(),
+            total_slots: 0,
+            alignment,
+        });
     }
 
+    let max_threads = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .clamp(2, 32);
+    let worker_count = max_threads.min(regions.len().max(1));
+    let total_bytes = regions
+        .iter()
+        .map(|region| region.size)
+        .fold(0usize, usize::saturating_add);
+    let target_bytes = total_bytes.div_ceil(worker_count).max(1);
+    let mut buckets = vec![Vec::new(); worker_count];
+    let mut bucket_index = 0;
+    let mut bucket_bytes = 0usize;
+    for region in regions {
+        if bucket_bytes >= target_bytes && bucket_index + 1 < worker_count {
+            bucket_index += 1;
+            bucket_bytes = 0;
+        }
+        bucket_bytes = bucket_bytes.saturating_add(region.size);
+        buckets[bucket_index].push(region);
+    }
+
+    let total_slots = Arc::new(AtomicUsize::new(0));
+    let workers = buckets
+        .into_iter()
+        .map(|worker_regions| {
+            let progress = Arc::clone(&progress);
+            let total_slots = Arc::clone(&total_slots);
+            thread::spawn(move || -> io::Result<Vec<RawMemorySnapshotChunk>> {
+                crate::platform::set_current_thread_high_priority();
+                let process = ScanProcess::open(pid, false)?;
+                let mut chunks = Vec::new();
+                for region in worker_regions {
+                    let end = region.base.saturating_add(region.size);
+                    let mut chunk_base = region.base;
+                    while chunk_base < end {
+                        let length = (end - chunk_base).min(SCAN_CHUNK_BYTES);
+                        let mut data = vec![0u8; length];
+                        if let Ok(count) = process.read(chunk_base, &mut data) {
+                            progress.fetch_add(count, Ordering::Relaxed);
+                            if count >= width {
+                                data.truncate(count);
+                                let slots = (count - width) / alignment + 1;
+                                total_slots.fetch_add(slots, Ordering::Relaxed);
+                                chunks.push(RawMemorySnapshotChunk {
+                                    base: chunk_base,
+                                    data,
+                                    mask: None,
+                                });
+                            }
+                        }
+                        chunk_base = chunk_base.saturating_add(length);
+                    }
+                }
+                Ok(chunks)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut all_chunks = Vec::new();
+    for worker in workers {
+        if let Ok(Ok(chunks)) = worker.join() {
+            all_chunks.extend(chunks);
+        }
+    }
+    all_chunks.sort_unstable_by_key(|c| c.base);
+
     Ok(RawMemorySnapshot {
-        chunks,
-        total_slots,
+        chunks: all_chunks,
+        total_slots: total_slots.load(Ordering::Relaxed),
         alignment,
     })
 }
@@ -3648,13 +3698,49 @@ pub fn update_snapshot_baseline(
     pid: u32,
     snapshot: &RawMemorySnapshot,
 ) -> io::Result<RawMemorySnapshot> {
-    let process = ScanProcess::open(pid, false)?;
-    let mut updated = snapshot.clone();
-    for chunk in &mut updated.chunks {
-        let len = chunk.data.len();
-        let _ = process.read(chunk.base, &mut chunk.data[..len]);
+    if snapshot.chunks.is_empty() {
+        return Ok(snapshot.clone());
     }
-    Ok(updated)
+    let max_threads = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .clamp(2, 32);
+    let worker_count = max_threads.min(snapshot.chunks.len().max(1));
+    let chunk_len = snapshot.chunks.len().div_ceil(worker_count);
+
+    let updated_chunks = thread::scope(|scope| {
+        snapshot
+            .chunks
+            .chunks(chunk_len)
+            .map(|chunk_slice| {
+                scope.spawn(move || -> io::Result<Vec<RawMemorySnapshotChunk>> {
+                    crate::platform::set_current_thread_high_priority();
+                    let process = ScanProcess::open(pid, false)?;
+                    let mut worker_chunks = Vec::with_capacity(chunk_slice.len());
+                    for chunk in chunk_slice {
+                        let mut data = chunk.data.clone();
+                        let len = data.len();
+                        let _ = process.read(chunk.base, &mut data[..len]);
+                        worker_chunks.push(RawMemorySnapshotChunk {
+                            base: chunk.base,
+                            data,
+                            mask: chunk.mask.clone(),
+                        });
+                    }
+                    Ok(worker_chunks)
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|w| w.join().map_err(|_| io::Error::other("worker panicked"))?)
+            .collect::<io::Result<Vec<_>>>()
+    })?;
+
+    Ok(RawMemorySnapshot {
+        chunks: updated_chunks.into_iter().flatten().collect(),
+        total_slots: snapshot.total_slots,
+        alignment: snapshot.alignment,
+    })
 }
 
 struct FilteredChunk {

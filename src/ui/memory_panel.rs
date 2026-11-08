@@ -7664,8 +7664,8 @@ impl CrosshairApp {
 
                                 let action_label = if entry.replaced {
                                     "NOP Active"
-                                } else if entry.writes {
-                                    "Find written"
+                                } else if entry.instruction.starts_with("Write:") || entry.writes {
+                                    "Watch Writes"
                                 } else {
                                     "Find accessed"
                                 };
@@ -8553,6 +8553,15 @@ impl CrosshairApp {
     #[cfg(windows)]
     pub(crate) fn resolve_code_entry_address(&self, pid: u32, module: &str, offset: usize) -> std::io::Result<usize> {
         if module == "[dynamic]" || module == "[heap]" || module.is_empty() {
+            if crate::process_memory::read_memory_bytes(pid, offset, 4).is_ok() {
+                return Ok(offset);
+            }
+            if let Some(delta) = self.memory_panel.android_bridge.delta {
+                let host_addr = (offset as isize + delta) as usize;
+                if crate::process_memory::read_memory_bytes(pid, host_addr, 4).is_ok() {
+                    return Ok(host_addr);
+                }
+            }
             return Ok(offset);
         }
         if let Ok(addr) = resolve_module_offset(pid, module, offset) {
@@ -8873,6 +8882,12 @@ impl CrosshairApp {
                 return;
             }
         };
+        // If this entry represents a data watchpoint (e.g. from emulator memory watch or data change summary),
+        // route it directly to instruction_watch (which handles data access/writes) rather than CPU execution breakpoint.
+        if entry.instruction.starts_with("Write:") || entry.instruction.starts_with("Read:") {
+            self.open_instruction_watch_many(vec![instruction_address], entry.writes);
+            return;
+        }
         let current_instruction = disassemble_from(
             pid,
             instruction_address,
@@ -14861,10 +14876,12 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                                 ui.separator();
-                                if ui
-                                    .button("Find out what accesses this instruction")
-                                    .clicked()
-                                {
+                                let watch_label = if opcode.starts_with("Write:") {
+                                    "Watch writes to this address"
+                                } else {
+                                    "Find out what accesses this instruction"
+                                };
+                                if ui.button(watch_label).clicked() {
                                     open_watch = Some((*address, opcode.clone(), false));
                                     ui.close();
                                 }
@@ -15745,6 +15762,15 @@ impl CrosshairApp {
             dialog.status = "Select a process".to_owned();
             return;
         };
+        let is_data_watch = self.state.memory_code_list.get(dialog.code_index).map_or(false, |e| {
+            e.instruction.starts_with("Write:") || e.instruction.starts_with("Read:")
+        });
+        if is_data_watch {
+            let addr = dialog.instruction_address;
+            self.memory_panel.code_access_dialog = None;
+            self.open_instruction_watch_many(vec![addr], true);
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         let notify = move |event| {
             let _ = tx.send(event);
@@ -19006,7 +19032,7 @@ impl CrosshairApp {
             scan_options.vm_allocation_base = vm_alloc;
         }
         let snapshot_for_filter = if action.comparison().is_some() && text_encoding.is_none() && self.memory_panel.candidates.is_empty() {
-            self.memory_panel.raw_snapshot.clone()
+            self.memory_panel.raw_snapshot.take()
         } else {
             None
         };
