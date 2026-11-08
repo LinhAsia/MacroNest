@@ -2787,10 +2787,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur: $ty = unsafe { $read_expr(offset) };
-                            if cur == candidate.$get_fn() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur == candidate.$get_fn();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2800,10 +2799,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur: $ty = unsafe { $read_expr(offset) };
-                            if cur != candidate.$get_fn() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur != candidate.$get_fn();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2813,10 +2811,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur: $ty = unsafe { $read_expr(offset) };
-                            if cur > candidate.$get_fn() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur > candidate.$get_fn();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2826,10 +2823,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur: $ty = unsafe { $read_expr(offset) };
-                            if cur < candidate.$get_fn() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur < candidate.$get_fn();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2840,10 +2836,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur: $ty = unsafe { $read_expr(offset) };
-                                if cur == e {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur == e;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -2855,10 +2850,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur: $ty = unsafe { $read_expr(offset) };
-                                if cur > e {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur > e;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -2870,10 +2864,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur: $ty = unsafe { $read_expr(offset) };
-                                if cur < e {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur < e;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -2885,10 +2878,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur: $ty = unsafe { $read_expr(offset) };
-                                if cur >= min && cur <= max {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur >= min && cur <= max;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -2916,10 +2908,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                            if cur.to_bits() == candidate.$get_fn().to_bits() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur.to_bits() == candidate.$get_fn().to_bits();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2929,10 +2920,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                            if cur.to_bits() != candidate.$get_fn().to_bits() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur.to_bits() != candidate.$get_fn().to_bits();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2942,10 +2932,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                            if cur > candidate.$get_fn() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur > candidate.$get_fn();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2955,10 +2944,9 @@ fn filter_candidate_slice(
                         let offset = candidate.address - $batch_base;
                         if offset + width <= $count {
                             let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                            if cur < candidate.$get_fn() {
-                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                $write += 1;
-                            }
+                            let keep = cur < candidate.$get_fn();
+                            $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                            $write += keep as usize;
                         }
                     }
                 }
@@ -2969,10 +2957,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                                if (cur - e).abs() <= (e.abs() * $rel_eps).max($abs_eps) {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = (cur - e).abs() <= (e.abs() * $rel_eps).max($abs_eps);
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -2984,10 +2971,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                                if cur > e {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur > e;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -2999,10 +2985,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                                if cur < e {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur < e;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -3014,10 +2999,9 @@ fn filter_candidate_slice(
                             let offset = candidate.address - $batch_base;
                             if offset + width <= $count {
                                 let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
-                                if cur >= min && cur <= max {
-                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
-                                    $write += 1;
-                                }
+                                let keep = cur >= min && cur <= max;
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += keep as usize;
                             }
                         }
                     }
@@ -3037,7 +3021,24 @@ fn filter_candidate_slice(
             (last_addr - batch_base).div_ceil(PAGE_BYTES) * PAGE_BYTES
         }.min(BATCH_BYTES);
 
-        if let Ok(count) = process.read(batch_base, &mut buffer[..batch_size]) {
+        let read_result = process.read(batch_base, &mut buffer[..batch_size]);
+        let count = match read_result {
+            Ok(count) => count,
+            Err(_) => {
+                let mut valid_count = 0;
+                for page_offset in (0..batch_size).step_by(PAGE_BYTES) {
+                    let page_addr = batch_base + page_offset;
+                    let page_end = (page_offset + PAGE_BYTES).min(batch_size);
+                    if let Ok(n) = process.read(page_addr, &mut buffer[page_offset..page_end]) {
+                        valid_count = valid_count.max(page_offset + n);
+                    } else {
+                        buffer[page_offset..page_end].fill(0);
+                    }
+                }
+                valid_count
+            }
+        };
+        if count > 0 {
             accumulated_progress += count;
             if accumulated_progress >= 512 * 1024 {
                 if let Some(progress) = progress {
@@ -3743,16 +3744,9 @@ pub fn update_snapshot_baseline(
     })
 }
 
-struct FilteredChunk {
-    base: usize,
-    fresh_data: Vec<u8>,
-    mask: Vec<u64>,
-    matches: usize,
-}
-
 pub fn filter_memory_snapshot_with_progress(
     pid: u32,
-    snapshot: &RawMemorySnapshot,
+    mut snapshot: RawMemorySnapshot,
     value_type: ScanValueType,
     comparison: ScanComparison,
     exact: Option<ScanValue>,
@@ -3774,14 +3768,15 @@ pub fn filter_memory_snapshot_with_progress(
     let results = thread::scope(|scope| {
         snapshot
             .chunks
-            .chunks(chunk_len)
+            .chunks_mut(chunk_len)
             .map(|chunk_slice| {
                 let progress = progress.clone();
-                scope.spawn(move || {
+                scope.spawn(move || -> io::Result<Vec<(RawMemorySnapshotChunk, usize)>> {
                     crate::platform::set_current_thread_high_priority();
                     let process = ScanProcess::open(pid, false)?;
-                    let mut worker_chunks = Vec::new();
                     let mut fresh_buffer = vec![0u8; SCAN_CHUNK_BYTES];
+                    let mut mask_buffer = Vec::new();
+                    let mut kept = Vec::new();
 
                     for snap_chunk in chunk_slice {
                         let len = snap_chunk.data.len();
@@ -3802,12 +3797,14 @@ pub fn filter_memory_snapshot_with_progress(
                             }
                             let slots_count = (valid_len - width) / alignment + 1;
                             let words = slots_count.div_ceil(64);
-                            let mut new_mask = vec![0u64; words];
+                            if mask_buffer.len() < words {
+                                mask_buffer.resize(words, 0);
+                            }
                             let chunk_matches = filter_snapshot_chunk_mask(
                                 &fresh_buffer[..valid_len],
                                 &snap_chunk.data[..valid_len],
                                 snap_chunk.mask.as_deref(),
-                                &mut new_mask,
+                                &mut mask_buffer[..words],
                                 slots_count,
                                 alignment,
                                 value_type,
@@ -3816,16 +3813,21 @@ pub fn filter_memory_snapshot_with_progress(
                                 range,
                             );
                             if chunk_matches > 0 {
-                                worker_chunks.push(FilteredChunk {
+                                snap_chunk.data[..valid_len].copy_from_slice(&fresh_buffer[..valid_len]);
+                                if snap_chunk.data.len() > valid_len {
+                                    snap_chunk.data.truncate(valid_len);
+                                }
+                                let mask = mask_buffer[..words].to_vec();
+                                let kept_chunk = RawMemorySnapshotChunk {
                                     base: snap_chunk.base,
-                                    fresh_data: fresh_buffer[..valid_len].to_vec(),
-                                    mask: new_mask,
-                                    matches: chunk_matches,
-                                });
+                                    data: std::mem::take(&mut snap_chunk.data),
+                                    mask: Some(mask),
+                                };
+                                kept.push((kept_chunk, chunk_matches));
                             }
                         }
                     }
-                    Ok(worker_chunks)
+                    Ok(kept)
                 })
             })
             .collect::<Vec<_>>()
@@ -3834,20 +3836,11 @@ pub fn filter_memory_snapshot_with_progress(
             .collect::<io::Result<Vec<_>>>()
     })?;
 
-    let all_chunks = results.into_iter().flatten().collect::<Vec<_>>();
-    let total_matches: usize = all_chunks.iter().map(|c| c.matches).sum();
+    let all_kept = results.into_iter().flatten().collect::<Vec<_>>();
+    let total_matches: usize = all_kept.iter().map(|(_, m)| *m).sum();
 
-    // ponytail: if matches > object_threshold, keep in fast snapshot bitmask mode without materializing objects.
-    // When matches drop <= object_threshold, materialize into Vec<ScanCandidate>.
     if total_matches > object_threshold {
-        let chunks = all_chunks
-            .into_iter()
-            .map(|c| RawMemorySnapshotChunk {
-                base: c.base,
-                data: c.fresh_data,
-                mask: Some(c.mask),
-            })
-            .collect();
+        let chunks = all_kept.into_iter().map(|(c, _)| c).collect();
         Ok(SnapshotFilterResult::Snapshot(RawMemorySnapshot {
             chunks,
             total_slots: total_matches,
@@ -3855,15 +3848,17 @@ pub fn filter_memory_snapshot_with_progress(
         }))
     } else {
         let mut candidates = Vec::with_capacity(total_matches);
-        for c in all_chunks {
-            extract_candidates_from_chunk(
-                c.base,
-                &c.fresh_data,
-                &c.mask,
-                value_type,
-                alignment,
-                &mut candidates,
-            );
+        for (c, _) in all_kept {
+            if let Some(mask) = c.mask.as_deref() {
+                extract_candidates_from_chunk(
+                    c.base,
+                    &c.data,
+                    mask,
+                    value_type,
+                    alignment,
+                    &mut candidates,
+                );
+            }
         }
         Ok(SnapshotFilterResult::Candidates(candidates))
     }
@@ -4192,6 +4187,156 @@ unsafe fn filter_snapshot_chunk_f32_avx2(
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn filter_snapshot_chunk_i16_avx2(
+    fresh: &[u8],
+    snap: &[u8],
+    old_mask: Option<&[u64]>,
+    new_mask: &mut [u64],
+    slots_count: usize,
+    comparison: ScanComparison,
+    exact_val: Option<i16>,
+    range_val: Option<(i16, i16)>,
+) -> usize {
+    let fresh_ptr = fresh.as_ptr();
+    let snap_ptr = snap.as_ptr();
+    let full_words = slots_count / 64;
+    let mut total_matches = 0usize;
+
+    let target_v = _mm256_set1_epi16(exact_val.unwrap_or(0));
+    let (min_v, max_v) = match range_val {
+        Some((min, max)) => (_mm256_set1_epi16(min), _mm256_set1_epi16(max)),
+        None => (_mm256_setzero_si256(), _mm256_setzero_si256()),
+    };
+    let all_ones = _mm256_set1_epi16(-1);
+
+    macro_rules! avx2_i16_loop {
+        ($cmp_fn:expr) => {{
+            for word_idx in 0..full_words {
+                let old_word = match old_mask {
+                    Some(old) => {
+                        let w = if word_idx < old.len() { old[word_idx] } else { 0 };
+                        if w == 0 {
+                            new_mask[word_idx] = 0;
+                            continue;
+                        }
+                        w
+                    }
+                    None => u64::MAX,
+                };
+
+                let base_offset = word_idx * 128;
+                let mut word_res = 0u64;
+
+                for v in 0..4 {
+                    if ((old_word >> (v * 16)) & 0xFFFF) == 0 {
+                        continue;
+                    }
+                    let off = base_offset + v * 32;
+                    let f = _mm256_loadu_si256(fresh_ptr.add(off) as *const __m256i);
+                    let s = _mm256_loadu_si256(snap_ptr.add(off) as *const __m256i);
+                    let cmp = $cmp_fn(f, s);
+                    let byte_mask = _mm256_movemask_epi8(cmp) as u32;
+                    let mut mask16 = 0u16;
+                    for bit in 0..16 {
+                        if (byte_mask & (1 << (bit * 2))) != 0 {
+                            mask16 |= 1 << bit;
+                        }
+                    }
+                    word_res |= (mask16 as u64) << (v * 16);
+                }
+
+                let final_word = word_res & old_word;
+                new_mask[word_idx] = final_word;
+                total_matches += final_word.count_ones() as usize;
+            }
+        }};
+    }
+
+    match comparison {
+        ScanComparison::Unchanged => {
+            avx2_i16_loop!(|f, s| _mm256_cmpeq_epi16(f, s));
+        }
+        ScanComparison::Changed => {
+            avx2_i16_loop!(|f, s| _mm256_xor_si256(_mm256_cmpeq_epi16(f, s), all_ones));
+        }
+        ScanComparison::Increased => {
+            avx2_i16_loop!(|f, s| _mm256_cmpgt_epi16(f, s));
+        }
+        ScanComparison::Decreased => {
+            avx2_i16_loop!(|f, s| _mm256_cmpgt_epi16(s, f));
+        }
+        ScanComparison::Exact => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i16_loop!(|f, _s| _mm256_cmpeq_epi16(f, target_v));
+        }
+        ScanComparison::Greater => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i16_loop!(|f, _s| _mm256_cmpgt_epi16(f, target_v));
+        }
+        ScanComparison::Less => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i16_loop!(|f, _s| _mm256_cmpgt_epi16(target_v, f));
+        }
+        ScanComparison::Between => {
+            if range_val.is_none() {
+                return 0;
+            }
+            avx2_i16_loop!(|f, _s| {
+                let not_lt_min = _mm256_xor_si256(_mm256_cmpgt_epi16(min_v, f), all_ones);
+                let not_gt_max = _mm256_xor_si256(_mm256_cmpgt_epi16(f, max_v), all_ones);
+                _mm256_and_si256(not_lt_min, not_gt_max)
+            });
+        }
+    }
+
+    let processed_slots = full_words * 64;
+    if processed_slots < slots_count {
+        let last_word_idx = full_words;
+        let mut active_bits = match old_mask {
+            Some(old) => if last_word_idx < old.len() { old[last_word_idx] } else { 0 },
+            None => u64::MAX,
+        };
+        let rem_count = slots_count - processed_slots;
+        let valid_mask = if rem_count >= 64 { u64::MAX } else { (1u64 << rem_count) - 1 };
+        active_bits &= valid_mask;
+
+        let mut word_matches = 0u64;
+        while active_bits != 0 {
+            let bit_idx = active_bits.trailing_zeros() as usize;
+            let slot_idx = processed_slots + bit_idx;
+            let offset = slot_idx * 2;
+            let cur = (fresh_ptr.add(offset) as *const i16).read_unaligned();
+            let prev = (snap_ptr.add(offset) as *const i16).read_unaligned();
+            let matches = match comparison {
+                ScanComparison::Unchanged => cur == prev,
+                ScanComparison::Changed => cur != prev,
+                ScanComparison::Increased => cur > prev,
+                ScanComparison::Decreased => cur < prev,
+                ScanComparison::Exact => exact_val.map_or(false, |e| cur == e),
+                ScanComparison::Greater => exact_val.map_or(false, |e| cur > e),
+                ScanComparison::Less => exact_val.map_or(false, |e| cur < e),
+                ScanComparison::Between => range_val.map_or(false, |(min, max)| cur >= min && cur <= max),
+            };
+            if matches {
+                word_matches |= 1u64 << bit_idx;
+            }
+            active_bits &= active_bits - 1;
+        }
+        new_mask[last_word_idx] = word_matches;
+        total_matches += word_matches.count_ones() as usize;
+    }
+    total_matches
+}
+
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn filter_snapshot_chunk_i8_avx2(
     fresh: &[u8],
@@ -4660,6 +4805,29 @@ fn filter_snapshot_chunk_mask(
             dispatch_snapshot_float!(f64, F64, 1e-12, 1e-9)
         }
         ScanValueType::I16 => {
+            #[cfg(target_arch = "x86_64")]
+            if alignment == 2 && is_x86_feature_detected!("avx2") {
+                let exact_val = match exact {
+                    Some(ScanValue::I16(v)) => Some(v),
+                    _ => None,
+                };
+                let range_val = match range {
+                    Some((ScanValue::I16(min), ScanValue::I16(max))) => Some((min, max)),
+                    _ => None,
+                };
+                return unsafe {
+                    filter_snapshot_chunk_i16_avx2(
+                        fresh,
+                        snap,
+                        old_mask,
+                        new_mask,
+                        slots_count,
+                        comparison,
+                        exact_val,
+                        range_val,
+                    )
+                };
+            }
             dispatch_snapshot_int!(i16, I16, |off, ptr: *const u8| (ptr.add(off) as *const i16).read_unaligned())
         }
     }
@@ -5250,6 +5418,84 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].address, 0x1000 + 4);
         assert_eq!(candidates[0].get_i32(), 250);
+    }
+
+
+    #[test]
+    fn snapshot_mask_filtering_i16_avx2_verification() {
+        let count: usize = 128;
+        let mut snap_bytes = Vec::new();
+        let mut fresh_bytes = Vec::new();
+        for i in 0..count {
+            let s_val = (i * 10) as i16;
+            // Introduce some equal, increased, decreased, exact
+            let f_val = match i % 4 {
+                0 => s_val,         // Unchanged
+                1 => s_val + 5,     // Increased
+                2 => s_val - 5,     // Decreased
+                _ => 999i16,        // Exact test
+            };
+            snap_bytes.extend_from_slice(&s_val.to_le_bytes());
+            fresh_bytes.extend_from_slice(&f_val.to_le_bytes());
+        }
+
+        // Test Unchanged
+        let mut mask_unchanged = vec![0u64; count.div_ceil(64)];
+        let m_unc = filter_snapshot_chunk_mask(
+            &fresh_bytes,
+            &snap_bytes,
+            None,
+            &mut mask_unchanged,
+            count,
+            2,
+            ScanValueType::I16,
+            ScanComparison::Unchanged,
+            None,
+            None,
+        );
+        assert_eq!(m_unc, count / 4);
+
+        // Test Increased
+        let mut mask_inc = vec![0u64; count.div_ceil(64)];
+        let m_inc = filter_snapshot_chunk_mask(
+            &fresh_bytes,
+            &snap_bytes,
+            None,
+            &mut mask_inc,
+            count,
+            2,
+            ScanValueType::I16,
+            ScanComparison::Increased,
+            None,
+            None,
+        );
+        let expected_inc = (0..count).filter(|&i| {
+            let s = (i * 10) as i16;
+            let f = match i % 4 { 0 => s, 1 => s + 5, 2 => s - 5, _ => 999i16 };
+            f > s
+        }).count();
+        assert_eq!(m_inc, expected_inc);
+
+        // Test Decreased
+        let mut mask_dec = vec![0u64; count.div_ceil(64)];
+        let m_dec = filter_snapshot_chunk_mask(
+            &fresh_bytes,
+            &snap_bytes,
+            None,
+            &mut mask_dec,
+            count,
+            2,
+            ScanValueType::I16,
+            ScanComparison::Decreased,
+            None,
+            None,
+        );
+        let expected_dec = (0..count).filter(|&i| {
+            let s = (i * 10) as i16;
+            let f = match i % 4 { 0 => s, 1 => s + 5, 2 => s - 5, _ => 999i16 };
+            f < s
+        }).count();
+        assert_eq!(m_dec, expected_dec);
     }
 
     #[test]

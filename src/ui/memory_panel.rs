@@ -780,6 +780,7 @@ enum ActiveInstructionWatch {
     Accesses(AddressAccessWatch),
     Writes(WriteWatch),
     Emulator(EmulatorMemoryWatchSession),
+    Execute(AccessWatch),
 }
 
 #[cfg(windows)]
@@ -789,6 +790,7 @@ impl ActiveInstructionWatch {
             Self::Accesses(watch) => watch.stop(),
             Self::Writes(watch) => watch.stop(),
             Self::Emulator(watch) => watch.stop(),
+            Self::Execute(watch) => watch.stop(),
         }
     }
 }
@@ -814,6 +816,7 @@ struct InstructionWatchDialog {
     pinned: bool,
     pending_code_add: Option<usize>,
     pending_code_add_all: bool,
+    pending_address_add: Option<usize>,
     pending_disassembler: Option<usize>,
     auto_stop_on_hit: bool,
     hits_sort: u8,
@@ -836,7 +839,7 @@ struct CodeAccessDialog {
     status: String,
     addresses: Vec<(usize, usize)>,
     rx: Receiver<WatchEvent>,
-    active: Option<AccessWatch>,
+    active: Option<ActiveInstructionWatch>,
     pinned: bool,
     selected: Option<usize>,
     selected_indices: HashSet<usize>,
@@ -8883,9 +8886,95 @@ impl CrosshairApp {
             }
         };
         // If this entry represents a data watchpoint (e.g. from emulator memory watch or data change summary),
-        // route it directly to instruction_watch (which handles data access/writes) rather than CPU execution breakpoint.
+        // route it directly with emulator memory watch into code_access_dialog so the user gets the captured addresses and values!
         if entry.instruction.starts_with("Write:") || entry.instruction.starts_with("Read:") {
-            self.open_instruction_watch_many(vec![instruction_address], entry.writes);
+            let (tx, rx) = mpsc::channel();
+            let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+            let hva = if crate::process_memory::read_memory_bytes(pid, instruction_address, 4).is_ok() {
+                instruction_address
+            } else {
+                (instruction_address as isize + delta) as usize
+            };
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_clone = std::sync::Arc::clone(&stop);
+            let tx_clone = tx.clone();
+            let handle = std::thread::spawn(move || {
+                let mut prev = crate::process_memory::read_memory_bytes(pid, hva, 8).unwrap_or_default();
+                let _ = tx_clone.send(WatchEvent::Started { armed_threads: 1, total_threads: 1 });
+                while !stop_clone.load(std::sync::atomic::Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(15));
+                    if let Ok(cur) = crate::process_memory::read_memory_bytes(pid, hva, 8) {
+                        if !prev.is_empty() && cur != prev {
+                            let cur_u32 = u32::from_le_bytes(cur[..4].try_into().unwrap_or_default());
+                            let prev_u32 = u32::from_le_bytes(prev[..4].try_into().unwrap_or_default());
+                            let _ = tx_clone.send(WatchEvent::AddressHit {
+                                instruction_address,
+                                instruction: format!("{cur_u32}"),
+                                details: format!("New Value: {cur_u32} (was {prev_u32})"),
+                            });
+                            prev = cur;
+                        } else if prev.is_empty() {
+                            prev = cur;
+                        }
+                    }
+                }
+                let _ = tx_clone.send(WatchEvent::Stopped);
+            });
+            let mut values = HashMap::new();
+            if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, hva, 4) {
+                let val_u32 = u32::from_le_bytes(bytes[..4].try_into().unwrap_or_default());
+                values.insert(instruction_address, format!("{val_u32}"));
+            }
+            let text_encoding = self
+                .memory_panel
+                .selected_saved
+                .iter()
+                .find_map(|&idx| self.memory_panel.saved.get(idx).and_then(|s| s.text_encoding))
+                .or(self.memory_panel.text_encoding);
+            let text_byte_len = self
+                .memory_panel
+                .selected_saved
+                .iter()
+                .find_map(|&idx| {
+                    self.memory_panel
+                        .saved
+                        .get(idx)
+                        .filter(|s| s.text_encoding.is_some())
+                        .map(|s| s.text_byte_len)
+                })
+                .unwrap_or(32)
+                .max(1);
+            self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
+                code_index,
+                instruction_address,
+                status: "Watching address writes — changes will appear below".to_owned(),
+                addresses: vec![(instruction_address, 1)],
+                rx,
+                active: Some(ActiveInstructionWatch::Emulator(EmulatorMemoryWatchSession {
+                    stop,
+                    handle: Some(handle),
+                })),
+                pinned: true,
+                selected: Some(0),
+                selected_indices: [0].into_iter().collect(),
+                selection_anchor: Some(0),
+                value_type: self.memory_panel.value_type,
+                text_encoding,
+                text_byte_len,
+                values,
+                tracked_name: entry.name.clone(),
+                tracked_offset: "0".to_owned(),
+                save_tracked: false,
+                auto_stop_on_hit: false,
+                hits_sort: 0,
+                value_sort: 0,
+                value_search: String::new(),
+                value_filter_enabled: false,
+                value_filter_min: String::new(),
+                value_filter_max: String::new(),
+                feedback_message: None,
+                last_value_refresh: Instant::now(),
+            });
             return;
         }
         let current_instruction = disassemble_from(
@@ -8966,7 +9055,7 @@ impl CrosshairApp {
             },
         );
         let (active, status) = match started {
-            Ok(active) => (Some(active), "Attaching debugger…".to_owned()),
+            Ok(active) => (Some(ActiveInstructionWatch::Execute(active)), "Attaching debugger…".to_owned()),
             Err(error) => (None, format!("Unable to start debugger: {error}")),
         };
         self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
@@ -14146,6 +14235,7 @@ impl CrosshairApp {
             pinned: true,
             pending_code_add: None,
             pending_code_add_all: false,
+            pending_address_add: None,
             pending_disassembler: None,
             auto_stop_on_hit: false,
             hits_sort: 0,
@@ -14311,6 +14401,12 @@ impl CrosshairApp {
         if start_requested {
             self.restart_instruction_watch(&mut dialog);
         }
+        if let Some(index) = dialog.pending_address_add.take()
+            && let Some(hit) = dialog.hits.get(index)
+        {
+            self.add_code_access_address(hit.address, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
+            self.memory_panel.status = format!("[OK] Added {} to Address list", format_prefixed_memory_address(hit.address));
+        }
         if let Some(index) = dialog.pending_code_add.take()
             && let Some(hit) = dialog.hits.get(index)
         {
@@ -14467,6 +14563,13 @@ impl CrosshairApp {
             }
             if ui.button("Clear captured").clicked() {
                 clear_captured = true;
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Add to address list"))
+                .on_hover_text("Add the selected memory address to the main Address List")
+                .clicked()
+            {
+                dialog.pending_address_add = dialog.selected;
             }
             if ui
                 .add_enabled(dialog.selected.is_some(), Button::new("Add to code list"))
@@ -14821,6 +14924,7 @@ impl CrosshairApp {
                     Self::memory_table_cell(ui, opcode_w, RichText::new("Instruction").strong());
                 });
                 let normalized_search = search.trim().to_ascii_lowercase();
+                let mut add_to_address_list = None;
                 egui::ScrollArea::both()
                     .id_salt("memory-disassembly-lines")
                     .max_height((ui.available_height() * 0.62).max(160.0))
@@ -14883,6 +14987,10 @@ impl CrosshairApp {
                                 };
                                 if ui.button(watch_label).clicked() {
                                     open_watch = Some((*address, opcode.clone(), false));
+                                    ui.close();
+                                }
+                                if ui.button("Add to address list").clicked() {
+                                    add_to_address_list = Some(*address);
                                     ui.close();
                                 }
                                 if ui.button("Add to code list").clicked() {
@@ -14971,6 +15079,9 @@ impl CrosshairApp {
             }) {
                 self.open_code_access_watch(index);
             }
+        }
+        if let Some(addr) = add_to_address_list {
+            self.add_code_access_address(addr, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
         }
         if let Some(target_addr) = nav_address {
             if let Some(pid) = pid {
@@ -15489,7 +15600,32 @@ impl CrosshairApp {
                     dialog.status = "Debugger stopped".to_owned();
                     dialog.active = None;
                 }
-                WatchEvent::AddressHit { .. } | WatchEvent::BatchProgress { .. } => {}
+                WatchEvent::AddressHit { instruction_address, instruction, details, .. } => {
+                    addresses_updated = true;
+                    if let Some((_, count)) = dialog
+                        .addresses
+                        .iter_mut()
+                        .find(|(address, _)| *address == instruction_address)
+                    {
+                        *count += 1;
+                    } else {
+                        dialog.addresses.push((instruction_address, 1));
+                    }
+                    let val_text = if let Some(pos) = details.find("New Value: ") {
+                        let after = &details[pos + 11..];
+                        after.lines().next().unwrap_or(after).trim().to_string()
+                    } else {
+                        instruction
+                    };
+                    dialog.values.insert(instruction_address, val_text);
+                    if dialog.auto_stop_on_hit
+                        && let Some(mut active) = dialog.active.take()
+                    {
+                        active.stop();
+                        dialog.status = "First address captured — debugger detached safely".to_owned();
+                    }
+                }
+                WatchEvent::BatchProgress { .. } => {}
             }
         }
         let now = Instant::now();
@@ -15766,9 +15902,45 @@ impl CrosshairApp {
             e.instruction.starts_with("Write:") || e.instruction.starts_with("Read:")
         });
         if is_data_watch {
-            let addr = dialog.instruction_address;
-            self.memory_panel.code_access_dialog = None;
-            self.open_instruction_watch_many(vec![addr], true);
+            let (tx, rx) = mpsc::channel();
+            let inst_addr = dialog.instruction_address;
+            let hva = if crate::process_memory::read_memory_bytes(pid, inst_addr, 4).is_ok() {
+                inst_addr
+            } else {
+                let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+                (inst_addr as isize + delta) as usize
+            };
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_clone = std::sync::Arc::clone(&stop);
+            let tx_clone = tx.clone();
+            let handle = std::thread::spawn(move || {
+                let mut prev = crate::process_memory::read_memory_bytes(pid, hva, 8).unwrap_or_default();
+                let _ = tx_clone.send(WatchEvent::Started { armed_threads: 1, total_threads: 1 });
+                while !stop_clone.load(std::sync::atomic::Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(15));
+                    if let Ok(cur) = crate::process_memory::read_memory_bytes(pid, hva, 8) {
+                        if !prev.is_empty() && cur != prev {
+                            let cur_u32 = u32::from_le_bytes(cur[..4].try_into().unwrap_or_default());
+                            let prev_u32 = u32::from_le_bytes(prev[..4].try_into().unwrap_or_default());
+                            let _ = tx_clone.send(WatchEvent::AddressHit {
+                                instruction_address: inst_addr,
+                                instruction: format!("{cur_u32}"),
+                                details: format!("New Value: {cur_u32} (was {prev_u32})"),
+                            });
+                            prev = cur;
+                        } else if prev.is_empty() {
+                            prev = cur;
+                        }
+                    }
+                }
+                let _ = tx_clone.send(WatchEvent::Stopped);
+            });
+            dialog.rx = rx;
+            dialog.active = Some(ActiveInstructionWatch::Emulator(EmulatorMemoryWatchSession {
+                stop,
+                handle: Some(handle),
+            }));
+            dialog.status = "Watching address writes — active".to_owned();
             return;
         }
         let (tx, rx) = mpsc::channel();
@@ -15793,7 +15965,7 @@ impl CrosshairApp {
         match started {
             Ok(active) => {
                 dialog.rx = rx;
-                dialog.active = Some(active);
+                dialog.active = Some(ActiveInstructionWatch::Execute(active));
                 dialog.status = "Attaching debugger…".to_owned();
             }
             Err(error) => {
@@ -19133,9 +19305,10 @@ impl CrosshairApp {
             } else if let Some(comparison) = action.comparison() {
                 progress.store(0, Ordering::Relaxed);
                 if let Some(snapshot) = snapshot_for_filter {
+                    let snap_val = std::sync::Arc::try_unwrap(snapshot).unwrap_or_else(|arc| (*arc).clone());
                     filter_memory_snapshot_with_progress(
                         pid,
-                        &snapshot,
+                        snap_val,
                         value_type,
                         comparison,
                         exact,
