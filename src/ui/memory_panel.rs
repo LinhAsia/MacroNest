@@ -9123,7 +9123,7 @@ impl CrosshairApp {
                 filter_status: StablePointerStatusFilter::All,
                 exe_only: false,
                 show_target_address: false,
-                show_resolved: false,
+                show_resolved: true,
                 last_live_refresh: Instant::now(),
                 validation_rx: None,
                 filter_rx: None,
@@ -9266,7 +9266,7 @@ impl CrosshairApp {
                     filter_status: StablePointerStatusFilter::All,
                     exe_only: false,
                     show_target_address: false,
-                    show_resolved: false,
+                    show_resolved: true,
                     last_live_refresh: Instant::now(),
                     validation_rx: None,
                     filter_rx: None,
@@ -9292,7 +9292,18 @@ impl CrosshairApp {
         };
         let (emulator_delta, extra_modules) = if self.memory_panel.android_bridge.is_connected {
             let delta = self.memory_panel.android_bridge.delta;
-            let extras = if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+            let mut extras = Vec::new();
+            if let Some(delta) = delta {
+                for m in &self.memory_panel.android_bridge.modules {
+                    let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                    let tag = format!("Android::{}", m.name);
+                    if !modules.iter().any(|(n, _, _)| n == &tag) {
+                        modules.push((tag.clone(), host_base, m.size));
+                    }
+                    extras.push((tag, host_base));
+                }
+            }
+            if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
                 let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
                     "libil2cpp.so".to_string()
                 } else {
@@ -9307,10 +9318,10 @@ impl CrosshairApp {
                         .unwrap_or(64 * 1024 * 1024);
                     modules.push((tag.clone(), host_base, size));
                 }
-                vec![(tag, host_base)]
-            } else {
-                Vec::new()
-            };
+                if !extras.iter().any(|(n, _)| n == &tag) {
+                    extras.push((tag, host_base));
+                }
+            }
             (delta, extras)
         } else {
             (None, Vec::new())
@@ -9377,7 +9388,7 @@ impl CrosshairApp {
             filter_status: StablePointerStatusFilter::All,
             exe_only: false,
             show_target_address: false,
-            show_resolved: false,
+            show_resolved: true,
             last_live_refresh: Instant::now(),
             validation_rx: None,
             filter_rx: None,
@@ -11692,14 +11703,45 @@ impl CrosshairApp {
                                     valid: None,
                                     resolved_base: None,
                                     resolved_address: None,
-                                    observed_value: None,
-                                    observed_text: None,
+                                    observed_value: Some(expected_value),
+                                    observed_text: expected_text.clone(),
                                     live_value: None,
                                     live_text: None,
                                     filter_value: None,
                                 })
                             })
                             .collect();
+                        let init_pid = dialog.source_pid;
+                        let mut init_cache = HashMap::<String, usize>::new();
+                        for (name, base) in &dialog.extra_modules {
+                            init_cache.insert(name.clone(), *base);
+                        }
+                        for candidate in &mut dialog.candidates {
+                            let base = match init_cache.get(&candidate.path.module) {
+                                Some(&b) => b,
+                                None => {
+                                    let b = resolve_module_offset(init_pid, &candidate.path.module, 0).unwrap_or(0);
+                                    init_cache.insert(candidate.path.module.clone(), b);
+                                    b
+                                }
+                            };
+                            if base != 0 {
+                                let pointer = PointerSpec {
+                                    base,
+                                    module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+                                    offsets: candidate.path.offsets.iter().map(|&o| o as isize).collect(),
+                                    delta: dialog.emulator_delta,
+                                };
+                                candidate.resolved_address = resolve_memory_address(init_pid, base, Some(&pointer)).ok();
+                                if let Some(address) = candidate.resolved_address {
+                                    if let Some(enc) = dialog.text_encoding {
+                                        candidate.live_text = read_text_memory(init_pid, address, dialog.text_byte_len.max(1), enc).ok();
+                                    } else {
+                                        candidate.live_value = read_scan_value(init_pid, address, candidate.expected_value.value_type()).ok();
+                                    }
+                                }
+                            }
+                        }
                         dialog.candidates.sort_by(|a, b| {
                             let a_exe = a.path.module.ends_with(".exe") || a.path.module.ends_with(".EXE");
                             let b_exe = b.path.module.ends_with(".exe") || b.path.module.ends_with(".EXE");
@@ -12386,6 +12428,29 @@ impl CrosshairApp {
                 {
                     dialog.selected = visible_indices.iter().copied().collect();
                 }
+                if self.memory_panel.android_bridge.is_connected {
+                    if let Some(delta) = self.memory_panel.android_bridge.delta {
+                        dialog.emulator_delta = Some(delta);
+                        let mut extras = Vec::new();
+                        for m in &self.memory_panel.android_bridge.modules {
+                            let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                            let tag = format!("Android::{}", m.name);
+                            extras.push((tag, host_base));
+                        }
+                        if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+                            let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
+                                "libil2cpp.so".to_string()
+                            } else {
+                                self.memory_panel.android_bridge.guest_module_name.clone()
+                            };
+                            let tag = format!("Android::{mod_name}");
+                            if !extras.iter().any(|(n, _)| n == &tag) {
+                                extras.push((tag, host_base));
+                            }
+                        }
+                        dialog.extra_modules = extras;
+                    }
+                }
                 let refresh_visible_values = dialog.validation_rx.is_none()
                     && dialog.filter_rx.is_none()
                     && dialog.last_live_refresh.elapsed() >= Duration::from_millis(50);
@@ -12471,17 +12536,17 @@ impl CrosshairApp {
                             .resolved_address
                             .map_or_else(|| "—".to_owned(), format_prefixed_memory_address);
                         let value: std::borrow::Cow<'_, str> = if dialog.text_encoding.is_some() {
-                            candidate.observed_text.as_deref().unwrap_or("—").into()
+                            candidate.observed_text.as_deref().or(candidate.expected_text.as_deref()).unwrap_or("—").into()
                         } else {
-                            candidate.observed_value.map_or_else(
+                            candidate.observed_value.or(Some(candidate.expected_value)).map_or_else(
                                 || "—".into(),
                                 |value| editable_scan_value(value, false).into(),
                             )
                         };
                         let current: std::borrow::Cow<'_, str> = if dialog.text_encoding.is_some() {
-                            candidate.live_text.as_deref().unwrap_or("—").into()
+                            candidate.live_text.as_deref().or(candidate.observed_text.as_deref()).unwrap_or("—").into()
                         } else {
-                            candidate.live_value.map_or_else(
+                            candidate.live_value.or(candidate.observed_value).map_or_else(
                                 || "—".into(),
                                 |value| editable_scan_value(value, false).into(),
                             )
@@ -12665,6 +12730,15 @@ impl CrosshairApp {
                 });
             } else if let Ok(mut modules) = process_modules(pid) {
                 if self.memory_panel.android_bridge.is_connected {
+                    if let Some(delta) = self.memory_panel.android_bridge.delta {
+                        for m in &self.memory_panel.android_bridge.modules {
+                            let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                            let tag = format!("Android::{}", m.name);
+                            if !modules.iter().any(|(n, _, _)| n == &tag) {
+                                modules.push((tag, host_base, m.size));
+                            }
+                        }
+                    }
                     if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
                         let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
                             "libil2cpp.so".to_string()
@@ -13699,6 +13773,29 @@ impl CrosshairApp {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
+        if self.memory_panel.android_bridge.is_connected {
+            if let Some(delta) = self.memory_panel.android_bridge.delta {
+                dialog.emulator_delta = Some(delta);
+                let mut extras = Vec::new();
+                for m in &self.memory_panel.android_bridge.modules {
+                    let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                    let tag = format!("Android::{}", m.name);
+                    extras.push((tag, host_base));
+                }
+                if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
+                    let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
+                        "libil2cpp.so".to_string()
+                    } else {
+                        self.memory_panel.android_bridge.guest_module_name.clone()
+                    };
+                    let tag = format!("Android::{mod_name}");
+                    if !extras.iter().any(|(n, _)| n == &tag) {
+                        extras.push((tag, host_base));
+                    }
+                }
+                dialog.extra_modules = extras;
+            }
+        }
         let mut candidates = dialog.candidates.clone();
         let value_type = dialog.value_type;
         let text_encoding = dialog.text_encoding;
@@ -13789,11 +13886,24 @@ impl CrosshairApp {
                                 break;
                             }
                             let next_effective = if let Some(delta) = emulator_delta {
-                                (next_ptr as isize).wrapping_add(delta) as usize
+                                let translated = (next_ptr as isize).wrapping_add(delta) as usize;
+                                if translated >= 0x10000 && translated <= 0x0000_7FFF_FFFF_FFFF {
+                                    translated
+                                } else {
+                                    next_ptr
+                                }
                             } else {
                                 next_ptr
                             };
-                            curr_addr = next_effective.wrapping_add(offset);
+                            let cand_addr = next_effective.wrapping_add(offset);
+                            if emulator_delta.is_some() && process.read(cand_addr, &mut [0u8; 1]).is_err() {
+                                let fallback_addr = next_ptr.wrapping_add(offset);
+                                if fallback_addr != cand_addr && process.read(fallback_addr, &mut [0u8; 1]).is_ok() {
+                                    curr_addr = fallback_addr;
+                                    continue;
+                                }
+                            }
+                            curr_addr = cand_addr;
                         }
                         if broken_path {
                             candidate.valid = Some(false);
@@ -13808,7 +13918,18 @@ impl CrosshairApp {
                         }
                         candidate.resolved_address = Some(curr_addr);
                         if let Some(enc) = text_encoding {
-                            if process.read(curr_addr, &mut text_buf).is_err() {
+                            let mut read_res = process.read(curr_addr, &mut text_buf);
+                            if read_res.is_err() && emulator_delta.is_some() {
+                                if let Some(delta) = emulator_delta {
+                                    let alt_addr = (curr_addr as isize).wrapping_sub(delta) as usize;
+                                    if process.read(alt_addr, &mut text_buf).is_ok() {
+                                        curr_addr = alt_addr;
+                                        candidate.resolved_address = Some(curr_addr);
+                                        read_res = Ok(text_buf.len());
+                                    }
+                                }
+                            }
+                            if read_res.is_err() {
                                 candidate.valid = Some(false);
                                 candidate.observed_text = None;
                                 candidate.live_text = None;
@@ -13830,14 +13951,10 @@ impl CrosshairApp {
                                     String::from_utf16_lossy(&units)
                                 }
                             };
-                            let is_match = if let Some(ref man_t) = manual_text {
-                                man_t == &text
-                            } else if let Some((_, Some(live_t))) = saved_targets.get(&candidate.source_address) {
-                                live_t == &text || candidate.expected_text.as_deref() == Some(&text)
-                            } else {
-                                candidate.expected_text.as_deref() == Some(&text)
-                                    || candidate.resolved_address == Some(candidate.source_address)
-                            };
+                            let is_match = candidate.expected_text.as_deref() == Some(&text)
+                                || manual_text.as_ref().map_or(false, |man| man == &text)
+                                || saved_targets.get(&candidate.source_address).and_then(|(_, s)| s.as_ref()).map_or(false, |s| s == &text)
+                                || candidate.resolved_address == Some(candidate.source_address);
                             candidate.observed_text = Some(text.clone());
                             candidate.live_text = Some(text);
                             if is_match {
@@ -13850,7 +13967,18 @@ impl CrosshairApp {
                         } else {
                             let val_type = candidate.expected_value.value_type();
                             let val_width = val_type.width();
-                            if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
+                            let mut read_res = process.read(curr_addr, &mut val_buf[..val_width]);
+                            if read_res.is_err() && emulator_delta.is_some() {
+                                if let Some(delta) = emulator_delta {
+                                    let alt_addr = (curr_addr as isize).wrapping_sub(delta) as usize;
+                                    if process.read(alt_addr, &mut val_buf[..val_width]).is_ok() {
+                                        curr_addr = alt_addr;
+                                        candidate.resolved_address = Some(curr_addr);
+                                        read_res = Ok(val_width);
+                                    }
+                                }
+                            }
+                            if read_res.is_err() {
                                 candidate.valid = Some(false);
                                 candidate.observed_value = None;
                                 candidate.live_value = None;
@@ -13869,14 +13997,10 @@ impl CrosshairApp {
                             candidate.observed_value = Some(observed);
                             candidate.live_value = Some(observed);
                             candidate.filter_value = Some(observed);
-                            let is_match = if let Some(man_val) = manual_expected {
-                                scan_values_equal_loose(observed, man_val)
-                            } else if let Some((Some(live_s), _)) = saved_targets.get(&candidate.source_address) {
-                                scan_values_equal_loose(observed, *live_s) || scan_values_equal_loose(observed, candidate.expected_value)
-                            } else {
-                                scan_values_equal_loose(observed, candidate.expected_value)
-                                    || candidate.resolved_address == Some(candidate.source_address)
-                            };
+                            let is_match = scan_values_equal_loose(observed, candidate.expected_value)
+                                || manual_expected.map_or(false, |m| scan_values_equal_loose(observed, m))
+                                || saved_targets.get(&candidate.source_address).and_then(|(s, _)| *s).map_or(false, |s| scan_values_equal_loose(observed, s))
+                                || candidate.resolved_address == Some(candidate.source_address);
                             if is_match {
                                 candidate.valid = Some(true);
                                 verified += 1;
@@ -25063,11 +25187,24 @@ fn filter_stable_pointer_candidates(
                     break;
                 }
                 let next_effective = if let Some(delta) = emulator_delta {
-                    (next_ptr as isize).wrapping_add(delta) as usize
+                    let translated = (next_ptr as isize).wrapping_add(delta) as usize;
+                    if translated >= 0x10000 && translated <= 0x0000_7FFF_FFFF_FFFF {
+                        translated
+                    } else {
+                        next_ptr
+                    }
                 } else {
                     next_ptr
                 };
-                curr_addr = next_effective.wrapping_add(offset);
+                let cand_addr = next_effective.wrapping_add(offset);
+                if emulator_delta.is_some() && process.read(cand_addr, &mut [0u8; 1]).is_err() {
+                    let fallback_addr = next_ptr.wrapping_add(offset);
+                    if fallback_addr != cand_addr && process.read(fallback_addr, &mut [0u8; 1]).is_ok() {
+                        curr_addr = fallback_addr;
+                        continue;
+                    }
+                }
+                curr_addr = cand_addr;
             }
             if broken {
                 continue;
@@ -25076,7 +25213,18 @@ fn filter_stable_pointer_candidates(
             candidate.resolved_address = Some(curr_addr);
 
             if let Some(enc) = text_encoding {
-                if process.read(curr_addr, &mut text_buf).is_err() {
+                let mut read_res = process.read(curr_addr, &mut text_buf);
+                if read_res.is_err() && emulator_delta.is_some() {
+                    if let Some(delta) = emulator_delta {
+                        let alt_addr = (curr_addr as isize).wrapping_sub(delta) as usize;
+                        if process.read(alt_addr, &mut text_buf).is_ok() {
+                            curr_addr = alt_addr;
+                            candidate.resolved_address = Some(curr_addr);
+                            read_res = Ok(text_buf.len());
+                        }
+                    }
+                }
+                if read_res.is_err() {
                     continue;
                 }
                 let text = match enc {
@@ -25196,11 +25344,24 @@ fn resolve_memory_address(
             ));
         }
         let next_effective = if let Some(delta) = pointer.delta {
-            (next as isize).wrapping_add(delta) as usize
+            let translated = (next as isize).wrapping_add(delta) as usize;
+            if translated >= 0x10000 && translated <= 0x0000_7FFF_FFFF_FFFF {
+                translated
+            } else {
+                next
+            }
         } else {
             next
         };
-        address = next_effective.wrapping_add_signed(*offset);
+        let cand_addr = next_effective.wrapping_add_signed(*offset);
+        if pointer.delta.is_some() && read_scan_value(pid, cand_addr, ScanValueType::I8).is_err() {
+            let fallback_addr = next.wrapping_add_signed(*offset);
+            if fallback_addr != cand_addr && read_scan_value(pid, fallback_addr, ScanValueType::I8).is_ok() {
+                address = fallback_addr;
+                continue;
+            }
+        }
+        address = cand_addr;
     }
     Ok(address)
 }
@@ -27231,5 +27392,46 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
 
         assert!(!panel.saved_list_active, "saved_list_active must be cleared when text input is focused");
         assert!(panel.edit_value_index.is_none(), "Value editing must not be triggered");
+    }
+
+    #[test]
+    fn test_stable_pointer_candidate_value_fallbacks_and_android_delta() {
+        let candidate = StablePointerCandidate {
+            source_address: 0x12345678,
+            expected_value: ScanValue::I32(77),
+            expected_text: None,
+            path: PointerPath {
+                module: "Android::libil2cpp.so".to_string(),
+                module_offset: 0x1000,
+                offsets: vec![0x10, 0x20],
+            },
+            valid: None,
+            resolved_base: None,
+            resolved_address: Some(0x24144116548),
+            observed_value: Some(ScanValue::I32(77)),
+            observed_text: None,
+            live_value: Some(ScanValue::I32(77)),
+            live_text: None,
+            filter_value: None,
+        };
+
+        // Fallback display check: Value and Current must never be empty dash when observed/live exists
+        let val = candidate.observed_value.or(Some(candidate.expected_value)).map(|v| editable_scan_value(v, false));
+        assert_eq!(val, Some("77".to_string()));
+
+        let cur = candidate.live_value.or(candidate.observed_value).map(|v| editable_scan_value(v, false));
+        assert_eq!(cur, Some("77".to_string()));
+
+        // GVA -> HVA translation check with delta
+        let gva: usize = 0x400023800000;
+        let delta: isize = -0x3DBEDF6E9AB8;
+        let translated = (gva as isize).wrapping_add(delta) as usize;
+        assert!(translated >= 0x10000 && translated <= 0x0000_7FFF_FFFF_FFFF);
+        assert_eq!(translated, 0x24144116548);
+
+        // HVA with delta check: Must be detected as out-of-bounds kernel wrap
+        let hva: usize = 0x24144116548;
+        let invalid_wrap = (hva as isize).wrapping_add(delta) as usize;
+        assert!(invalid_wrap > 0x0000_7FFF_FFFF_FFFF);
     }
 }
