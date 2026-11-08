@@ -159,10 +159,12 @@ impl AndroidBridgeState {
             if executable && !r.executable && !r.readable {
                 continue;
             }
-            let hva_start = (r.start as isize).wrapping_add(delta) as usize;
-            let hva_end = (r.end as isize).wrapping_add(delta) as usize;
-            if hva_start < hva_end {
-                raw.push((hva_start, hva_end));
+            let hva_start = (r.start as isize).checked_add(delta);
+            let hva_end = (r.end as isize).checked_add(delta);
+            if let (Some(s), Some(e)) = (hva_start, hva_end) {
+                if s >= 0 && e > s && (e as usize) <= 0x0000_7FFF_FFFF_FFFF {
+                    raw.push((s as usize, e as usize));
+                }
             }
         }
         merge_memory_ranges(raw)

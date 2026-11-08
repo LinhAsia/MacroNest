@@ -3168,6 +3168,88 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
     regions
 }
 
+/// Discovers and isolates the Android emulator's Guest VM RAM allocations in the host process.
+/// This includes the entire Android guest memory space (game heap, Unity objects, Dalvik, and .so modules),
+/// while strictly excluding Windows host DLLs (`MEM_IMAGE`) and small host GUI event allocations (eliminating mouse movement).
+#[cfg(windows)]
+pub fn find_emulator_guest_ram_ranges(pid: u32, known_host_addr: Option<usize>) -> Vec<(usize, usize)> {
+    let Ok(process) = ScanProcess::open(pid, false) else {
+        return Vec::new();
+    };
+
+    let target_alloc_base = known_host_addr.and_then(|addr| {
+        let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
+        let queried = unsafe {
+            VirtualQueryEx(
+                process.handle,
+                addr as *const c_void,
+                information.as_mut_ptr(),
+                size_of::<MemoryBasicInformation>(),
+            )
+        };
+        if queried != 0 {
+            let info = unsafe { information.assume_init() };
+            let base = info.allocation_base as usize;
+            if base != 0 {
+                Some(base)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let mut ranges = Vec::new();
+    let mut address = 0usize;
+    loop {
+        let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
+        let queried = unsafe {
+            VirtualQueryEx(
+                process.handle,
+                address as *const c_void,
+                information.as_mut_ptr(),
+                size_of::<MemoryBasicInformation>(),
+            )
+        };
+        if queried == 0 {
+            break;
+        }
+        let info = unsafe { information.assume_init() };
+        let base = info.base_address as usize;
+        let Some(next) = base.checked_add(info.region_size) else {
+            break;
+        };
+
+        if info.state == MEM_COMMIT
+            && info.kind != MEM_IMAGE
+            && info.protect & PAGE_GUARD == 0
+        {
+            let alloc_base = info.allocation_base as usize;
+            let is_matched_alloc = target_alloc_base.map_or(false, |tb| alloc_base == tb);
+            // Guest VM physical RAM is allocated in large blocks (typically 2MB+, usually hundreds of MBs/GBs).
+            // Small host allocations (< 2MB) belong to the host Windows/Qt message loop and GUI mouse tracking.
+            let is_large_ram = info.region_size >= 2 * 1024 * 1024;
+
+            if is_matched_alloc || is_large_ram {
+                ranges.push((base, base + info.region_size));
+            }
+        }
+
+        if next <= address {
+            break;
+        }
+        address = next;
+    }
+
+    crate::android_bridge::merge_memory_ranges(ranges)
+}
+
+#[cfg(not(windows))]
+pub fn find_emulator_guest_ram_ranges(_pid: u32, _known_host_addr: Option<usize>) -> Vec<(usize, usize)> {
+    Vec::new()
+}
+
 fn active_scan_regions(
     process: &ScanProcess,
     region: ScanRegion,

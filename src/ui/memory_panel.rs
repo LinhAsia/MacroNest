@@ -6761,8 +6761,8 @@ impl CrosshairApp {
             None => return,
         };
 
-        let magic = match crate::android_bridge::read_android_memory_bytes(&adb, &target, pid, guest_base, 16) {
-            Ok(b) if b.len() >= 8 => b,
+        let magic = match crate::android_bridge::read_android_memory_bytes(&adb, &target, pid, guest_base, 32) {
+            Ok(b) if b.len() >= 16 => b,
             _ => return,
         };
 
@@ -6783,27 +6783,33 @@ impl CrosshairApp {
         let host_pid = self.memory_panel.process_pid;
 
         if let Some(h_pid) = host_pid {
-            let hex_pattern = magic[..8.min(magic.len())].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
+            let pat_len = 24.min(magic.len());
+            let hex_pattern = magic[..pat_len].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
             let options = MemoryScanOptions {
-                writable: true,
-                executable: false,
+                writable: false,
+                executable: true,
                 copy_on_write: true,
                 active_memory_only: false,
                 mem_private: true,
-                mem_image: true,
+                mem_image: false,
                 mem_mapped: true,
-                alignment: None,
+                alignment: Some(4096),
                 target_ranges: None,
             };
 
             let progress = Arc::new(AtomicUsize::new(0));
-            if let Ok(addrs) = crate::process_memory::scan_aob_memory_addresses(h_pid, &hex_pattern, 5, options, progress) {
-                if let Some(&first_host) = addrs.first() {
-                    let delta = first_host as isize - guest_base as isize;
-                    self.memory_panel.android_bridge.host_base_address = Some(first_host);
-                    self.memory_panel.android_bridge.delta = Some(delta);
-                    self.sync_android_module_to_scan_modules();
-                }
+            let mut matched = crate::process_memory::scan_aob_memory_addresses(h_pid, &hex_pattern, 5, options.clone(), progress.clone()).unwrap_or_default();
+            if matched.is_empty() && magic.len() >= 16 {
+                let fallback_pat = magic[..16].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
+                progress.store(0, Ordering::Relaxed);
+                matched = crate::process_memory::scan_aob_memory_addresses(h_pid, &fallback_pat, 5, options, progress).unwrap_or_default();
+            }
+
+            if let Some(&first_host) = matched.first() {
+                let delta = first_host as isize - guest_base as isize;
+                self.memory_panel.android_bridge.host_base_address = Some(first_host);
+                self.memory_panel.android_bridge.delta = Some(delta);
+                self.sync_android_module_to_scan_modules();
             }
         }
     }
@@ -13977,21 +13983,31 @@ impl CrosshairApp {
                                 format!("Write: {} -> {} (Diff: {diff_i64:+})", prev_u32, cur_u32)
                             };
 
-                            let mod_desc = modules.iter().find(|m| gva >= m.base_address && gva < m.end_address)
-                                .map(|m| format!("{}+0x{:X}", m.name, gva - m.base_address))
-                                .or_else(|| {
-                                    all_regions.iter().find(|r| gva >= r.start && gva < r.end)
-                                        .map(|r| format!("{}+0x{:X}", r.pathname, gva - r.start))
-                                })
-                                .unwrap_or_else(|| format!("0x{gva:08X}"));
+                            let is_valid_gva = gva <= 0x0000_7FFF_FFFF_FFFF;
+                            let mod_desc = if is_valid_gva {
+                                modules.iter().find(|m| gva >= m.base_address && gva < m.end_address)
+                                    .map(|m| format!("{}+0x{:X}", m.name, gva - m.base_address))
+                                    .or_else(|| {
+                                        all_regions.iter().find(|r| gva >= r.start && gva < r.end)
+                                            .map(|r| format!("{}+0x{:X}", r.pathname, gva - r.start))
+                                    })
+                                    .unwrap_or_else(|| format!("GVA: 0x{gva:08X}"))
+                            } else {
+                                "Heap / Dynamic Guest Memory".to_string()
+                            };
 
                             let raw_hex = cur_bytes[..4].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
+                            let target_desc = if is_valid_gva {
+                                format!("Target GVA: 0x{gva:08X} (Host HVA: 0x{hva:08X})")
+                            } else {
+                                format!("Host HVA: 0x{hva:08X} (Android Guest Heap)")
+                            };
                             let details = format!(
-                                "Target GVA: 0x{gva:08X} (Host HVA: 0x{hva:08X})\nModule: {mod_desc}\nOld Value: {prev_u32} (0x{prev_u32:X}, f32: {prev_f32:.2})\nNew Value: {cur_u32} (0x{cur_u32:X}, f32: {cur_f32:.2})\nRaw Bytes: {raw_hex}"
+                                "{target_desc}\nModule: {mod_desc}\nOld Value: {prev_u32} (0x{prev_u32:X}, f32: {prev_f32:.2})\nNew Value: {cur_u32} (0x{cur_u32:X}, f32: {cur_f32:.2})\nRaw Bytes: {raw_hex}"
                             );
 
                             let _ = tx_watch.send(WatchEvent::AddressHit {
-                                instruction_address: gva,
+                                instruction_address: if is_valid_gva { gva } else { hva },
                                 instruction: summary,
                                 details,
                             });
@@ -18918,15 +18934,15 @@ impl CrosshairApp {
         };
         if self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some()
-            && self.memory_panel.android_bridge.delta.is_some()
             && self.memory_panel.android_bridge.scan_game_ram_only
         {
-            let ranges = self.memory_panel.android_bridge.get_host_scan_ranges(
-                scan_options.writable,
-                scan_options.executable,
+            scan_options.mem_image = false;
+            let guest_ranges = crate::process_memory::find_emulator_guest_ram_ranges(
+                pid,
+                self.memory_panel.android_bridge.host_base_address,
             );
-            if !ranges.is_empty() {
-                scan_options.target_ranges = Some(Arc::new(ranges));
+            if !guest_ranges.is_empty() {
+                scan_options.target_ranges = Some(Arc::new(guest_ranges));
             }
         }
         let snapshot_for_filter = if action.comparison().is_some() && text_encoding.is_none() && self.memory_panel.candidates.is_empty() {
