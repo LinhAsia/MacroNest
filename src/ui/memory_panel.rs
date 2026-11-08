@@ -760,9 +760,26 @@ struct ModuleListDialog {
 }
 
 #[cfg(windows)]
+pub struct EmulatorMemoryWatchSession {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl EmulatorMemoryWatchSession {
+    pub fn stop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+#[cfg(windows)]
 enum ActiveInstructionWatch {
     Accesses(AddressAccessWatch),
     Writes(WriteWatch),
+    Emulator(EmulatorMemoryWatchSession),
 }
 
 #[cfg(windows)]
@@ -771,6 +788,7 @@ impl ActiveInstructionWatch {
         match self {
             Self::Accesses(watch) => watch.stop(),
             Self::Writes(watch) => watch.stop(),
+            Self::Emulator(watch) => watch.stop(),
         }
     }
 }
@@ -3333,6 +3351,19 @@ impl CrosshairApp {
                     &mut self.memory_panel.pause_while_scanning,
                     pause_label,
                 );
+                if self.memory_panel.android_bridge.is_connected && self.memory_panel.android_bridge.selected_pid.is_some() {
+                    ui.horizontal(|ui| {
+                        let game_ram_label = self.tr("Android Game RAM only", "Chỉ quét RAM Game Android");
+                        ui.checkbox(&mut self.memory_panel.android_bridge.scan_game_ram_only, game_ram_label)
+                            .on_hover_text(self.tr(
+                                "Restricts scan strictly to the selected Android process. Eliminates emulator host memory, mouse movement, and UI artifacts.",
+                                "Giới hạn quét chỉ trong tiến trình game Android. Loại bỏ hoàn toàn RAM giả lập, chuột và giao diện UI.",
+                            ));
+                        if self.memory_panel.android_bridge.scan_game_ram_only {
+                            ui.label(RichText::new("⚡ Isolated").color(Color32::from_rgb(80, 210, 120)).weak());
+                        }
+                    });
+                }
                 #[cfg(windows)]
                 {
                     ui.add_space(2.0);
@@ -3808,6 +3839,8 @@ impl CrosshairApp {
             double
         };
         let mut probe_request: Option<(Vec<usize>, u32)> = None;
+        #[cfg(windows)]
+        let mut instruction_watch_request: Option<(Vec<usize>, bool)> = None;
         response.context_menu(|ui| {
             let label = if marked {
                 "Remove not-relevant mark"
@@ -3838,6 +3871,32 @@ impl CrosshairApp {
                 ui.ctx().copy_text(text);
                 ui.close();
             }
+            #[cfg(windows)]
+            {
+                ui.separator();
+                let debugger_arch = self.memory_panel.process_pid
+                    .and_then(|pid| process_pointer_width(pid).ok())
+                    .map_or("auto", |width| if width == 4 { "x86" } else { "x64" });
+                let is_android = self.memory_panel.android_bridge.is_connected && self.memory_panel.android_bridge.selected_pid.is_some();
+                let arch_tag = if is_android { "Android" } else { debugger_arch };
+                if ui.button(format!("{} ({arch_tag})", self.tr("Find instructions accessing this address", "Tìm lệnh truy cập địa chỉ này"))).clicked() {
+                    let mut addrs = self.selected_memory_result_addresses();
+                    if !addrs.contains(&address_value) {
+                        addrs.push(address_value);
+                    }
+                    instruction_watch_request = Some((addrs, true));
+                    ui.close();
+                }
+                if ui.button(format!("{} ({arch_tag})", self.tr("Find instructions writing this address", "Tìm lệnh ghi vào địa chỉ này"))).clicked() {
+                    let mut addrs = self.selected_memory_result_addresses();
+                    if !addrs.contains(&address_value) {
+                        addrs.push(address_value);
+                    }
+                    instruction_watch_request = Some((addrs, false));
+                    ui.close();
+                }
+            }
+            ui.separator();
             ui.menu_button(
                 self.tr("Probe Location (ESP) >", "Dò vị trí vật thể (ESP) >"),
                 |ui| {
@@ -3865,6 +3924,10 @@ impl CrosshairApp {
         });
         if let Some((addrs, preset_id)) = probe_request {
             self.open_location_probe_dialog(addrs, preset_id);
+        }
+        #[cfg(windows)]
+        if let Some((addrs, reads_and_writes)) = instruction_watch_request {
+            self.open_instruction_watch_many(addrs, reads_and_writes);
         }
         if response.clicked_by(egui::PointerButton::Middle) {
             let toggle = ui.input(|input| input.modifiers.ctrl || input.modifiers.command);
@@ -4864,11 +4927,15 @@ impl CrosshairApp {
                                 let Some(saved) = self.memory_panel.saved.get(index).cloned() else { return; };
                                 let selected_count = self.memory_panel.selected_saved.len();
                                 let single_target = selected_count == 1;
-                                let debugger_arch = self
-                                    .memory_panel
-                                    .process_pid
-                                    .and_then(|pid| process_pointer_width(pid).ok())
-                                    .map_or("auto", |width| if width == 4 { "x86" } else { "x64" });
+                                let is_android = self.memory_panel.android_bridge.is_connected && self.memory_panel.android_bridge.selected_pid.is_some();
+                                let debugger_arch = if is_android {
+                                    "Android"
+                                } else {
+                                    self.memory_panel
+                                        .process_pid
+                                        .and_then(|pid| process_pointer_width(pid).ok())
+                                        .map_or("auto", |width| if width == 4 { "x86" } else { "x64" })
+                                };
                                 let editable_selection = selected_count > 0
                                     && self.memory_panel.selected_saved.iter().all(
                                         |selected_index| {
@@ -6412,6 +6479,24 @@ impl CrosshairApp {
                     ui.label(RichText::new(format!("(Delta: {sign}0x{:X})", delta.unsigned_abs())).weak());
                 }
             });
+            let scan_ram_label = self.tr(
+                "Scan Game RAM only (Isolate from emulator host)",
+                "Chỉ quét RAM Game (Cách ly khỏi RAM giả lập)",
+            );
+            let scan_ram_hint = self.tr(
+                "Only scan memory mapped directly to the selected Android process. Eliminates emulator host memory, mouse movement, and UI artifacts.",
+                "Chỉ quét các vùng bộ nhớ thuộc tiến trình game Android đã chọn. Loại bỏ hoàn toàn bộ nhớ của giả lập, di chuyển chuột, và giao diện UI.",
+            );
+            ui.horizontal(|ui| {
+                ui.checkbox(
+                    &mut self.memory_panel.android_bridge.scan_game_ram_only,
+                    scan_ram_label,
+                ).on_hover_text(scan_ram_hint);
+                let reg_count = self.memory_panel.android_bridge.all_regions.len();
+                if reg_count > 0 {
+                    ui.label(RichText::new(format!("({reg_count} RAM regions)")).color(Color32::from_rgb(80, 210, 120)).weak());
+                }
+            });
 
             ui.separator();
 
@@ -6623,9 +6708,10 @@ impl CrosshairApp {
             None => return,
         };
         let target = self.memory_panel.android_bridge.selected_target.clone();
-        match crate::android_bridge::get_android_memory_maps(&adb, &target, pid) {
-            Ok(mods) => {
+        match crate::android_bridge::get_android_process_maps(&adb, &target, pid) {
+            Ok((mods, all_regs)) => {
                 let count = mods.len();
+                let reg_count = all_regs.len();
                 if let Some(pri) = mods.iter().find(|m| m.name.contains("libil2cpp") || m.name.contains("libneox") || m.name.contains("libunity")) {
                     self.memory_panel.android_bridge.guest_module_name = pri.name.clone();
                     self.memory_panel.android_bridge.guest_module_base = Some(pri.base_address);
@@ -6634,11 +6720,13 @@ impl CrosshairApp {
                     self.memory_panel.android_bridge.guest_module_base = Some(first.base_address);
                 }
                 self.memory_panel.android_bridge.modules = mods;
-                self.memory_panel.android_bridge.status = format!("Loaded {count} modules for PID {pid}");
+                self.memory_panel.android_bridge.all_regions = all_regs;
+                self.memory_panel.android_bridge.status = format!("Loaded {count} modules ({reg_count} RAM regions) for PID {pid}");
                 self.android_auto_sync_delta();
             }
             Err(err) => {
                 self.memory_panel.android_bridge.modules.clear();
+                self.memory_panel.android_bridge.all_regions.clear();
                 self.memory_panel.android_bridge.guest_module_name.clear();
                 self.memory_panel.android_bridge.guest_module_base = None;
                 self.memory_panel.android_bridge.status = err;
@@ -6681,7 +6769,7 @@ impl CrosshairApp {
         #[cfg(windows)]
         let host_pid = self.memory_panel.process_pid.or_else(|| {
             let procs = list_process_details().unwrap_or_default();
-            let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu"];
+            let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu", "mumuplayer"];
             procs.into_iter().find(|p| {
                 let lower = p.name.to_lowercase();
                 emu_names.iter().any(|&emu| lower.contains(emu))
@@ -6705,6 +6793,7 @@ impl CrosshairApp {
                 mem_image: true,
                 mem_mapped: true,
                 alignment: None,
+                target_ranges: None,
             };
 
             let progress = Arc::new(AtomicUsize::new(0));
@@ -6720,23 +6809,18 @@ impl CrosshairApp {
     }
 
     fn sync_android_module_to_scan_modules(&mut self) {
-        if let Some(host_base) = self.memory_panel.android_bridge.host_base_address {
-            let mod_name = if self.memory_panel.android_bridge.guest_module_name.is_empty() {
-                "libil2cpp.so".to_string()
-            } else {
-                self.memory_panel.android_bridge.guest_module_name.clone()
-            };
-            let tag = format!("Android::{mod_name}");
-            let size = self.memory_panel.android_bridge.modules
-                .iter()
-                .find(|m| m.name == mod_name)
-                .map(|m| m.size)
-                .unwrap_or(64 * 1024 * 1024);
+        let delta = match self.memory_panel.android_bridge.delta {
+            Some(d) => d,
+            None => return,
+        };
+        for m in &self.memory_panel.android_bridge.modules {
+            let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+            let tag = format!("Android::{}", m.name);
             if let Some(existing) = self.memory_panel.scan_modules.iter_mut().find(|(n, _, _)| n == &tag) {
                 existing.1 = host_base;
-                existing.2 = size;
+                existing.2 = m.size;
             } else {
-                self.memory_panel.scan_modules.push((tag, host_base, size));
+                self.memory_panel.scan_modules.push((tag, host_base, m.size));
             }
         }
     }
@@ -8025,6 +8109,7 @@ impl CrosshairApp {
                 mem_image: true,
                 mem_mapped: false,
                 alignment: None,
+                target_ranges: None,
             };
             let result = scan_aob_memory_range_with_progress(
                 pid,
@@ -8234,6 +8319,7 @@ impl CrosshairApp {
                 mem_image: true,
                 mem_mapped: false,
                 alignment: None,
+                target_ranges: None,
             };
             let mut successful = Vec::new();
             for item in items {
@@ -8249,7 +8335,7 @@ impl CrosshairApp {
                     *module_base,
                     *module_size,
                     32,
-                    options,
+                    options.clone(),
                     Arc::new(AtomicUsize::new(0)),
                 );
                 if let Ok(matched) = matches {
@@ -13796,6 +13882,19 @@ impl CrosshairApp {
         mut addresses: Vec<usize>,
         reads_and_writes: bool,
     ) {
+        let is_android = self.memory_panel.android_bridge.is_connected
+            && self.memory_panel.android_bridge.selected_pid.is_some();
+        if is_android && self.memory_panel.process_pid.is_none() {
+            let procs = list_process_details().unwrap_or_default();
+            let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu", "mumuplayer"];
+            if let Some(p) = procs.into_iter().find(|p| {
+                let lower = p.name.to_lowercase();
+                emu_names.iter().any(|&emu| lower.contains(emu))
+            }) {
+                self.memory_panel.process_pid = Some(p.pid);
+                self.memory_panel.process_selector = format!("pid:{}:{}", p.pid, p.name);
+            }
+        }
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
             return;
@@ -13813,10 +13912,99 @@ impl CrosshairApp {
         };
         self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
+        let tx_watch = tx.clone();
         let notify = move |event| {
             let _ = tx.send(event);
         };
-        let started = if reads_and_writes {
+        let started = if is_android {
+            let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+            let modules = self.memory_panel.android_bridge.modules.clone();
+            let all_regions = self.memory_panel.android_bridge.all_regions.clone();
+            let watch_targets: Vec<(usize, usize)> = addresses.iter().map(|&addr| {
+                if crate::process_memory::read_memory_bytes(pid, addr, 4).is_ok() {
+                    let gva = (addr as isize - delta) as usize;
+                    (gva, addr)
+                } else {
+                    let hva = (addr as isize + delta) as usize;
+                    (addr, hva)
+                }
+            }).collect();
+
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_clone = std::sync::Arc::clone(&stop);
+            let handle = thread::spawn(move || {
+                let mut prev_values: HashMap<usize, Vec<u8>> = HashMap::new();
+                for &(_, hva) in &watch_targets {
+                    if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, hva, 8) {
+                        prev_values.insert(hva, bytes);
+                    }
+                }
+
+                let _ = tx_watch.send(WatchEvent::Started {
+                    armed_threads: 1,
+                    total_threads: 1,
+                });
+
+                while !stop_clone.load(std::sync::atomic::Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(15));
+                    for &(gva, hva) in &watch_targets {
+                        let Ok(cur_bytes) = crate::process_memory::read_memory_bytes(pid, hva, 8) else {
+                            continue;
+                        };
+                        let changed = match prev_values.get(&hva) {
+                            Some(prev) => prev != &cur_bytes,
+                            None => true,
+                        };
+                        if changed {
+                            let prev = prev_values.get(&hva).cloned().unwrap_or_else(|| cur_bytes.clone());
+                            prev_values.insert(hva, cur_bytes.clone());
+
+                            let prev_u32 = u32::from_le_bytes(prev[..4].try_into().unwrap_or_default());
+                            let cur_u32 = u32::from_le_bytes(cur_bytes[..4].try_into().unwrap_or_default());
+                            let prev_f32 = f32::from_le_bytes(prev[..4].try_into().unwrap_or_default());
+                            let cur_f32 = f32::from_le_bytes(cur_bytes[..4].try_into().unwrap_or_default());
+
+                            let diff_i64 = cur_u32 as i64 - prev_u32 as i64;
+                            let is_float_likely = (cur_f32 - prev_f32).abs() > 0.0001
+                                && cur_f32.is_finite()
+                                && prev_f32.is_finite()
+                                && cur_f32.abs() < 1e7
+                                && prev_f32.abs() < 1e7;
+
+                            let summary = if is_float_likely {
+                                format!("Write: {:.2} -> {:.2} (Diff: {:.2})", prev_f32, cur_f32, cur_f32 - prev_f32)
+                            } else {
+                                format!("Write: {} -> {} (Diff: {diff_i64:+})", prev_u32, cur_u32)
+                            };
+
+                            let mod_desc = modules.iter().find(|m| gva >= m.base_address && gva < m.end_address)
+                                .map(|m| format!("{}+0x{:X}", m.name, gva - m.base_address))
+                                .or_else(|| {
+                                    all_regions.iter().find(|r| gva >= r.start && gva < r.end)
+                                        .map(|r| format!("{}+0x{:X}", r.pathname, gva - r.start))
+                                })
+                                .unwrap_or_else(|| format!("0x{gva:08X}"));
+
+                            let raw_hex = cur_bytes[..4].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
+                            let details = format!(
+                                "Target GVA: 0x{gva:08X} (Host HVA: 0x{hva:08X})\nModule: {mod_desc}\nOld Value: {prev_u32} (0x{prev_u32:X}, f32: {prev_f32:.2})\nNew Value: {cur_u32} (0x{cur_u32:X}, f32: {cur_f32:.2})\nRaw Bytes: {raw_hex}"
+                            );
+
+                            let _ = tx_watch.send(WatchEvent::AddressHit {
+                                instruction_address: gva,
+                                instruction: summary,
+                                details,
+                            });
+                        }
+                    }
+                }
+                let _ = tx_watch.send(WatchEvent::Stopped);
+            });
+            Ok(ActiveInstructionWatch::Emulator(EmulatorMemoryWatchSession {
+                stop,
+                handle: Some(handle),
+            }))
+        } else if reads_and_writes {
             AddressAccessWatch::start_many(
                 pid,
                 &addresses,
@@ -13834,11 +14022,32 @@ impl CrosshairApp {
             .map(ActiveInstructionWatch::Writes)
         };
         let (active, status) = match started {
-            Ok(active) => (Some(active), "Attaching debugger…".to_owned()),
+            Ok(active) => {
+                let st = if is_android {
+                    let android_pid = self.memory_panel.android_bridge.selected_pid.unwrap_or(0);
+                    format!("Active Watcher running (Android PID {android_pid}) — real-time write capture")
+                } else {
+                    "Attaching debugger…".to_owned()
+                };
+                (Some(active), st)
+            }
             Err(error) => (None, format!("Unable to start debugger: {error}")),
         };
+        let display_address = if is_android {
+            if let Some(delta) = self.memory_panel.android_bridge.delta {
+                if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
+                    (address as isize - delta) as usize
+                } else {
+                    address
+                }
+            } else {
+                address
+            }
+        } else {
+            address
+        };
         self.memory_panel.instruction_watch_dialog = Some(InstructionWatchDialog {
-            address,
+            address: display_address,
             addresses,
             writes_only: !reads_and_writes,
             status,
@@ -18562,6 +18771,17 @@ impl CrosshairApp {
         }
         #[cfg(windows)]
         self.close_memory_debuggers();
+        if self.memory_panel.process_pid.is_none() && self.memory_panel.android_bridge.is_connected {
+            let procs = list_process_details().unwrap_or_default();
+            let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu", "mumuplayer"];
+            if let Some(p) = procs.into_iter().find(|p| {
+                let lower = p.name.to_lowercase();
+                emu_names.iter().any(|&emu| lower.contains(emu))
+            }) {
+                self.memory_panel.process_pid = Some(p.pid);
+                self.memory_panel.process_selector = format!("pid:{}:{}", p.pid, p.name);
+            }
+        }
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
             return;
@@ -18671,7 +18891,7 @@ impl CrosshairApp {
             .unwrap_or(value_type.width())
             .clamp(1, 4096);
         self.memory_panel.fast_scan_alignment = alignment.to_string();
-        let scan_options = if is_aob || self.memory_panel.scan_scope_all {
+        let mut scan_options = if is_aob || self.memory_panel.scan_scope_all {
             MemoryScanOptions {
                 writable: false,
                 executable: true,
@@ -18681,6 +18901,7 @@ impl CrosshairApp {
                 mem_image: true,
                 mem_mapped: true,
                 alignment: (!is_aob && self.memory_panel.fast_scan).then_some(alignment),
+                target_ranges: None,
             }
         } else {
             MemoryScanOptions {
@@ -18692,8 +18913,22 @@ impl CrosshairApp {
                 mem_image: self.memory_panel.scan_mem_image,
                 mem_mapped: self.memory_panel.scan_mem_mapped,
                 alignment: self.memory_panel.fast_scan.then_some(alignment),
+                target_ranges: None,
             }
         };
+        if self.memory_panel.android_bridge.is_connected
+            && self.memory_panel.android_bridge.selected_pid.is_some()
+            && self.memory_panel.android_bridge.delta.is_some()
+            && self.memory_panel.android_bridge.scan_game_ram_only
+        {
+            let ranges = self.memory_panel.android_bridge.get_host_scan_ranges(
+                scan_options.writable,
+                scan_options.executable,
+            );
+            if !ranges.is_empty() {
+                scan_options.target_ranges = Some(Arc::new(ranges));
+            }
+        }
         let snapshot_for_filter = if action.comparison().is_some() && text_encoding.is_none() && self.memory_panel.candidates.is_empty() {
             self.memory_panel.raw_snapshot.clone()
         } else {
@@ -18970,6 +19205,7 @@ impl CrosshairApp {
                 mem_image: true,
                 mem_mapped: true,
                 alignment: None,
+                target_ranges: None,
             }
         } else {
             MemoryScanOptions {
@@ -18981,6 +19217,7 @@ impl CrosshairApp {
                 mem_image: self.memory_panel.scan_mem_image,
                 mem_mapped: self.memory_panel.scan_mem_mapped,
                 alignment: None,
+                target_ranges: None,
             }
         };
 
@@ -19575,6 +19812,7 @@ impl CrosshairApp {
                         .unwrap_or(4)
                         .max(1),
                 ),
+                target_ranges: None,
             }
         } else {
             MemoryScanOptions {
@@ -19592,6 +19830,7 @@ impl CrosshairApp {
                         .unwrap_or(4)
                         .max(1),
                 ),
+                target_ranges: None,
             }
         };
         let progress = Arc::clone(&self.memory_panel.scan_progress);

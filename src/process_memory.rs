@@ -65,7 +65,7 @@ pub enum ScanValueType {
     F64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct MemoryScanOptions {
     pub writable: bool,
     pub executable: bool,
@@ -75,6 +75,7 @@ pub struct MemoryScanOptions {
     pub mem_image: bool,
     pub mem_mapped: bool,
     pub alignment: Option<usize>,
+    pub target_ranges: Option<Arc<Vec<(usize, usize)>>>,
 }
 
 impl Default for MemoryScanOptions {
@@ -88,6 +89,7 @@ impl Default for MemoryScanOptions {
             mem_image: true,
             mem_mapped: false,
             alignment: Some(4),
+            target_ranges: None,
         }
     }
 }
@@ -501,6 +503,7 @@ pub fn scan_view_projection_candidates(
         mem_image: true,
         mem_mapped: true,
         alignment: Some(4),
+        target_ranges: None,
     };
     let mut candidates = Vec::new();
     let mut remaining = max_bytes;
@@ -1860,7 +1863,7 @@ pub fn scan_memory_range_with_progress(
 ) -> io::Result<Vec<ScanCandidate>> {
     let result_limit = result_limit.max(1);
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process, options)
+    let regions = scan_regions_for(&process, options.clone())
         .into_iter()
         .flat_map(|region| {
             (0..region.size)
@@ -2183,7 +2186,7 @@ pub fn scan_aob_memory_addresses(
         )
     })?;
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process, options)
+    let regions = scan_regions_for(&process, options.clone())
         .into_iter()
         .flat_map(|region| {
             (0..region.size)
@@ -2401,7 +2404,7 @@ pub fn scan_aob_wildcard_batch(
     }
 
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process, options);
+    let regions = scan_regions_for(&process, options.clone());
     if regions.is_empty() {
         return Ok(scenarios
             .into_iter()
@@ -3134,7 +3137,24 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
                 base,
                 size: information.region_size,
             };
-            if let Some(buf) = information_buffer.as_mut() {
+            if let Some(target_ranges) = options.target_ranges.as_ref() {
+                let reg_end = region.base.saturating_add(region.size);
+                for &(t_start, t_end) in target_ranges.as_ref() {
+                    let start = region.base.max(t_start);
+                    let end = reg_end.min(t_end);
+                    if start < end {
+                        let sub_region = ScanRegion {
+                            base: start,
+                            size: end - start,
+                        };
+                        if let Some(buf) = information_buffer.as_mut() {
+                            regions.extend(active_scan_regions(process, sub_region, buf));
+                        } else {
+                            regions.push(sub_region);
+                        }
+                    }
+                }
+            } else if let Some(buf) = information_buffer.as_mut() {
                 regions.extend(active_scan_regions(process, region, buf));
             } else {
                 regions.push(region);
@@ -3530,7 +3550,7 @@ pub fn capture_memory_snapshot(
     progress: Arc<AtomicUsize>,
 ) -> io::Result<RawMemorySnapshot> {
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process, options);
+    let regions = scan_regions_for(&process, options.clone());
     let alignment = options.alignment.unwrap_or(value_type.width()).max(1);
     let width = value_type.width();
 

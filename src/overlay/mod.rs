@@ -33673,6 +33673,7 @@ mod windows_overlay {
             mem_image: true,
             mem_mapped: true,
             alignment: None,
+            target_ranges: None,
         };
 
         let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));

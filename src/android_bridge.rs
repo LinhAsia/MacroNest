@@ -95,6 +95,16 @@ pub struct AndroidMemoryModule {
     pub is_game_module: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AndroidMemoryRegion {
+    pub start: usize,
+    pub end: usize,
+    pub readable: bool,
+    pub writable: bool,
+    pub executable: bool,
+    pub pathname: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AndroidBridgeState {
     pub is_open: bool,
@@ -110,6 +120,8 @@ pub struct AndroidBridgeState {
     pub selected_pid: Option<u32>,
     pub selected_process_name: String,
     pub modules: Vec<AndroidMemoryModule>,
+    pub all_regions: Vec<AndroidMemoryRegion>,
+    pub scan_game_ram_only: bool,
     pub module_filter: String,
     pub show_game_modules_only: bool,
     // Automated GVA <-> HVA Delta
@@ -125,8 +137,55 @@ impl AndroidBridgeState {
             custom_target: "127.0.0.1:16416".to_string(),
             status: "Ready".to_string(),
             show_game_modules_only: true,
+            scan_game_ram_only: true,
             ..Default::default()
         }
+    }
+
+    /// Converts guest process memory regions into host virtual address (HVA) scan ranges using Delta.
+    pub fn get_host_scan_ranges(&self, writable_only: bool, executable: bool) -> Vec<(usize, usize)> {
+        let delta = match self.delta {
+            Some(d) => d,
+            None => return Vec::new(),
+        };
+        let mut raw = Vec::new();
+        for r in &self.all_regions {
+            if writable_only && !r.writable {
+                continue;
+            }
+            if !writable_only && !executable && !r.readable {
+                continue;
+            }
+            if executable && !r.executable && !r.readable {
+                continue;
+            }
+            let hva_start = (r.start as isize).wrapping_add(delta) as usize;
+            let hva_end = (r.end as isize).wrapping_add(delta) as usize;
+            if hva_start < hva_end {
+                raw.push((hva_start, hva_end));
+            }
+        }
+        merge_memory_ranges(raw)
+    }
+
+    /// Resolves which Android module or region an address (GVA) falls into.
+    pub fn resolve_gva_module(&self, gva: usize) -> Option<(String, usize)> {
+        for m in &self.modules {
+            if gva >= m.base_address && gva < m.end_address {
+                return Some((m.name.clone(), gva - m.base_address));
+            }
+        }
+        for r in &self.all_regions {
+            if gva >= r.start && gva < r.end {
+                let name = if let Some((_, file)) = r.pathname.rsplit_once('/') {
+                    file.to_string()
+                } else {
+                    r.pathname.clone()
+                };
+                return Some((name, gva - r.start));
+            }
+        }
+        None
     }
 }
 
@@ -487,13 +546,98 @@ fn module_priority_score(name: &str) -> u32 {
     }
 }
 
-/// Fetches and parses memory maps of a given Android process PID.
-pub fn get_android_memory_maps(
+/// Parses all memory regions from Android `/proc/<pid>/maps` including heap, anon mmap, and libraries.
+pub fn parse_all_android_regions(maps_content: &str) -> Vec<AndroidMemoryRegion> {
+    let mut regions = Vec::new();
+    for line in maps_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let range = match parts.next() {
+            Some(r) => r,
+            None => continue,
+        };
+        let perms = match parts.next() {
+            Some(p) => p,
+            None => continue,
+        };
+        let _offset = parts.next();
+        let _dev = parts.next();
+        let _inode = parts.next();
+        let pathname = parts.next().unwrap_or("").trim();
+
+        let readable = perms.contains('r');
+        let writable = perms.contains('w');
+        let executable = perms.contains('x');
+        if !readable && !writable && !executable {
+            continue; // Skip guard / inaccessible pages (---p)
+        }
+
+        let (start_str, end_str) = match range.split_once('-') {
+            Some((s, e)) => (s, e),
+            None => continue,
+        };
+
+        let start = match usize::from_str_radix(start_str, 16) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let end = match usize::from_str_radix(end_str, 16) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if start >= end {
+            continue;
+        }
+
+        let clean_path = if pathname.is_empty() {
+            "[anon]".to_string()
+        } else {
+            pathname.to_string()
+        };
+
+        regions.push(AndroidMemoryRegion {
+            start,
+            end,
+            readable,
+            writable,
+            executable,
+            pathname: clean_path,
+        });
+    }
+    regions
+}
+
+/// Merges overlapping and contiguous memory ranges.
+pub fn merge_memory_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    if ranges.is_empty() {
+        return ranges;
+    }
+    ranges.sort_unstable_by_key(|&(start, _)| start);
+    let mut merged = Vec::with_capacity(ranges.len());
+    let (mut cur_start, mut cur_end) = ranges[0];
+    for (start, end) in ranges.into_iter().skip(1) {
+        if start <= cur_end {
+            cur_end = cur_end.max(end);
+        } else {
+            merged.push((cur_start, cur_end));
+            cur_start = start;
+            cur_end = end;
+        }
+    }
+    merged.push((cur_start, cur_end));
+    merged
+}
+
+/// Fetches and parses both shared library modules and all memory regions of a given Android process PID.
+pub fn get_android_process_maps(
     adb: &Path,
     target: &str,
     pid: u32,
-) -> Result<Vec<AndroidMemoryModule>, String> {
-    // Try reading with su -c, then su 0, then direct cat
+) -> Result<(Vec<AndroidMemoryModule>, Vec<AndroidMemoryRegion>), String> {
     let commands = [
         format!("su -c 'cat /proc/{pid}/maps'"),
         format!("su 0 cat /proc/{pid}/maps"),
@@ -516,8 +660,9 @@ pub fn get_android_memory_maps(
             }
 
             let modules = parse_android_maps(trimmed);
-            if !modules.is_empty() {
-                return Ok(modules);
+            let all_regions = parse_all_android_regions(trimmed);
+            if !modules.is_empty() || !all_regions.is_empty() {
+                return Ok((modules, all_regions));
             }
         }
     }
@@ -527,6 +672,15 @@ pub fn get_android_memory_maps(
     } else {
         Err(format!("Could not read /proc/{pid}/maps"))
     }
+}
+
+/// Fetches and parses memory maps of a given Android process PID.
+pub fn get_android_memory_maps(
+    adb: &Path,
+    target: &str,
+    pid: u32,
+) -> Result<Vec<AndroidMemoryModule>, String> {
+    get_android_process_maps(adb, target, pid).map(|(mods, _)| mods)
 }
 
 /// Reads memory directly from Android `/proc/<pid>/mem`.
@@ -644,5 +798,29 @@ u0_a234       8910  1000 1500000 100000 0                   0 S com.mihoyo.Gensh
         let (delta, explanation) = calculate_gva_hva_delta(guest_addr, host_addr);
         assert_eq!(delta, (host_addr as isize - guest_addr as isize));
         assert!(explanation.contains("Host Base Offset"));
+    }
+
+    #[test]
+    fn test_parse_all_android_regions_and_merge() {
+        let sample = r#"
+1000-2000 rw-p 0000 00:00 0 [anon:libc_malloc]
+2000-3000 rw-p 0000 00:00 0 [anon:libc_malloc]
+4000-5000 r-xp 0000 00:00 0 /data/app/pkg/libil2cpp.so
+6000-7000 ---p 0000 00:00 0 [guard]
+"#;
+        let regions = parse_all_android_regions(sample);
+        assert_eq!(regions.len(), 3); // 6000-7000 guard is skipped
+        assert!(regions[0].writable);
+        assert_eq!(regions[0].pathname, "[anon:libc_malloc]");
+        assert!(regions[2].executable);
+
+        let mut state = AndroidBridgeState::new();
+        state.all_regions = regions;
+        state.delta = Some(0x10000);
+
+        let writable_hva = state.get_host_scan_ranges(true, false);
+        // 1000..2000 and 2000..3000 should merge into 0x11000..0x13000
+        assert_eq!(writable_hva.len(), 1);
+        assert_eq!(writable_hva[0], (0x11000, 0x13000));
     }
 }
