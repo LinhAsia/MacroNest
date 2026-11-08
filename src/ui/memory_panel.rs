@@ -7978,7 +7978,7 @@ impl CrosshairApp {
                 #[cfg(windows)]
                 if let Some(pid) = self.memory_panel.process_pid
                     && let Some(entry) = self.state.memory_code_list.get(index)
-                    && let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset)
+                    && let Ok(address) = self.resolve_code_entry_address(pid, &entry.module, entry.offset)
                 {
                     self.open_disassembler_at_address(address);
                 }
@@ -8543,6 +8543,30 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
+    pub(crate) fn resolve_code_entry_address(&self, pid: u32, module: &str, offset: usize) -> std::io::Result<usize> {
+        if module == "[dynamic]" || module == "[heap]" || module.is_empty() {
+            return Ok(offset);
+        }
+        if let Ok(addr) = resolve_module_offset(pid, module, offset) {
+            return Ok(addr);
+        }
+        for (name, base, _size) in &self.memory_panel.scan_modules {
+            if name.eq_ignore_ascii_case(module) || name.ends_with(module) || module.ends_with(name) {
+                return Ok(base.wrapping_add(offset));
+            }
+        }
+        if let Some(delta) = self.memory_panel.android_bridge.delta {
+            for m in &self.memory_panel.android_bridge.modules {
+                if m.name.eq_ignore_ascii_case(module) || format!("Android::{}", m.name).eq_ignore_ascii_case(module) {
+                    let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                    return Ok(host_base.wrapping_add(offset));
+                }
+            }
+        }
+        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Module is not loaded"))
+    }
+
+    #[cfg(windows)]
     fn replace_code_entry_with_nop(&mut self, code_index: usize) {
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process first".to_owned();
@@ -8551,7 +8575,7 @@ impl CrosshairApp {
         let Some(entry) = self.state.memory_code_list.get(code_index) else {
             return;
         };
-        let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+        let Ok(address) = self.resolve_code_entry_address(pid, &entry.module, entry.offset) else {
             self.memory_panel.status = format!("Unable to resolve address for {}", entry.name);
             return;
         };
@@ -8604,7 +8628,7 @@ impl CrosshairApp {
         if !entry.replaced || original_bytes.is_empty() {
             return;
         }
-        let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+        let Ok(address) = self.resolve_code_entry_address(pid, &entry.module, entry.offset) else {
             self.memory_panel.status = format!("Unable to resolve address for {}", entry.name);
             return;
         };
@@ -8629,10 +8653,25 @@ impl CrosshairApp {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
-        let Ok((module, offset)) = module_offset_for_address(pid, address) else {
-            self.memory_panel.status = "Instruction is not inside a loaded module".to_owned();
-            return;
-        };
+        let (module, offset) = module_offset_for_address(pid, address)
+            .or_else(|_| {
+                for (name, base, size) in &self.memory_panel.scan_modules {
+                    if address >= *base && address < base.saturating_add(*size) {
+                        return Ok((name.clone(), address - *base));
+                    }
+                }
+                if let Some(delta) = self.memory_panel.android_bridge.delta {
+                    let gva = (address as isize - delta) as usize;
+                    if let Some((mod_name, off)) = self.memory_panel.android_bridge.resolve_gva_module(gva) {
+                        return Ok((format!("Android::{mod_name}"), off));
+                    }
+                }
+                if let Some((mod_name, off)) = self.memory_panel.android_bridge.resolve_gva_module(address) {
+                    return Ok((format!("Android::{mod_name}"), off));
+                }
+                Ok(("[dynamic]".to_string(), address))
+            })
+            .unwrap_or_else(|_: std::io::Error| ("[dynamic]".to_string(), address));
         let existing = self
             .state
             .memory_code_list
@@ -8696,7 +8735,7 @@ impl CrosshairApp {
         let Some(entry) = self.state.memory_code_list.get(code_index) else {
             return;
         };
-        let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+        let Ok(address) = self.resolve_code_entry_address(pid, &entry.module, entry.offset) else {
             self.memory_panel.code_relocate_status = format!("Module '{}' not found", entry.module);
             return;
         };
@@ -8740,7 +8779,7 @@ impl CrosshairApp {
             let Some(entry) = self.state.memory_code_list.get(index) else {
                 continue;
             };
-            let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+            let Ok(address) = self.resolve_code_entry_address(pid, &entry.module, entry.offset) else {
                 continue;
             };
             instruction_addresses.push(address);
@@ -8809,7 +8848,7 @@ impl CrosshairApp {
         let Some(entry) = self.state.memory_code_list.get(code_index).cloned() else {
             return;
         };
-        let instruction_address = match resolve_module_offset(pid, &entry.module, entry.offset) {
+        let instruction_address = match self.resolve_code_entry_address(pid, &entry.module, entry.offset) {
             Ok(address) => address,
             Err(error) => {
                 self.memory_panel.status = format!("Unable to resolve saved code: {error}");
