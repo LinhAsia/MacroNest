@@ -10,6 +10,91 @@ use super::{
 };
 use crate::window_list::window_title;
 
+fn is_script_or_code_block(trimmed: &str) -> bool {
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed.contains(';')
+        || trimmed.contains('$')
+        || trimmed.contains('|')
+        || trimmed.contains('&')
+        || trimmed.contains('"')
+        || trimmed.contains('\'')
+        || trimmed.contains('\n')
+        || trimmed.contains('\r')
+        || trimmed.contains('\\')
+        || trimmed.contains('@')
+    {
+        return true;
+    }
+
+    for word in trimmed.split_whitespace() {
+        let stripped = word.trim_matches(|c| c == '(' || c == ')' || c == '{' || c == '}');
+        if stripped.starts_with('-')
+            && stripped.len() > 1
+            && stripped[1..].chars().next().map_or(false, |c| c.is_ascii_alphabetic())
+        {
+            return true;
+        }
+    }
+
+    for word in trimmed.split_whitespace() {
+        let lower = word.to_ascii_lowercase();
+        let stripped = lower.trim_matches(|c| c == '(' || c == ')' || c == '{' || c == '}');
+        if stripped.starts_with("start-")
+            || stripped.starts_with("stop-")
+            || stripped.starts_with("get-")
+            || stripped.starts_with("set-")
+            || stripped.starts_with("new-")
+            || stripped.starts_with("remove-")
+            || stripped.starts_with("invoke-")
+            || stripped.starts_with("write-")
+            || stripped.starts_with("wait-")
+            || stripped.starts_with("convert-")
+            || stripped.starts_with("out-")
+            || stripped.starts_with("restart-")
+            || stripped.starts_with("clear-")
+            || stripped.starts_with("test-")
+            || stripped.starts_with("enable-")
+            || stripped.starts_with("disable-")
+        {
+            return true;
+        }
+    }
+
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.len() >= 2 {
+        let is_op = |w: &str| {
+            matches!(
+                w,
+                "+" | "-" | "*" | "/" | "%" | "^" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "," | "(" | ")" | "="
+            )
+        };
+        for pair in words.windows(2) {
+            if !is_op(pair[0]) && !is_op(pair[1]) {
+                let w0_ends_op = pair[0].ends_with('+')
+                    || pair[0].ends_with('-')
+                    || pair[0].ends_with('*')
+                    || pair[0].ends_with('/')
+                    || pair[0].ends_with('(')
+                    || pair[0].ends_with(',');
+                let w1_starts_op = pair[1].starts_with('+')
+                    || pair[1].starts_with('-')
+                    || pair[1].starts_with('*')
+                    || pair[1].starts_with('/')
+                    || pair[1].starts_with(')')
+                    || pair[1].starts_with(',');
+                if !w0_ends_op && !w1_starts_op {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
 pub fn interpolate_variables(text: &str) -> String {
     if !text.contains('{') {
         return text.to_owned();
@@ -32,9 +117,23 @@ pub fn interpolate_variables(text: &str) -> String {
 
             if found_close {
                 let var_trimmed = var_name.trim();
+                let is_code_block = is_script_or_code_block(var_trimmed);
+
+                let is_potential_math = !is_code_block
+                    && !var_trimmed.is_empty()
+                    && var_trimmed.chars().all(|c| {
+                        c.is_ascii_alphanumeric()
+                            || c == '_'
+                            || c == '.'
+                            || matches!(
+                                c,
+                                '+' | '-' | '*' | '/' | '%' | '^' | '(' | ')' | ',' | '<' | '>' | '=' | '!' | ' '
+                            )
+                    });
+
                 if let Some(text_val) = resolve_text_variable_value(var_trimmed) {
                     result.push_str(&text_val);
-                } else {
+                } else if is_potential_math {
                     use std::fmt::Write;
                     let val = evaluate_math_expression_f64(var_trimmed);
                     if val.fract() == 0.0 {
@@ -42,6 +141,10 @@ pub fn interpolate_variables(text: &str) -> String {
                     } else {
                         let _ = write!(result, "{val}");
                     }
+                } else {
+                    result.push('{');
+                    result.push_str(&var_name);
+                    result.push('}');
                 }
             } else {
                 result.push('{');
@@ -1989,6 +2092,10 @@ mod tests {
         assert_eq!(evaluate_math_expression_f64("pos + 4"), 4100.0);
         assert_eq!(interpolate_variables("{pos}"), "0x1000");
         assert_eq!(interpolate_variables("{pos + 4}"), "4100");
+        assert_eq!(
+            interpolate_variables("while ($true) { Start-Sleep -Seconds 1 }"),
+            "while ($true) { Start-Sleep -Seconds 1 }"
+        );
 
         {
             let mut text_vars = TEXT_VARIABLES.lock();
