@@ -2189,6 +2189,7 @@ pub fn parse_aob_pattern(pattern_str: &str) -> Option<Vec<AobByte>> {
     if bytes.is_empty() { None } else { Some(bytes) }
 }
 
+#[allow(dead_code)]
 fn aob_bytes_equal(actual: &[u8], pattern: &[AobByte]) -> bool {
     if actual.len() != pattern.len() {
         return false;
@@ -2197,6 +2198,367 @@ fn aob_bytes_equal(actual: &[u8], pattern: &[AobByte]) -> bool {
         AobByte::Exact(expected) => b == expected,
         AobByte::Any => true,
     })
+}
+
+#[derive(Clone, Debug)]
+pub struct CompiledAob {
+    #[allow(dead_code)]
+    pub pattern: Vec<AobByte>,
+    pub values: Vec<u8>,
+    pub masks: Vec<u8>,
+    pub first_exact_idx: Option<usize>,
+    pub first_exact_byte: Option<u8>,
+    pub second_exact_idx: Option<usize>,
+    pub second_exact_byte: Option<u8>,
+}
+
+impl CompiledAob {
+    pub fn new(pattern: Vec<AobByte>) -> Self {
+        let len = pattern.len();
+        let mut values = Vec::with_capacity(len);
+        let mut masks = Vec::with_capacity(len);
+        for &b in &pattern {
+            match b {
+                AobByte::Exact(v) => {
+                    values.push(v);
+                    masks.push(0xFF);
+                }
+                AobByte::Any => {
+                    values.push(0x00);
+                    masks.push(0x00);
+                }
+            }
+        }
+        let first_exact_idx = pattern.iter().position(|b| matches!(b, AobByte::Exact(_)));
+        let first_exact_byte = first_exact_idx.map(|idx| values[idx]);
+
+        let mut second_exact = None;
+        if let Some(f_idx) = first_exact_idx {
+            let is_common = |b: u8| matches!(b, 0x00 | 0x48 | 0x89 | 0x8B | 0x90 | 0xFF);
+            let max_win = (f_idx + 32).min(len);
+            for idx in (f_idx + 1..max_win).rev() {
+                if masks[idx] == 0xFF && !is_common(values[idx]) {
+                    second_exact = Some((idx, values[idx]));
+                    break;
+                }
+            }
+            if second_exact.is_none() {
+                for idx in (f_idx + 1..max_win).rev() {
+                    if masks[idx] == 0xFF {
+                        second_exact = Some((idx, values[idx]));
+                        break;
+                    }
+                }
+            }
+            if second_exact.is_none() {
+                for idx in f_idx + 1..len {
+                    if masks[idx] == 0xFF {
+                        second_exact = Some((idx, values[idx]));
+                        break;
+                    }
+                }
+            }
+        }
+        let (second_exact_idx, second_exact_byte) = match second_exact {
+            Some((idx, b)) => (Some(idx), Some(b)),
+            None => (None, None),
+        };
+
+        Self {
+            pattern,
+            values,
+            masks,
+            first_exact_idx,
+            first_exact_byte,
+            second_exact_idx,
+            second_exact_byte,
+        }
+    }
+
+    pub fn from_pattern_str(pattern_str: &str) -> Option<Self> {
+        let pattern = parse_aob_pattern(pattern_str)?;
+        Some(Self::new(pattern))
+    }
+
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    #[inline]
+    pub fn matches(&self, haystack: &[u8]) -> bool {
+        let len = self.len();
+        if haystack.len() < len {
+            return false;
+        }
+        let h = &haystack[..len];
+        let v = &self.values[..];
+        let m = &self.masks[..];
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            if is_x86_feature_detected!("avx2") && len >= 32 {
+                return unsafe { aob_matches_avx2(h.as_ptr(), v.as_ptr(), m.as_ptr(), len) };
+            }
+        }
+
+        let mut i = 0;
+        while i + 8 <= len {
+            let h_val = u64::from_ne_bytes(h[i..i + 8].try_into().unwrap());
+            let m_val = u64::from_ne_bytes(m[i..i + 8].try_into().unwrap());
+            let v_val = u64::from_ne_bytes(v[i..i + 8].try_into().unwrap());
+            if (h_val & m_val) != v_val {
+                return false;
+            }
+            i += 8;
+        }
+        while i < len {
+            if (h[i] & m[i]) != v[i] {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unused_unsafe)]
+unsafe fn aob_matches_avx2(
+    h_ptr: *const u8,
+    v_ptr: *const u8,
+    m_ptr: *const u8,
+    len: usize,
+) -> bool {
+    use std::arch::x86_64::*;
+    let mut i = 0;
+    while i + 32 <= len {
+        let chunk = unsafe { _mm256_loadu_si256(h_ptr.add(i) as *const __m256i) };
+        let mask = unsafe { _mm256_loadu_si256(m_ptr.add(i) as *const __m256i) };
+        let val = unsafe { _mm256_loadu_si256(v_ptr.add(i) as *const __m256i) };
+        let masked = unsafe { _mm256_and_si256(chunk, mask) };
+        let eq = unsafe { _mm256_cmpeq_epi8(masked, val) };
+        if (unsafe { _mm256_movemask_epi8(eq) } as u32) != 0xFFFF_FFFF {
+            return false;
+        }
+        i += 32;
+    }
+    while i + 8 <= len {
+        let h_val = unsafe { std::ptr::read_unaligned(h_ptr.add(i) as *const u64) };
+        let m_val = unsafe { std::ptr::read_unaligned(m_ptr.add(i) as *const u64) };
+        let v_val = unsafe { std::ptr::read_unaligned(v_ptr.add(i) as *const u64) };
+        if (h_val & m_val) != v_val {
+            return false;
+        }
+        i += 8;
+    }
+    while i < len {
+        if (unsafe { *h_ptr.add(i) } & unsafe { *m_ptr.add(i) }) != unsafe { *v_ptr.add(i) } {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unused_unsafe)]
+unsafe fn scan_aob_chunk_dual_avx2(
+    haystack: &[u8],
+    compiled: &CompiledAob,
+    f_idx: usize,
+    f_byte: u8,
+    delta: usize,
+    s_byte: u8,
+    mut on_match: impl FnMut(usize) -> bool,
+) -> bool {
+    use std::arch::x86_64::*;
+    let pat_len = compiled.len();
+    let max_cursor = haystack.len().saturating_sub(pat_len - f_idx);
+    let mut cursor = f_idx;
+
+    let v_f = unsafe { _mm256_set1_epi8(f_byte as i8) };
+    let v_s = unsafe { _mm256_set1_epi8(s_byte as i8) };
+
+    while cursor + delta + 32 <= haystack.len() && cursor + 32 <= max_cursor + 1 {
+        let chunk_f = unsafe { _mm256_loadu_si256(haystack.as_ptr().add(cursor) as *const __m256i) };
+        let chunk_s = unsafe { _mm256_loadu_si256(haystack.as_ptr().add(cursor + delta) as *const __m256i) };
+        let eq_f = unsafe { _mm256_cmpeq_epi8(chunk_f, v_f) };
+        let eq_s = unsafe { _mm256_cmpeq_epi8(chunk_s, v_s) };
+        let mut mask = unsafe { _mm256_movemask_epi8(_mm256_and_si256(eq_f, eq_s)) } as u32;
+
+        while mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            let cand_offset = (cursor + bit) - f_idx;
+            if compiled.matches(&haystack[cand_offset..]) {
+                if !on_match(cand_offset) {
+                    return false;
+                }
+            }
+        }
+        cursor += 32;
+    }
+
+    while cursor <= max_cursor {
+        if haystack[cursor] == f_byte && haystack[cursor + delta] == s_byte {
+            let cand_offset = cursor - f_idx;
+            if compiled.matches(&haystack[cand_offset..]) {
+                if !on_match(cand_offset) {
+                    return false;
+                }
+            }
+        }
+        cursor += 1;
+    }
+    true
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unused_unsafe)]
+unsafe fn scan_aob_chunk_single_avx2(
+    haystack: &[u8],
+    compiled: &CompiledAob,
+    f_idx: usize,
+    f_byte: u8,
+    mut on_match: impl FnMut(usize) -> bool,
+) -> bool {
+    use std::arch::x86_64::*;
+    let pat_len = compiled.len();
+    let max_cursor = haystack.len().saturating_sub(pat_len - f_idx);
+    let mut cursor = f_idx;
+
+    let v_f = unsafe { _mm256_set1_epi8(f_byte as i8) };
+
+    while cursor + 32 <= max_cursor + 1 {
+        let chunk_f = unsafe { _mm256_loadu_si256(haystack.as_ptr().add(cursor) as *const __m256i) };
+        let eq_f = unsafe { _mm256_cmpeq_epi8(chunk_f, v_f) };
+        let mut mask = unsafe { _mm256_movemask_epi8(eq_f) } as u32;
+
+        while mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            let cand_offset = (cursor + bit) - f_idx;
+            if compiled.matches(&haystack[cand_offset..]) {
+                if !on_match(cand_offset) {
+                    return false;
+                }
+            }
+        }
+        cursor += 32;
+    }
+
+    while cursor <= max_cursor {
+        if haystack[cursor] == f_byte {
+            let cand_offset = cursor - f_idx;
+            if compiled.matches(&haystack[cand_offset..]) {
+                if !on_match(cand_offset) {
+                    return false;
+                }
+            }
+        }
+        cursor += 1;
+    }
+    true
+}
+
+fn scan_aob_chunk_all_any(
+    haystack: &[u8],
+    compiled: &CompiledAob,
+    mut on_match: impl FnMut(usize) -> bool,
+) -> bool {
+    let pat_len = compiled.len();
+    let max_start = haystack.len().saturating_sub(pat_len);
+    for offset in 0..=max_start {
+        if !on_match(offset) {
+            return false;
+        }
+    }
+    true
+}
+
+fn scan_aob_chunk_scalar(
+    haystack: &[u8],
+    compiled: &CompiledAob,
+    mut on_match: impl FnMut(usize) -> bool,
+) -> bool {
+    let pat_len = compiled.len();
+    if let (Some(f_idx), Some(f_byte)) = (compiled.first_exact_idx, compiled.first_exact_byte) {
+        let max_cursor = haystack.len().saturating_sub(pat_len - f_idx);
+        let mut cursor = f_idx;
+        if let (Some(s_idx), Some(s_byte)) = (compiled.second_exact_idx, compiled.second_exact_byte) {
+            let delta = s_idx - f_idx;
+            while cursor <= max_cursor {
+                if haystack[cursor] == f_byte && haystack[cursor + delta] == s_byte {
+                    let cand_offset = cursor - f_idx;
+                    if compiled.matches(&haystack[cand_offset..]) {
+                        if !on_match(cand_offset) {
+                            return false;
+                        }
+                    }
+                }
+                cursor += 1;
+            }
+        } else {
+            while cursor <= max_cursor {
+                if haystack[cursor] == f_byte {
+                    let cand_offset = cursor - f_idx;
+                    if compiled.matches(&haystack[cand_offset..]) {
+                        if !on_match(cand_offset) {
+                            return false;
+                        }
+                    }
+                }
+                cursor += 1;
+            }
+        }
+    } else {
+        return scan_aob_chunk_all_any(haystack, compiled, on_match);
+    }
+    true
+}
+
+pub fn scan_aob_chunk(
+    haystack: &[u8],
+    compiled: &CompiledAob,
+    on_match: impl FnMut(usize) -> bool,
+) -> bool {
+    if haystack.len() < compiled.len() {
+        return true;
+    }
+    if compiled.is_empty() {
+        return true;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") {
+            if let (Some(f_idx), Some(f_byte)) = (compiled.first_exact_idx, compiled.first_exact_byte) {
+                if let (Some(s_idx), Some(s_byte)) = (compiled.second_exact_idx, compiled.second_exact_byte) {
+                    let delta = s_idx - f_idx;
+                    return unsafe {
+                        scan_aob_chunk_dual_avx2(haystack, compiled, f_idx, f_byte, delta, s_byte, on_match)
+                    };
+                } else {
+                    return unsafe {
+                        scan_aob_chunk_single_avx2(haystack, compiled, f_idx, f_byte, on_match)
+                    };
+                }
+            } else {
+                return scan_aob_chunk_all_any(haystack, compiled, on_match);
+            }
+        }
+    }
+
+    scan_aob_chunk_scalar(haystack, compiled, on_match)
 }
 
 pub fn is_aob_pattern_input(input: &str) -> bool {
@@ -2289,8 +2651,20 @@ pub fn scan_aob_memory_addresses(
             "invalid AOB pattern format (e.g. F3 41 ?? 10 50 10)",
         )
     })?;
+    let compiled = CompiledAob::new(pattern);
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process, options.clone())
+    let regions = scan_regions_for(&process, options);
+    scan_aob_regions_multithreaded(pid, regions, &compiled, result_limit, total)
+}
+
+fn scan_aob_regions_multithreaded(
+    pid: u32,
+    regions: Vec<ScanRegion>,
+    compiled: &CompiledAob,
+    result_limit: usize,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<usize>> {
+    let sliced_regions = regions
         .into_iter()
         .flat_map(|region| {
             (0..region.size)
@@ -2302,12 +2676,16 @@ pub fn scan_aob_memory_addresses(
         })
         .collect::<Vec<_>>();
 
+    if sliced_regions.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let max_threads = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4)
         .clamp(2, 32);
-    let worker_count = max_threads.min(regions.len().max(1));
-    let total_bytes = regions
+    let worker_count = max_threads.min(sliced_regions.len().max(1));
+    let total_bytes = sliced_regions
         .iter()
         .map(|region| region.size)
         .fold(0usize, usize::saturating_add);
@@ -2315,7 +2693,7 @@ pub fn scan_aob_memory_addresses(
     let mut buckets = vec![Vec::new(); worker_count];
     let mut bucket_index = 0;
     let mut bucket_bytes = 0usize;
-    for region in regions {
+    for region in sliced_regions {
         if bucket_bytes >= target_bytes && bucket_index + 1 < worker_count {
             bucket_index += 1;
             bucket_bytes = 0;
@@ -2323,19 +2701,20 @@ pub fn scan_aob_memory_addresses(
         bucket_bytes = bucket_bytes.saturating_add(region.size);
         buckets[bucket_index].push(region);
     }
+
     let claimed_results = Arc::new(AtomicUsize::new(0));
-    let pattern_arc = Arc::new(pattern);
+    let compiled_arc = Arc::new(compiled.clone());
     let workers = buckets
         .into_iter()
-        .map(|regions| {
+        .map(|b_regions| {
             let progress = Arc::clone(&total);
             let claimed_results = Arc::clone(&claimed_results);
-            let pattern = Arc::clone(&pattern_arc);
+            let compiled = Arc::clone(&compiled_arc);
             thread::spawn(move || {
                 scan_aob_bucket(
                     pid,
-                    regions,
-                    &pattern,
+                    b_regions,
+                    &compiled,
                     result_limit,
                     claimed_results,
                     progress,
@@ -2343,6 +2722,7 @@ pub fn scan_aob_memory_addresses(
             })
         })
         .collect::<Vec<_>>();
+
     let mut all_results = Vec::new();
     for worker in workers {
         if let Ok(Ok(bucket_res)) = worker.join() {
@@ -2355,13 +2735,16 @@ pub fn scan_aob_memory_addresses(
     }
     all_results.sort_unstable();
     all_results.dedup();
+    if all_results.len() > result_limit {
+        all_results.truncate(result_limit);
+    }
     Ok(all_results)
 }
 
 fn scan_aob_bucket(
     pid: u32,
     regions: Vec<ScanRegion>,
-    pattern: &[AobByte],
+    compiled: &CompiledAob,
     result_limit: usize,
     claimed_results: Arc<AtomicUsize>,
     progress: Arc<AtomicUsize>,
@@ -2370,13 +2753,7 @@ fn scan_aob_bucket(
     let process = ScanProcess::open(pid, false)?;
     let mut found = Vec::new();
     let mut buffer = Vec::new();
-    let overlap = pattern.len().saturating_sub(1);
-
-    let first_exact_idx = pattern.iter().position(|b| matches!(b, AobByte::Exact(_)));
-    let first_exact_byte = first_exact_idx.and_then(|idx| match pattern[idx] {
-        AobByte::Exact(b) => Some(b),
-        _ => None,
-    });
+    let overlap = compiled.len().saturating_sub(1);
 
     'regions: for region in regions {
         let end = region.base.saturating_add(region.size);
@@ -2396,45 +2773,18 @@ fn scan_aob_bucket(
             if let Ok(count) = process.read(read_base, &mut buffer) {
                 progress.fetch_add(count, Ordering::Relaxed);
                 let haystack = &buffer[..count];
-                if count < pattern.len() {
+                if count < compiled.len() {
                     chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
                     continue;
                 }
 
-                if let (Some(f_idx), Some(target_byte)) = (first_exact_idx, first_exact_byte) {
-                    let mut cursor = f_idx;
-                    let max_target_pos = count.saturating_sub(pattern.len() - f_idx);
-                    while cursor <= max_target_pos {
-                        let sub = &haystack[cursor..=max_target_pos];
-                        if let Some(pos) = sub.iter().position(|&b| b == target_byte) {
-                            let match_target_idx = cursor + pos;
-                            let cand_offset = match_target_idx - f_idx;
-                            if aob_bytes_equal(
-                                &haystack[cand_offset..cand_offset + pattern.len()],
-                                pattern,
-                            ) {
-                                found.push(read_base + cand_offset);
-                                if claimed_results.fetch_add(1, Ordering::Relaxed) + 1
-                                    >= result_limit
-                                {
-                                    break 'regions;
-                                }
-                            }
-                            cursor = match_target_idx + 1;
-                        } else {
-                            break;
-                        }
-                    }
-                } else {
-                    let max_start = count.saturating_sub(pattern.len());
-                    for offset in 0..=max_start {
-                        if aob_bytes_equal(&haystack[offset..offset + pattern.len()], pattern) {
-                            found.push(read_base + offset);
-                            if claimed_results.fetch_add(1, Ordering::Relaxed) + 1 >= result_limit {
-                                break 'regions;
-                            }
-                        }
-                    }
+                let cont = scan_aob_chunk(haystack, compiled, |cand_offset| {
+                    let match_addr = read_base + cand_offset;
+                    found.push(match_addr);
+                    claimed_results.fetch_add(1, Ordering::Relaxed) + 1 < result_limit
+                });
+                if !cont {
+                    break 'regions;
                 }
             }
             chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
@@ -2467,14 +2817,14 @@ pub fn scan_aob_memory_range_with_progress(
             "invalid AOB pattern format (e.g. F3 41 ?? 10 50 10)",
         )
     })?;
+    let compiled = CompiledAob::new(pattern);
     let process = ScanProcess::open(pid, false)?;
     let end = base.saturating_add(size);
     let regions: Vec<ScanRegion> = scan_regions_for(&process, options)
         .into_iter()
         .filter_map(|region| intersect_scan_region(region, base, end))
         .collect();
-    let claimed = Arc::new(AtomicUsize::new(0));
-    let addrs = scan_aob_bucket(pid, regions, &pattern, result_limit, claimed, total)?;
+    let addrs = scan_aob_regions_multithreaded(pid, regions, &compiled, result_limit, total)?;
     Ok(addrs
         .into_iter()
         .map(|address| TextScanCandidate {
@@ -2526,34 +2876,26 @@ pub fn scan_aob_wildcard_batch(
         label: String,
         pattern_str: String,
         wildcard_count: usize,
-        pattern: Vec<AobByte>,
-        first_exact_idx: Option<usize>,
-        first_exact_byte: Option<u8>,
+        compiled: CompiledAob,
         matches: Vec<usize>,
     }
 
     let mut candidates = Vec::with_capacity(total_scenarios);
     for (label, pattern_str, wildcard_count) in scenarios {
         let pattern = parse_aob_pattern(&pattern_str).unwrap_or_default();
-        let first_exact_idx = pattern.iter().position(|b| matches!(b, AobByte::Exact(_)));
-        let first_exact_byte = first_exact_idx.and_then(|idx| match pattern[idx] {
-            AobByte::Exact(b) => Some(b),
-            _ => None,
-        });
+        let compiled = CompiledAob::new(pattern);
         candidates.push(Candidate {
             label,
             pattern_str,
             wildcard_count,
-            pattern,
-            first_exact_idx,
-            first_exact_byte,
+            compiled,
             matches: Vec::new(),
         });
     }
 
     let max_pattern_len = candidates
         .iter()
-        .map(|c| c.pattern.len())
+        .map(|c| c.compiled.len())
         .max()
         .unwrap_or(0);
     let overlap = max_pattern_len.saturating_sub(1);
@@ -2578,7 +2920,7 @@ pub fn scan_aob_wildcard_batch(
             // Early exit if every pattern has reached match_limit
             if candidates
                 .iter()
-                .all(|c| c.pattern.is_empty() || c.matches.len() >= match_limit)
+                .all(|c| c.compiled.is_empty() || c.matches.len() >= match_limit)
             {
                 break 'regions;
             }
@@ -2597,56 +2939,23 @@ pub fn scan_aob_wildcard_batch(
                 let haystack = &buffer[..count];
 
                 for cand in &mut candidates {
-                    if cand.matches.len() >= match_limit || cand.pattern.is_empty() {
+                    if cand.matches.len() >= match_limit || cand.compiled.is_empty() {
                         continue;
                     }
-                    let pat = &cand.pattern;
-                    let pat_len = pat.len();
+                    let pat_len = cand.compiled.len();
                     if count < pat_len {
                         continue;
                     }
 
-                    if let (Some(f_idx), Some(target_byte)) = (cand.first_exact_idx, cand.first_exact_byte) {
-                        let mut cursor = f_idx;
-                        let max_target_pos = count.saturating_sub(pat_len - f_idx);
-                        while cursor <= max_target_pos {
-                            let sub = &haystack[cursor..=max_target_pos];
-                            if let Some(pos) = sub.iter().position(|&b| b == target_byte) {
-                                let match_target_idx = cursor + pos;
-                                let cand_offset = match_target_idx - f_idx;
-                                let match_addr = read_base + cand_offset;
-                                cursor = match_target_idx + 1;
-
-                                // Avoid duplicates from chunk overlap prefix
-                                if chunk_base > region.base && match_addr <= chunk_base - pat_len {
-                                    continue;
-                                }
-
-                                if aob_bytes_equal(&haystack[cand_offset..cand_offset + pat_len], pat) {
-                                    cand.matches.push(match_addr);
-                                    if cand.matches.len() >= match_limit {
-                                        break;
-                                    }
-                                }
-                            } else {
-                                break;
-                            }
+                    scan_aob_chunk(haystack, &cand.compiled, |cand_offset| {
+                        let match_addr = read_base + cand_offset;
+                        // Avoid duplicates from chunk overlap prefix
+                        if chunk_base > region.base && match_addr <= chunk_base - pat_len {
+                            return true;
                         }
-                    } else {
-                        let max_start = count.saturating_sub(pat_len);
-                        for offset in 0..=max_start {
-                            let match_addr = read_base + offset;
-                            if chunk_base > region.base && match_addr <= chunk_base - pat_len {
-                                continue;
-                            }
-                            if aob_bytes_equal(&haystack[offset..offset + pat_len], pat) {
-                                cand.matches.push(match_addr);
-                                if cand.matches.len() >= match_limit {
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                        cand.matches.push(match_addr);
+                        cand.matches.len() < match_limit
+                    });
                 }
             } else {
                 bytes_scanned = bytes_scanned.saturating_add(length.saturating_sub(prefix));
@@ -2693,14 +3002,14 @@ pub fn filter_aob_scan_candidates_numeric(
     pattern_str: &str,
     value_type: ScanValueType,
 ) -> io::Result<Vec<ScanCandidate>> {
-    let pattern = parse_aob_pattern(pattern_str)
+    let compiled = CompiledAob::from_pattern_str(pattern_str)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid AOB pattern format"))?;
     let process = ScanProcess::open(pid, false)?;
-    let mut bytes = vec![0; pattern.len()];
+    let mut bytes = vec![0; compiled.len()];
     let mut kept = Vec::new();
     for candidate in candidates {
-        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
-            && aob_bytes_equal(&bytes, &pattern)
+        if process.read(candidate.address, &mut bytes).ok() == Some(compiled.len())
+            && compiled.matches(&bytes)
         {
             let current = read_scan_value(pid, candidate.address, value_type)
                 .unwrap_or(ScanValue::I32(0));
@@ -2716,15 +3025,15 @@ pub fn filter_aob_scan_candidates_text(
     pattern_str: &str,
     encoding: TextEncoding,
 ) -> io::Result<Vec<TextScanCandidate>> {
-    let pattern = parse_aob_pattern(pattern_str)
+    let compiled = CompiledAob::from_pattern_str(pattern_str)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid AOB pattern format"))?;
     let process = ScanProcess::open(pid, false)?;
-    let mut bytes = vec![0; pattern.len()];
+    let mut bytes = vec![0; compiled.len()];
     let mut kept = Vec::new();
     let read_len = if encoding == TextEncoding::Utf16 { 64 } else { 32 };
     for candidate in candidates {
-        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
-            && aob_bytes_equal(&bytes, &pattern)
+        if process.read(candidate.address, &mut bytes).ok() == Some(compiled.len())
+            && compiled.matches(&bytes)
         {
             let text = read_text_memory(pid, candidate.address, read_len, encoding).unwrap_or_default();
             kept.push(TextScanCandidate {
@@ -6067,6 +6376,81 @@ mod tests {
         scan_chunk_fast(0x4000, &buf_i8, buf_i8.len(), Some(ScanValue::I8(42)), None, ScanValueType::I8, 1, &mut found_i8);
         let addrs_i8: Vec<usize> = found_i8.iter().map(|c| c.address).collect();
         assert_eq!(addrs_i8, vec![0x4000 + 5, 0x4000 + 33, 0x4000 + 34, 0x4000 + 99]);
+    }
+
+    #[test]
+    fn test_compiled_aob_and_simd_scan_chunk() {
+        // 1. CompiledAob matches equivalence with aob_bytes_equal
+        let pat_str = "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC ??";
+        let pat = parse_aob_pattern(pat_str).expect("valid pattern");
+        let compiled = CompiledAob::new(pat.clone());
+        assert_eq!(compiled.len(), 15);
+        assert_eq!(compiled.first_exact_idx, Some(0));
+        assert_eq!(compiled.first_exact_byte, Some(0x48));
+
+        let matching_data = [
+            0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20,
+        ];
+        assert!(compiled.matches(&matching_data));
+        assert!(aob_bytes_equal(&matching_data, &pat));
+
+        let mismatch_data = [
+            0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEE, 0x20,
+        ];
+        assert!(!compiled.matches(&mismatch_data));
+        assert!(!aob_bytes_equal(&mismatch_data, &pat));
+
+        // 2. Long pattern (>= 32 bytes) testing AVX2 bitmask comparison
+        let long_pat_str = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC ?? 48 8B ?? ?? ?? ?? ??";
+        let long_pat = parse_aob_pattern(long_pat_str).expect("valid long pattern");
+        let long_compiled = CompiledAob::new(long_pat.clone());
+        assert!(long_compiled.len() >= 32);
+
+        let mut long_data = vec![0u8; long_compiled.len()];
+        for (i, b) in long_pat.iter().enumerate() {
+            if let AobByte::Exact(v) = b {
+                long_data[i] = *v;
+            } else {
+                long_data[i] = 0xAA;
+            }
+        }
+        assert!(long_compiled.matches(&long_data));
+        assert!(aob_bytes_equal(&long_data, &long_pat));
+
+        // Corrupt one exact byte at index 28 (0x48)
+        long_data[28] ^= 0xFF;
+        assert!(!long_compiled.matches(&long_data));
+        assert!(!aob_bytes_equal(&long_data, &long_pat));
+
+        // 3. scan_aob_chunk on 1024-byte haystack with multiple occurrences (aligned & unaligned)
+        let mut haystack = vec![0x90u8; 1024];
+        let target_offsets = vec![0, 20, 48, 77, 256, 400, 990];
+        for &off in &target_offsets {
+            haystack[off..off + matching_data.len()].copy_from_slice(&matching_data);
+        }
+
+        let mut found_offsets = Vec::new();
+        scan_aob_chunk(&haystack, &compiled, |off| {
+            found_offsets.push(off);
+            true
+        });
+        assert_eq!(found_offsets, target_offsets);
+
+        // 4. Single-exact-byte pattern: "?? ?? 7E ??"
+        let single_pat_str = "?? ?? 7E ??";
+        let single_pat = parse_aob_pattern(single_pat_str).unwrap();
+        let single_compiled = CompiledAob::new(single_pat);
+        let mut single_haystack = vec![0x00u8; 256];
+        single_haystack[10] = 0x7E; // match at offset 8 (byte 2 is index 10)
+        single_haystack[42] = 0x7E; // match at offset 40
+        single_haystack[120] = 0x7E; // match at offset 118
+
+        let mut single_found = Vec::new();
+        scan_aob_chunk(&single_haystack, &single_compiled, |off| {
+            single_found.push(off);
+            true
+        });
+        assert_eq!(single_found, vec![8, 40, 118]);
     }
 }
 
