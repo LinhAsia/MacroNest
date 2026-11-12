@@ -34,6 +34,16 @@ const SCAN_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 const SCAN_BUCKET_BYTES: usize = 64 * 1024 * 1024;
 const PAGE_BYTES: usize = 4096;
 
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+#[cfg(target_arch = "x86_64")]
+const AVX_CMP_LE_OQ: i32 = 0x12;
+#[cfg(target_arch = "x86_64")]
+const AVX_CMP_GE_OQ: i32 = 0x1d;
+#[cfg(target_arch = "x86_64")]
+const AVX_CMP_GT_OQ: i32 = 0x1e;
+
 #[repr(C)]
 struct MemoryBasicInformation {
     base_address: *mut c_void,
@@ -638,6 +648,143 @@ pub fn capture_pointer_map_with_budget(
     capture_pointer_map_with_budget_cancel(pid, modules, pointer_width, max_bytes, progress, None, None)
 }
 
+fn capture_pointer_map_bucket(
+    pid: u32,
+    regions: Vec<ScanRegion>,
+    readable_ranges: &[(usize, usize)],
+    min_readable: usize,
+    max_readable: usize,
+    pointer_width: usize,
+    emulator_delta: Option<isize>,
+    progress: &AtomicUsize,
+    cancel: Option<&AtomicBool>,
+) -> io::Result<Vec<(usize, usize)>> {
+    let process = ScanProcess::open(pid, false)?;
+    let mut pointers = Vec::new();
+    let _ = pointers.try_reserve(262_144);
+    let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
+    let mut last_hit_base = 0usize;
+    let mut last_hit_end = 0usize;
+    let buf_ptr = buffer.as_ptr();
+
+    'regions: for region in regions {
+        if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
+            break;
+        }
+        let mut offset = 0;
+        while offset < region.size {
+            if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
+                break 'regions;
+            }
+            let address = region.base + offset;
+            let wanted = (region.size - offset).min(SCAN_CHUNK_BYTES);
+            let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
+                offset += wanted;
+                continue;
+            };
+            if read < pointer_width {
+                offset += wanted;
+                continue;
+            }
+            if pointer_width == 8 {
+                let chunks = read / 8;
+                for i in 0..chunks {
+                    let value = unsafe { (buf_ptr.add(i * 8) as *const u64).read_unaligned() as usize };
+                    let valid_addr = if value >= min_readable && value < max_readable {
+                        if (value >= last_hit_base && value < last_hit_end) || {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                            if range > 0 && value < readable_ranges[range - 1].1 {
+                                last_hit_base = readable_ranges[range - 1].0;
+                                last_hit_end = readable_ranges[range - 1].1;
+                                true
+                            } else {
+                                false
+                            }
+                        } {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    } else if let Some(delta) = emulator_delta {
+                        let translated = (value as isize).wrapping_add(delta) as usize;
+                        if translated >= min_readable && translated < max_readable {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= translated);
+                            if range > 0 && translated < readable_ranges[range - 1].1 {
+                                Some(translated)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(target_ptr) = valid_addr {
+                        if pointers.len() == pointers.capacity() {
+                            let additional = pointers.capacity().max(500_000).min(4_000_000);
+                            if pointers.try_reserve(additional).is_err() {
+                                break 'regions;
+                            }
+                        }
+                        pointers.push((target_ptr, address + i * 8));
+                    }
+                }
+            } else {
+                let chunks = read / 4;
+                for i in 0..chunks {
+                    let value = unsafe { (buf_ptr.add(i * 4) as *const u32).read_unaligned() as usize };
+                    let valid_addr = if value >= min_readable && value < max_readable {
+                        if (value >= last_hit_base && value < last_hit_end) || {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                            if range > 0 && value < readable_ranges[range - 1].1 {
+                                last_hit_base = readable_ranges[range - 1].0;
+                                last_hit_end = readable_ranges[range - 1].1;
+                                true
+                            } else {
+                                false
+                            }
+                        } {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    } else if let Some(delta) = emulator_delta {
+                        let translated = (value as isize).wrapping_add(delta) as usize;
+                        if translated >= min_readable && translated < max_readable {
+                            let range = readable_ranges.partition_point(|(base, _)| *base <= translated);
+                            if range > 0 && translated < readable_ranges[range - 1].1 {
+                                Some(translated)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(target_ptr) = valid_addr {
+                        if pointers.len() == pointers.capacity() {
+                            let additional = pointers.capacity().max(500_000).min(4_000_000);
+                            if pointers.try_reserve(additional).is_err() {
+                                break 'regions;
+                            }
+                        }
+                        pointers.push((target_ptr, address + i * 4));
+                    }
+                }
+            }
+            progress.fetch_add(read, Ordering::Relaxed);
+            offset += wanted;
+        }
+    }
+    pointers.sort_unstable();
+    Ok(pointers)
+}
+
 fn capture_pointer_map_with_budget_cancel(
     pid: u32,
     modules: &[(String, usize, usize)],
@@ -680,134 +827,85 @@ fn capture_pointer_map_with_budget_cancel(
     }
     let min_readable = readable_ranges.first().map(|(base, _)| *base).unwrap_or(0);
     let max_readable = readable_ranges.iter().map(|(_, end)| *end).max().unwrap_or(0);
-    let mut pointers = Vec::new();
-    pointers
-        .try_reserve_exact(1_000_000)
-        .map_err(|_| io::Error::other("not enough memory to start pointer map"))?;
-    let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
-    let mut remaining = max_bytes;
-    let mut last_hit_base = 0usize;
-    let mut last_hit_end = 0usize;
 
-    'regions: for region in regions {
-        if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
+    let mut limited_regions = Vec::new();
+    let mut remaining = max_bytes;
+    for region in regions {
+        if remaining == 0 {
             break;
         }
-        let region_size = region.size.min(remaining);
-        for offset in (0..region_size).step_by(SCAN_CHUNK_BYTES) {
-            if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
-                break 'regions;
-            }
-            let address = region.base + offset;
-            let wanted = (region_size - offset).min(SCAN_CHUNK_BYTES);
-            remaining = remaining.saturating_sub(wanted);
-            let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
-                if remaining == 0 {
-                    break 'regions;
-                }
-                continue;
-            };
-            if read < pointer_width {
-                continue;
-            }
-            if pointer_width == 8 {
-                let chunks = read / 8;
-                for (i, chunk) in buffer[..chunks * 8].chunks_exact(8).enumerate() {
-                    let value = u64::from_le_bytes(chunk.try_into().unwrap()) as usize;
-                    let valid_addr = if value >= min_readable && value < max_readable {
-                        if (value >= last_hit_base && value < last_hit_end) || {
-                            let range = readable_ranges.partition_point(|(base, _)| *base <= value);
-                            if range > 0 && value < readable_ranges[range - 1].1 {
-                                last_hit_base = readable_ranges[range - 1].0;
-                                last_hit_end = readable_ranges[range - 1].1;
-                                true
-                            } else {
-                                false
-                            }
-                        } {
-                            Some(value)
-                        } else {
-                            None
-                        }
-                    } else if let Some(delta) = emulator_delta {
-                        let translated = (value as isize).wrapping_add(delta) as usize;
-                        if translated >= min_readable && translated < max_readable {
-                            let range = readable_ranges.partition_point(|(base, _)| *base <= translated);
-                            if range > 0 && translated < readable_ranges[range - 1].1 {
-                                Some(translated)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    if let Some(target_ptr) = valid_addr {
-                        if pointers.len() == pointers.capacity() {
-                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
-                            if pointers.try_reserve(additional).is_err() {
-                                break 'regions;
-                            }
-                        }
-                        pointers.push((target_ptr, address + i * 8));
-                    }
-                }
-            } else {
-                let chunks = read / 4;
-                for (i, chunk) in buffer[..chunks * 4].chunks_exact(4).enumerate() {
-                    let value = u32::from_le_bytes(chunk.try_into().unwrap()) as usize;
-                    let valid_addr = if value >= min_readable && value < max_readable {
-                        if (value >= last_hit_base && value < last_hit_end) || {
-                            let range = readable_ranges.partition_point(|(base, _)| *base <= value);
-                            if range > 0 && value < readable_ranges[range - 1].1 {
-                                last_hit_base = readable_ranges[range - 1].0;
-                                last_hit_end = readable_ranges[range - 1].1;
-                                true
-                            } else {
-                                false
-                            }
-                        } {
-                            Some(value)
-                        } else {
-                            None
-                        }
-                    } else if let Some(delta) = emulator_delta {
-                        let translated = (value as isize).wrapping_add(delta) as usize;
-                        if translated >= min_readable && translated < max_readable {
-                            let range = readable_ranges.partition_point(|(base, _)| *base <= translated);
-                            if range > 0 && translated < readable_ranges[range - 1].1 {
-                                Some(translated)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    if let Some(target_ptr) = valid_addr {
-                        if pointers.len() == pointers.capacity() {
-                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
-                            if pointers.try_reserve(additional).is_err() {
-                                break 'regions;
-                            }
-                        }
-                        pointers.push((target_ptr, address + i * 4));
-                    }
-                }
-            }
-            progress.fetch_add(read, Ordering::Relaxed);
-            if remaining == 0 {
-                break 'regions;
-            }
+        let size = region.size.min(remaining);
+        let mut offset = 0;
+        while offset < size {
+            let chunk_sz = (size - offset).min(SCAN_BUCKET_BYTES);
+            limited_regions.push(ScanRegion {
+                base: region.base + offset,
+                size: chunk_sz,
+            });
+            offset += chunk_sz;
         }
+        remaining -= size;
+    }
+
+    if limited_regions.is_empty() {
+        return Ok(PointerMap {
+            pointers: Vec::new(),
+            modules: modules.to_vec(),
+        });
+    }
+
+    let max_threads = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .clamp(2, 32);
+    let worker_count = max_threads.min(limited_regions.len().max(1));
+    let total_bytes: usize = limited_regions.iter().map(|r| r.size).sum();
+    let target_bytes = total_bytes.div_ceil(worker_count).max(1);
+    let mut buckets = vec![Vec::new(); worker_count];
+    let mut bucket_index = 0;
+    let mut bucket_bytes = 0usize;
+    for region in limited_regions {
+        if bucket_bytes >= target_bytes && bucket_index + 1 < worker_count {
+            bucket_index += 1;
+            bucket_bytes = 0;
+        }
+        bucket_bytes = bucket_bytes.saturating_add(region.size);
+        buckets[bucket_index].push(region);
+    }
+
+    let readable_ref = &readable_ranges;
+    let progress_ref = &progress;
+    let worker_results = thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(buckets.len());
+        for worker_regions in buckets {
+            handles.push(scope.spawn(move || {
+                crate::platform::set_current_thread_high_priority();
+                capture_pointer_map_bucket(
+                    pid,
+                    worker_regions,
+                    readable_ref,
+                    min_readable,
+                    max_readable,
+                    pointer_width,
+                    emulator_delta,
+                    progress_ref,
+                    cancel,
+                )
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err(io::Error::other("pointer scan worker panicked"))))
+            .collect::<io::Result<Vec<_>>>()
+    })?;
+
+    let total_pointers: usize = worker_results.iter().map(|v| v.len()).sum();
+    let mut pointers = Vec::with_capacity(total_pointers);
+    for worker_ptrs in worker_results {
+        pointers.extend(worker_ptrs);
     }
     pointers.sort_unstable();
+
     Ok(PointerMap {
         pointers,
         modules: modules.to_vec(),
@@ -3332,6 +3430,339 @@ fn pointer_scan_regions_for(process: &ScanProcess) -> Vec<ScanRegion> {
     regions
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i32_avx2_step4(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i32,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let target = _mm256_set1_epi32(val);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi32(v, target);
+        let mask = _mm256_movemask_ps(_mm256_castsi256_ps(eq)) as u32;
+        if mask != 0 {
+            for i in 0..8 {
+                if (mask & (1 << i)) != 0 {
+                    found.push(ScanCandidate::new_i32(chunk_base + offset + i * 4, val));
+                }
+            }
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in (processed..=count.saturating_sub(4)).step_by(4) {
+        let cur = (ptr.add(offset) as *const i32).read_unaligned();
+        if cur == val {
+            found.push(ScanCandidate::new_i32(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i32_avx2_step1(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i32,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let b0 = val as u8;
+    let b0_vec = _mm256_set1_epi8(b0 as i8);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi8(v, b0_vec);
+        let mut mask = _mm256_movemask_epi8(eq) as u32;
+        while mask != 0 {
+            let i = mask.trailing_zeros() as usize;
+            let cand_offset = offset + i;
+            if cand_offset + 4 <= count {
+                let cur = (ptr.add(cand_offset) as *const i32).read_unaligned();
+                if cur == val {
+                    found.push(ScanCandidate::new_i32(chunk_base + cand_offset, val));
+                }
+            }
+            mask &= mask - 1;
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in processed..=count.saturating_sub(4) {
+        let cur = (ptr.add(offset) as *const i32).read_unaligned();
+        if cur == val {
+            found.push(ScanCandidate::new_i32(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i64_avx2_step8(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i64,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let target = _mm256_set1_epi64x(val);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi64(v, target);
+        let mask = _mm256_movemask_pd(_mm256_castsi256_pd(eq)) as u32;
+        if mask != 0 {
+            for i in 0..4 {
+                if (mask & (1 << i)) != 0 {
+                    found.push(ScanCandidate::new_i64(chunk_base + offset + i * 8, val));
+                }
+            }
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in (processed..=count.saturating_sub(8)).step_by(8) {
+        let cur = (ptr.add(offset) as *const i64).read_unaligned();
+        if cur == val {
+            found.push(ScanCandidate::new_i64(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i64_avx2_step1(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i64,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let b0 = val as u8;
+    let b0_vec = _mm256_set1_epi8(b0 as i8);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi8(v, b0_vec);
+        let mut mask = _mm256_movemask_epi8(eq) as u32;
+        while mask != 0 {
+            let i = mask.trailing_zeros() as usize;
+            let cand_offset = offset + i;
+            if cand_offset + 8 <= count {
+                let cur = (ptr.add(cand_offset) as *const i64).read_unaligned();
+                if cur == val {
+                    found.push(ScanCandidate::new_i64(chunk_base + cand_offset, val));
+                }
+            }
+            mask &= mask - 1;
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in processed..=count.saturating_sub(8) {
+        let cur = (ptr.add(offset) as *const i64).read_unaligned();
+        if cur == val {
+            found.push(ScanCandidate::new_i64(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i16_avx2_step2(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i16,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let target = _mm256_set1_epi16(val);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi16(v, target);
+        let mask = _mm256_movemask_epi8(eq) as u32;
+        if mask != 0 {
+            for i in 0..16 {
+                if (mask & (1 << (i * 2))) != 0 {
+                    found.push(ScanCandidate::new_i16(chunk_base + offset + i * 2, val));
+                }
+            }
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in (processed..=count.saturating_sub(2)).step_by(2) {
+        let cur = (ptr.add(offset) as *const i16).read_unaligned();
+        if cur == val {
+            found.push(ScanCandidate::new_i16(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i16_avx2_step1(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i16,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let b0 = val as u8;
+    let b0_vec = _mm256_set1_epi8(b0 as i8);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi8(v, b0_vec);
+        let mut mask = _mm256_movemask_epi8(eq) as u32;
+        while mask != 0 {
+            let i = mask.trailing_zeros() as usize;
+            let cand_offset = offset + i;
+            if cand_offset + 2 <= count {
+                let cur = (ptr.add(cand_offset) as *const i16).read_unaligned();
+                if cur == val {
+                    found.push(ScanCandidate::new_i16(chunk_base + cand_offset, val));
+                }
+            }
+            mask &= mask - 1;
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in processed..=count.saturating_sub(2) {
+        let cur = (ptr.add(offset) as *const i16).read_unaligned();
+        if cur == val {
+            found.push(ScanCandidate::new_i16(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_i8_avx2_step1(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: i8,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let target = _mm256_set1_epi8(val);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_si256(ptr.add(offset) as *const __m256i);
+        let eq = _mm256_cmpeq_epi8(v, target);
+        let mut mask = _mm256_movemask_epi8(eq) as u32;
+        while mask != 0 {
+            let i = mask.trailing_zeros() as usize;
+            found.push(ScanCandidate::new_i8(chunk_base + offset + i, val));
+            mask &= mask - 1;
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in processed..count {
+        let cur = *ptr.add(offset) as i8;
+        if cur == val {
+            found.push(ScanCandidate::new_i8(chunk_base + offset, val));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_f32_avx2_step4(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: f32,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let tol = (val.abs() * 1e-6).max(1e-5);
+    let min_val = val - tol;
+    let max_val = val + tol;
+    let min_v = _mm256_set1_ps(min_val);
+    let max_v = _mm256_set1_ps(max_val);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_ps(ptr.add(offset) as *const f32);
+        let ge = _mm256_cmp_ps(v, min_v, AVX_CMP_GE_OQ);
+        let le = _mm256_cmp_ps(v, max_v, AVX_CMP_LE_OQ);
+        let and = _mm256_and_ps(ge, le);
+        let mask = _mm256_movemask_ps(and) as u32;
+        if mask != 0 {
+            for i in 0..8 {
+                if (mask & (1 << i)) != 0 {
+                    let cur = (ptr.add(offset + i * 4) as *const f32).read_unaligned();
+                    found.push(ScanCandidate::new_f32(chunk_base + offset + i * 4, cur));
+                }
+            }
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in (processed..=count.saturating_sub(4)).step_by(4) {
+        let cur = (ptr.add(offset) as *const f32).read_unaligned();
+        if cur >= min_val && cur <= max_val {
+            found.push(ScanCandidate::new_f32(chunk_base + offset, cur));
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn scan_exact_f64_avx2_step8(
+    chunk_base: usize,
+    ptr: *const u8,
+    count: usize,
+    val: f64,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let tol = (val.abs() * 1e-12).max(1e-9);
+    let min_val = val - tol;
+    let max_val = val + tol;
+    let min_v = _mm256_set1_pd(min_val);
+    let max_v = _mm256_set1_pd(max_val);
+    let full_blocks = count / 32;
+    for block in 0..full_blocks {
+        let offset = block * 32;
+        let v = _mm256_loadu_pd(ptr.add(offset) as *const f64);
+        let ge = _mm256_cmp_pd(v, min_v, AVX_CMP_GE_OQ);
+        let le = _mm256_cmp_pd(v, max_v, AVX_CMP_LE_OQ);
+        let and = _mm256_and_pd(ge, le);
+        let mask = _mm256_movemask_pd(and) as u32;
+        if mask != 0 {
+            for i in 0..4 {
+                if (mask & (1 << i)) != 0 {
+                    let cur = (ptr.add(offset + i * 8) as *const f64).read_unaligned();
+                    found.push(ScanCandidate::new_f64(chunk_base + offset + i * 8, cur));
+                }
+            }
+        }
+    }
+    let processed = full_blocks * 32;
+    for offset in (processed..=count.saturating_sub(8)).step_by(8) {
+        let cur = (ptr.add(offset) as *const f64).read_unaligned();
+        if cur >= min_val && cur <= max_val {
+            found.push(ScanCandidate::new_f64(chunk_base + offset, cur));
+        }
+    }
+}
+
 #[inline]
 fn scan_chunk_fast(
     chunk_base: usize,
@@ -3352,6 +3783,57 @@ fn scan_chunk_fast(
 
     // 1. Exact value scan
     if let (Some(expected), None) = (exact, range) {
+        #[cfg(target_arch = "x86_64")]
+        if is_x86_feature_detected!("avx2") {
+            match expected {
+                ScanValue::I32(val) => {
+                    if step == 4 {
+                        unsafe { scan_exact_i32_avx2_step4(chunk_base, ptr, count, val, found) };
+                        return;
+                    } else if step == 1 {
+                        unsafe { scan_exact_i32_avx2_step1(chunk_base, ptr, count, val, found) };
+                        return;
+                    }
+                }
+                ScanValue::F32(val) => {
+                    if step == 4 {
+                        unsafe { scan_exact_f32_avx2_step4(chunk_base, ptr, count, val, found) };
+                        return;
+                    }
+                }
+                ScanValue::I64(val) => {
+                    if step == 8 {
+                        unsafe { scan_exact_i64_avx2_step8(chunk_base, ptr, count, val, found) };
+                        return;
+                    } else if step == 1 {
+                        unsafe { scan_exact_i64_avx2_step1(chunk_base, ptr, count, val, found) };
+                        return;
+                    }
+                }
+                ScanValue::F64(val) => {
+                    if step == 8 {
+                        unsafe { scan_exact_f64_avx2_step8(chunk_base, ptr, count, val, found) };
+                        return;
+                    }
+                }
+                ScanValue::I16(val) => {
+                    if step == 2 {
+                        unsafe { scan_exact_i16_avx2_step2(chunk_base, ptr, count, val, found) };
+                        return;
+                    } else if step == 1 {
+                        unsafe { scan_exact_i16_avx2_step1(chunk_base, ptr, count, val, found) };
+                        return;
+                    }
+                }
+                ScanValue::I8(val) => {
+                    if step == 1 {
+                        unsafe { scan_exact_i8_avx2_step1(chunk_base, ptr, count, val, found) };
+                        return;
+                    }
+                }
+            }
+        }
+
         match expected {
             ScanValue::I32(val) => {
                 for offset in (0..=count - 4).step_by(step) {
@@ -3863,16 +4345,6 @@ pub fn filter_memory_snapshot_with_progress(
         Ok(SnapshotFilterResult::Candidates(candidates))
     }
 }
-
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
-
-#[cfg(target_arch = "x86_64")]
-const AVX_CMP_LE_OQ: i32 = 0x12;
-#[cfg(target_arch = "x86_64")]
-const AVX_CMP_GE_OQ: i32 = 0x1d;
-#[cfg(target_arch = "x86_64")]
-const AVX_CMP_GT_OQ: i32 = 0x1e;
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
@@ -5528,6 +6000,73 @@ mod tests {
 
         let translated = (gva as isize).wrapping_add(delta) as usize;
         assert_eq!(translated, hva);
+    }
+
+    #[test]
+    fn test_scan_chunk_fast_exact_simd_and_scalar() {
+        let mut buffer = vec![0u8; 256];
+
+        // 1. i32 test: place 123456 at aligned offset 16, 32, 64, and unaligned offset 73
+        let val_i32: i32 = 123456;
+        let bytes_i32 = val_i32.to_le_bytes();
+        buffer[16..20].copy_from_slice(&bytes_i32);
+        buffer[32..36].copy_from_slice(&bytes_i32);
+        buffer[64..68].copy_from_slice(&bytes_i32);
+        buffer[73..77].copy_from_slice(&bytes_i32);
+
+        // Step 4 (aligned): should find 16, 32, 64 (73 is unaligned so ignored when step=4)
+        let mut found_i32_step4 = Vec::new();
+        scan_chunk_fast(0x1000, &buffer, buffer.len(), Some(ScanValue::I32(val_i32)), None, ScanValueType::I32, 4, &mut found_i32_step4);
+        let addrs_step4: Vec<usize> = found_i32_step4.iter().map(|c| c.address).collect();
+        assert_eq!(addrs_step4, vec![0x1000 + 16, 0x1000 + 32, 0x1000 + 64]);
+
+        // Step 1 (unaligned): should find 16, 32, 64, and 73!
+        let mut found_i32_step1 = Vec::new();
+        scan_chunk_fast(0x1000, &buffer, buffer.len(), Some(ScanValue::I32(val_i32)), None, ScanValueType::I32, 1, &mut found_i32_step1);
+        let addrs_step1: Vec<usize> = found_i32_step1.iter().map(|c| c.address).collect();
+        assert_eq!(addrs_step1, vec![0x1000 + 16, 0x1000 + 32, 0x1000 + 64, 0x1000 + 73]);
+
+        // 2. i64 test: place 0x0123456789ABCDEF at offset 8, 40, and unaligned 73
+        let mut buf_i64 = vec![0u8; 256];
+        let val_i64: i64 = 0x0123456789ABCDEF;
+        let bytes_i64 = val_i64.to_le_bytes();
+        buf_i64[8..16].copy_from_slice(&bytes_i64);
+        buf_i64[40..48].copy_from_slice(&bytes_i64);
+        buf_i64[73..81].copy_from_slice(&bytes_i64);
+
+        let mut found_i64_step8 = Vec::new();
+        scan_chunk_fast(0x2000, &buf_i64, buf_i64.len(), Some(ScanValue::I64(val_i64)), None, ScanValueType::I64, 8, &mut found_i64_step8);
+        let addrs_i64_step8: Vec<usize> = found_i64_step8.iter().map(|c| c.address).collect();
+        assert_eq!(addrs_i64_step8, vec![0x2000 + 8, 0x2000 + 40]);
+
+        let mut found_i64_step1 = Vec::new();
+        scan_chunk_fast(0x2000, &buf_i64, buf_i64.len(), Some(ScanValue::I64(val_i64)), None, ScanValueType::I64, 1, &mut found_i64_step1);
+        let addrs_i64_step1: Vec<usize> = found_i64_step1.iter().map(|c| c.address).collect();
+        assert_eq!(addrs_i64_step1, vec![0x2000 + 8, 0x2000 + 40, 0x2000 + 73]);
+
+        // 3. f32 test: place 123.456 at offset 12 and 36
+        let mut buf_f32 = vec![0u8; 128];
+        let val_f32: f32 = 123.456;
+        let bytes_f32 = val_f32.to_le_bytes();
+        buf_f32[12..16].copy_from_slice(&bytes_f32);
+        buf_f32[36..40].copy_from_slice(&bytes_f32);
+
+        let mut found_f32 = Vec::new();
+        scan_chunk_fast(0x3000, &buf_f32, buf_f32.len(), Some(ScanValue::F32(val_f32)), None, ScanValueType::F32, 4, &mut found_f32);
+        let addrs_f32: Vec<usize> = found_f32.iter().map(|c| c.address).collect();
+        assert_eq!(addrs_f32, vec![0x3000 + 12, 0x3000 + 36]);
+
+        // 4. i8 test: place 42 at offsets 5, 33, 34, 99
+        let mut buf_i8 = vec![0u8; 128];
+        buf_i8[5] = 42;
+        buf_i8[33] = 42;
+        buf_i8[34] = 42;
+        buf_i8[99] = 42;
+
+        let mut found_i8 = Vec::new();
+        scan_chunk_fast(0x4000, &buf_i8, buf_i8.len(), Some(ScanValue::I8(42)), None, ScanValueType::I8, 1, &mut found_i8);
+        let addrs_i8: Vec<usize> = found_i8.iter().map(|c| c.address).collect();
+        assert_eq!(addrs_i8, vec![0x4000 + 5, 0x4000 + 33, 0x4000 + 34, 0x4000 + 99]);
     }
 }
 
