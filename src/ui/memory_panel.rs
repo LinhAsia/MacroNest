@@ -717,6 +717,7 @@ struct MemoryViewDialog {
     address: usize,
     tracked_base: Option<usize>,
     source_saved_index: Option<usize>,
+    source_pointer: Option<(usize, PointerSpec)>,
     kind: MemoryViewKind,
     display_type: MemoryDisplayType,
     relative_addresses: bool,
@@ -750,6 +751,14 @@ struct MemoryViewDialog {
     stride_address_b: String,
     track_range_hex: String,
     filter_changed_only: bool,
+}
+
+impl MemoryViewDialog {
+    pub(crate) fn pointer_string_for_address(&self, target_address: usize) -> Option<String> {
+        let (base_addr, base_ptr) = self.source_pointer.as_ref()?;
+        let derived = derive_pointer_for_address(base_ptr, *base_addr, target_address);
+        Some(format_pointer_expression(&derived))
+    }
 }
 
 #[cfg(windows)]
@@ -4848,6 +4857,7 @@ impl CrosshairApp {
                                 self.select_saved_memory_row(index, selected, ui);
                                 if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
                                     view.source_saved_index = Some(index);
+                                    view.source_pointer = self.memory_panel.saved.get(index).and_then(|s| s.pointer.clone()).map(|p| (address, p));
                                     view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[index]);
                                     Self::navigate_memory_view_dialog(view, address);
                                 }
@@ -4875,8 +4885,10 @@ impl CrosshairApp {
                                 self.memory_panel.selected_saved.clear();
                                 self.memory_panel.selected_saved.insert(index);
                                 self.memory_panel.saved_selection_anchor = Some(index);
+                                let source_pointer = self.memory_panel.saved.get(index).and_then(|s| s.pointer.clone()).map(|p| (address, p));
                                 if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
                                     view.source_saved_index = Some(index);
+                                    view.source_pointer = source_pointer;
                                     view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[index]);
                                     Self::navigate_memory_view_dialog(view, address);
                                 } else {
@@ -4884,6 +4896,7 @@ impl CrosshairApp {
                                         address,
                                         tracked_base: None,
                                         source_saved_index: Some(index),
+                                        source_pointer,
                                         kind: MemoryViewKind::Bytes,
                                         display_type: if text_encoding.is_some() { MemoryDisplayType::Text } else { memory_display_type_for_scan_type(value_type) },
                                         relative_addresses: false,
@@ -5272,8 +5285,22 @@ impl CrosshairApp {
                                     self.memory_panel.selected_saved.clear();
                                     self.memory_panel.selected_saved.insert(index);
                                     self.memory_panel.saved_selection_anchor = Some(index);
+                                    let source_pointer = saved.pointer.as_ref().map(|p| (saved.address, p.clone())).or_else(|| {
+                                        self.resolve_static_module_address(saved.address).map(|(mod_name, mod_offset)| {
+                                            (
+                                                saved.address,
+                                                PointerSpec {
+                                                    base: 0,
+                                                    module: Some((mod_name, mod_offset)),
+                                                    offsets: Vec::new(),
+                                                    delta: None,
+                                                },
+                                            )
+                                        })
+                                    });
                                     if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
                                         view.source_saved_index = Some(index);
+                                        view.source_pointer = source_pointer;
                                         view.display_type = memory_display_type_for_saved(&saved);
                                         Self::navigate_memory_view_dialog(view, saved.address);
                                     } else {
@@ -5281,6 +5308,7 @@ impl CrosshairApp {
                                             address: saved.address,
                                             tracked_base: None,
                                             source_saved_index: Some(index),
+                                            source_pointer,
                                             kind: MemoryViewKind::Bytes,
                                             display_type: memory_display_type_for_saved(&saved),
                                             relative_addresses: false,
@@ -5345,10 +5373,12 @@ impl CrosshairApp {
                                     self.memory_panel.selected_saved.clear();
                                     self.memory_panel.selected_saved.insert(index);
                                     self.memory_panel.saved_selection_anchor = Some(index);
+                                    let source_pointer = saved.pointer.as_ref().map(|p| (saved.address, p.clone()));
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         tracked_base: None,
                                         source_saved_index: Some(index),
+                                        source_pointer,
                                         kind: MemoryViewKind::Structure,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
@@ -11829,6 +11859,7 @@ impl CrosshairApp {
 
         let mut validate = false;
         let mut add: Option<Vec<usize>> = None;
+        let mut browse_candidate: Option<usize> = None;
         let mut rescan_requested = false;
         ui.label(&dialog.status);
         if dialog.rx.is_some() {
@@ -12672,6 +12703,15 @@ impl CrosshairApp {
                                 add = Some(to_add);
                                 ui.close();
                             }
+                            let browse_label = Self::tr_lang(
+                                self.state.ui_language,
+                                "Browse this memory region",
+                                "Duyệt vùng bộ nhớ này",
+                            );
+                            if ui.button(browse_label).clicked() {
+                                browse_candidate = Some(index);
+                                ui.close();
+                            }
                         });
                     }
                 });
@@ -12791,6 +12831,30 @@ impl CrosshairApp {
         if let Some(indices) = add {
             self.add_stable_pointer_candidates(&mut dialog, indices);
         }
+        if let Some(index) = browse_candidate {
+            if let Some(candidate) = dialog.candidates.get(index) {
+                let pid = self.memory_panel.process_pid;
+                #[cfg(windows)]
+                let base = match dialog.extra_modules.iter().find(|(n, _)| n == &candidate.path.module) {
+                    Some((_, b)) => *b,
+                    None => pid
+                        .and_then(|p| resolve_module_offset(p, &candidate.path.module, 0).ok())
+                        .unwrap_or(candidate.resolved_base.unwrap_or_default()),
+                };
+                #[cfg(not(windows))]
+                let base = candidate.resolved_base.unwrap_or_default();
+                let pointer = PointerSpec {
+                    base,
+                    module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+                    offsets: candidate.path.offsets.iter().map(|&o| o as isize).collect(),
+                    delta: dialog.emulator_delta,
+                };
+                let target_address = candidate
+                    .resolved_address
+                    .unwrap_or(candidate.source_address);
+                self.open_memory_view_with_pointer(target_address, pointer);
+            }
+        }
         if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         } else if dialog.rx.is_some() {
@@ -12874,6 +12938,7 @@ impl CrosshairApp {
         let mut clear = false;
         let mut add = false;
         let mut add_one = None;
+        let mut browse_one = None;
         let mut recompare = false;
         let title = "Deep pointer scan - map comparison";
         let popup_id = "memory-deep-pointer-scan";
@@ -12922,6 +12987,7 @@ impl CrosshairApp {
                                 &mut clear,
                                 &mut add,
                                 &mut add_one,
+                                &mut browse_one,
                                 &mut recompare,
                             );
                         });
@@ -12963,6 +13029,7 @@ impl CrosshairApp {
                         &mut clear,
                         &mut add,
                         &mut add_one,
+                        &mut browse_one,
                         &mut recompare,
                     );
                 });
@@ -13063,6 +13130,21 @@ impl CrosshairApp {
                 self.memory_panel.status = format!("Added {added} deep pointer(s) to Address list");
             }
         }
+        if let Some(index) = browse_one
+            && let Some(pid) = self.memory_panel.process_pid
+            && let Some(path) = dialog.candidates.get(index).cloned()
+        {
+            let base = resolve_module_offset(pid, &path.module, 0).unwrap_or(0);
+            let pointer = PointerSpec {
+                base,
+                module: Some((path.module.clone(), path.module_offset)),
+                offsets: path.offsets.into_iter().map(|o| o as isize).collect(),
+                delta: None,
+            };
+            if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
+                self.open_memory_view_with_pointer(address, pointer);
+            }
+        }
         if recompare {
             if let (Some(map_a), Some(map_b)) = (dialog.map_a.clone(), dialog.map_b.clone()) {
                 let (tx, rx) = mpsc::channel();
@@ -13132,6 +13214,7 @@ impl CrosshairApp {
         clear: &mut bool,
         add: &mut bool,
         add_one: &mut Option<usize>,
+        browse_one: &mut Option<usize>,
         recompare: &mut bool,
     ) {
         ui.label(&dialog.status);
@@ -13712,6 +13795,21 @@ impl CrosshairApp {
                                 delta: None,
                             },
                         ));
+                        ui.close();
+                    }
+                    let browse_label = Self::tr_lang(
+                        language,
+                        "Browse this memory region",
+                        "Duyệt vùng bộ nhớ này",
+                    );
+                    if ui
+                        .add_enabled(
+                            resolved.is_some(),
+                            Button::new(browse_label),
+                        )
+                        .clicked()
+                    {
+                        *browse_one = Some(index);
                         ui.close();
                     }
                     if ui
@@ -15460,6 +15558,7 @@ impl CrosshairApp {
                 address: addr,
                 tracked_base: None,
                 source_saved_index: None,
+                source_pointer: None,
                 kind: MemoryViewKind::Bytes,
                 display_type: MemoryDisplayType::ByteHex,
                 relative_addresses: false,
@@ -15500,6 +15599,7 @@ impl CrosshairApp {
                 address: addr,
                 tracked_base: None,
                 source_saved_index: None,
+                source_pointer: None,
                 kind: MemoryViewKind::Structure,
                 display_type: MemoryDisplayType::ByteHex,
                 relative_addresses: true,
@@ -15959,10 +16059,22 @@ impl CrosshairApp {
             ));
         }
         if let Some(address) = browse {
+            let source_pointer = self.resolve_static_module_address(address).map(|(mod_name, mod_offset)| {
+                (
+                    address,
+                    PointerSpec {
+                        base: 0,
+                        module: Some((mod_name, mod_offset)),
+                        offsets: Vec::new(),
+                        delta: None,
+                    },
+                )
+            });
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address,
                 tracked_base: Some(address),
                 source_saved_index: None,
+                source_pointer,
                 kind: MemoryViewKind::Bytes,
                 display_type: if dialog.text_encoding.is_some() {
                     MemoryDisplayType::Text
@@ -17448,7 +17560,7 @@ impl CrosshairApp {
                     dialog.reset_memory_scroll = false;
                 }
                 struct_scroll.show(ui, |ui| {
-                    Self::render_structure_elements(ui, dialog, bytes, process_pid)
+                    Self::render_structure_elements(ui, language, dialog, bytes, process_pid)
                 });
                 if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
                     active.address = dialog.address;
@@ -17543,10 +17655,18 @@ impl CrosshairApp {
                     ));
                 }
                 address_cell.context_menu(|ui| {
-                    if ui.button("Copy address").clicked() {
+                    let copy_addr_label = Self::tr_lang(language, "Copy address", "Sao chép địa chỉ");
+                    if ui.button(copy_addr_label).clicked() {
                         ui.ctx()
                             .copy_text(format_prefixed_memory_address(row_address));
                         ui.close();
+                    }
+                    if let Some(ptr_str) = dialog.pointer_string_for_address(row_address) {
+                        let copy_ptr_label = Self::tr_lang(language, "Copy pointer", "Sao chép pointer");
+                        if ui.button(copy_ptr_label).on_hover_text(&ptr_str).clicked() {
+                            ui.ctx().copy_text(ptr_str);
+                            ui.close();
+                        }
                     }
                 });
                 for (column, value) in chunk.chunks(unit).take(columns).enumerate() {
@@ -17612,10 +17732,18 @@ impl CrosshairApp {
                         ));
                     }
                     cell.context_menu(|ui| {
-                        if ui.button("Copy address").clicked() {
+                        let copy_addr_label = Self::tr_lang(language, "Copy address", "Sao chép địa chỉ");
+                        if ui.button(copy_addr_label).clicked() {
                             ui.ctx()
                                 .copy_text(format_prefixed_memory_address(cell_address));
                             ui.close();
+                        }
+                        if let Some(ptr_str) = dialog.pointer_string_for_address(cell_address) {
+                            let copy_ptr_label = Self::tr_lang(language, "Copy pointer", "Sao chép pointer");
+                            if ui.button(copy_ptr_label).on_hover_text(&ptr_str).clicked() {
+                                ui.ctx().copy_text(ptr_str);
+                                ui.close();
+                            }
                         }
                         if is_valid {
                             let add_label = Self::tr_lang(
@@ -17711,6 +17839,7 @@ impl CrosshairApp {
 
     fn render_structure_elements(
         ui: &mut egui::Ui,
+        language: crate::model::UiLanguage,
         dialog: &mut MemoryViewDialog,
         bytes: &[u8],
         process_pid: Option<u32>,
@@ -17744,6 +17873,7 @@ impl CrosshairApp {
         let _open_pointer_class: Option<usize> = None;
         let selected_address = dialog.selected_structure_address;
         let mut newly_selected_address = None;
+        let source_pointer = dialog.source_pointer.clone();
         egui::Grid::new("struct-elements")
             .min_col_width(0.0)
             .spacing([0.0, 1.0])
@@ -17941,11 +18071,17 @@ impl CrosshairApp {
                     }
 
                     // Context menu on the whole row
+                    let ptr_str = source_pointer.as_ref().map(|(base_addr, base_ptr)| {
+                        let derived = derive_pointer_for_address(base_ptr, *base_addr, element_address);
+                        format_pointer_expression(&derived)
+                    });
                     desc_resp.context_menu(|ui| {
                         Self::structure_element_context_menu(
                             ui,
+                            language,
                             element,
                             element_address,
+                            ptr_str.as_deref(),
                             process_pid,
                             &mut add_request,
                         )
@@ -17953,8 +18089,10 @@ impl CrosshairApp {
                     av.context_menu(|ui| {
                         Self::structure_element_context_menu(
                             ui,
+                            language,
                             element,
                             element_address,
+                            ptr_str.as_deref(),
                             process_pid,
                             &mut add_request,
                         )
@@ -18081,11 +18219,26 @@ impl CrosshairApp {
     /// Context menu shared by description and value columns.
     fn structure_element_context_menu(
         ui: &mut egui::Ui,
+        language: crate::model::UiLanguage,
         element: &mut StructureElement,
         element_address: usize,
+        pointer_str: Option<&str>,
         process_pid: Option<u32>,
         add_request: &mut Option<(usize, ScanValueType, Option<TextEncoding>, usize)>,
     ) {
+        if let Some(ptr) = pointer_str {
+            let copy_ptr_label = Self::tr_lang(language, "Copy pointer", "Sao chép pointer");
+            if ui.button(copy_ptr_label).on_hover_text(ptr).clicked() {
+                ui.ctx().copy_text(ptr.to_owned());
+                ui.close();
+            }
+        }
+        let copy_addr_label = Self::tr_lang(language, "Copy address", "Sao chép địa chỉ");
+        if ui.button(copy_addr_label).clicked() {
+            ui.ctx().copy_text(format_prefixed_memory_address(element_address));
+            ui.close();
+        }
+        ui.separator();
         ui.horizontal(|ui| {
             ui.label("Name:");
             ui.add(
@@ -18182,6 +18335,16 @@ impl CrosshairApp {
             });
             (current, None)
         };
+        let derived_pointer = dialog.source_pointer.as_ref().map(|(base_addr, base_ptr)| {
+            derive_pointer_for_address(base_ptr, *base_addr, address)
+        });
+        let description = if let Some(ref ptr) = derived_pointer {
+            format_pointer_expression(ptr)
+        } else if text_encoding.is_some() {
+            "Text (UTF-8)".to_owned()
+        } else {
+            String::new()
+        };
         self.memory_panel.saved.push(SavedMemoryAddress {
             address,
             value_type,
@@ -18189,10 +18352,10 @@ impl CrosshairApp {
             text_encoding,
             text_byte_len,
             current_text,
-            description: if text_encoding.is_some() { "Text (UTF-8)".to_owned() } else { String::new() },
+            description,
             group: String::new(),
             hexadecimal: false,
-            pointer: None,
+            pointer: derived_pointer,
             frozen: None,
             saved_to_library: false,
             aob_sample_1: None,
@@ -21435,10 +21598,27 @@ impl CrosshairApp {
             let display_type = source_saved_index
                 .map(|idx| memory_display_type_for_saved(&self.memory_panel.saved[idx]))
                 .unwrap_or(MemoryDisplayType::ByteHex);
+            let source_pointer = source_saved_index
+                .and_then(|idx| self.memory_panel.saved.get(idx))
+                .and_then(|s| s.pointer.clone().map(|p| (address, p)))
+                .or_else(|| {
+                    self.resolve_static_module_address(address).map(|(mod_name, mod_offset)| {
+                        (
+                            address,
+                            PointerSpec {
+                                base: 0,
+                                module: Some((mod_name, mod_offset)),
+                                offsets: Vec::new(),
+                                delta: None,
+                            },
+                        )
+                    })
+                });
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address,
                 tracked_base: None,
                 source_saved_index,
+                source_pointer,
                 kind: MemoryViewKind::Bytes,
                 display_type,
                 relative_addresses: false,
@@ -22314,17 +22494,43 @@ impl CrosshairApp {
     }
 
     fn navigate_open_memory_view(&mut self, address: usize) -> bool {
-        let Some(dialog) = self.memory_panel.memory_view_dialog.as_mut() else {
+        if self.memory_panel.memory_view_dialog.is_none() {
             return false;
-        };
-        dialog.source_saved_index = self
+        }
+        let source_saved_index = self
             .memory_panel
             .saved
             .iter()
             .position(|item| item.address == address);
-        if let Some(idx) = dialog.source_saved_index {
-            dialog.display_type = memory_display_type_for_saved(&self.memory_panel.saved[idx]);
+        let (display_type, source_pointer) = if let Some(idx) = source_saved_index {
+            (
+                Some(memory_display_type_for_saved(&self.memory_panel.saved[idx])),
+                self.memory_panel.saved[idx].pointer.as_ref().map(|p| (address, p.clone())),
+            )
+        } else {
+            (
+                None,
+                self.resolve_static_module_address(address).map(|(mod_name, mod_offset)| {
+                    (
+                        address,
+                        PointerSpec {
+                            base: 0,
+                            module: Some((mod_name, mod_offset)),
+                            offsets: Vec::new(),
+                            delta: None,
+                        },
+                    )
+                }),
+            )
+        };
+        let Some(dialog) = self.memory_panel.memory_view_dialog.as_mut() else {
+            return false;
+        };
+        dialog.source_saved_index = source_saved_index;
+        if let Some(dt) = display_type {
+            dialog.display_type = dt;
         }
+        dialog.source_pointer = source_pointer;
         Self::navigate_memory_view_dialog(dialog, address);
         true
     }
@@ -22380,6 +22586,7 @@ impl CrosshairApp {
             let new_address = item.address;
             Self::navigate_memory_view_dialog(dialog, new_address);
             dialog.display_type = memory_display_type_for_saved(item);
+            dialog.source_pointer = item.pointer.as_ref().map(|p| (new_address, p.clone()));
             return true;
         } else if !panel.candidates.is_empty() {
             let in_candidates = panel
@@ -22503,6 +22710,60 @@ impl CrosshairApp {
         }
     }
 
+    fn open_memory_view_with_pointer(&mut self, address: usize, pointer: PointerSpec) {
+        let source_pointer = Some((address, pointer));
+        let pid = self.memory_panel.process_pid;
+        let ptr_width = pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8);
+        if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+            view.source_saved_index = None;
+            view.source_pointer = source_pointer;
+            view.display_type = MemoryDisplayType::ByteHex;
+            Self::navigate_memory_view_dialog(view, address);
+        } else {
+            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                address,
+                tracked_base: None,
+                source_saved_index: None,
+                source_pointer,
+                kind: MemoryViewKind::Bytes,
+                display_type: MemoryDisplayType::ByteHex,
+                relative_addresses: false,
+                pinned: true,
+                elements: default_structure_elements(),
+                pending_add: None,
+                pending_track: None,
+                pointer_width: ptr_width,
+                previous_bytes: Vec::new(),
+                previous_byte_map: HashMap::new(),
+                track_changes: false,
+                changed_addresses: HashSet::new(),
+                classes: vec![StructureClass {
+                    name: "Class_0".to_owned(),
+                    address,
+                    elements: default_structure_elements(),
+                }],
+                selected_class: 0,
+                class_detection_status: String::new(),
+                class_detection_attempted: false,
+                auto_dissected: false,
+                history: Vec::new(),
+                structure_back_step: "10".to_owned(),
+                structure_forward_step: "10".to_owned(),
+                selected_structure_address: None,
+                scroll_offset: 0,
+                memory_columns: 3,
+                reset_memory_scroll: true,
+                memory_scroll_override: None,
+                memory_region_override: None,
+                fit_memory_columns: true,
+                stride_address_a: String::new(),
+                stride_address_b: String::new(),
+                track_range_hex: "1000".to_owned(),
+                filter_changed_only: false,
+            });
+        }
+    }
+
     fn open_manual_structure_view(&mut self) {
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
@@ -22513,10 +22774,22 @@ impl CrosshairApp {
             return;
         };
         let elements = default_structure_elements();
+        let source_pointer = self.resolve_static_module_address(address).map(|(mod_name, mod_offset)| {
+            (
+                address,
+                PointerSpec {
+                    base: 0,
+                    module: Some((mod_name, mod_offset)),
+                    offsets: Vec::new(),
+                    delta: None,
+                },
+            )
+        });
         self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
             address,
             tracked_base: None,
             source_saved_index: None,
+            source_pointer,
             kind: MemoryViewKind::Structure,
             display_type: MemoryDisplayType::ByteHex,
             relative_addresses: true,
@@ -23459,6 +23732,23 @@ fn format_pointer_expression(pointer: &PointerSpec) -> String {
     );
     format_hex_offsets_signed(&mut root, &pointer.offsets);
     root
+}
+
+fn derive_pointer_for_address(
+    base_ptr: &PointerSpec,
+    base_address: usize,
+    target_address: usize,
+) -> PointerSpec {
+    let diff = (target_address as isize).wrapping_sub(base_address as isize);
+    let mut new_ptr = base_ptr.clone();
+    if let Some(last) = new_ptr.offsets.last_mut() {
+        *last = last.wrapping_add(diff);
+    } else if let Some((_, mod_offset)) = new_ptr.module.as_mut() {
+        *mod_offset = (*mod_offset as isize).wrapping_add(diff) as usize;
+    } else {
+        new_ptr.base = (new_ptr.base as isize).wrapping_add(diff) as usize;
+    }
+    new_ptr
 }
 
 fn compact_hotkey_label(label: &str) -> String {
@@ -26393,6 +26683,7 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
             address: 0x1000,
             tracked_base: None,
             source_saved_index: None,
+            source_pointer: None,
             kind: MemoryViewKind::Bytes,
             display_type: MemoryDisplayType::Float,
             relative_addresses: false,
@@ -27124,6 +27415,7 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
             address: 0x1000,
             tracked_base: None,
             source_saved_index: None,
+            source_pointer: None,
             kind: MemoryViewKind::Bytes,
             display_type: MemoryDisplayType::I32Hex,
             relative_addresses: false,
@@ -27433,5 +27725,80 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
         let hva: usize = 0x24144116548;
         let invalid_wrap = (hva as isize).wrapping_add(delta) as usize;
         assert!(invalid_wrap > 0x0000_7FFF_FFFF_FFFF);
+    }
+
+    #[test]
+    fn test_derive_pointer_for_address() {
+        // Multi-level pointer: last offset should be adjusted
+        let base_ptr = PointerSpec {
+            base: 0x140000000,
+            module: Some(("game.exe".to_string(), 0x1200)),
+            offsets: vec![0x10, 0x20],
+            delta: None,
+        };
+        let derived_plus_8 = derive_pointer_for_address(&base_ptr, 0x5000, 0x5008);
+        assert_eq!(derived_plus_8.offsets, vec![0x10, 0x28]);
+        assert_eq!(format_pointer_expression(&derived_plus_8), "game.exe+1200 [10, 28]");
+
+        let derived_minus_8 = derive_pointer_for_address(&base_ptr, 0x5000, 0x4FF8);
+        assert_eq!(derived_minus_8.offsets, vec![0x10, 0x18]);
+        assert_eq!(format_pointer_expression(&derived_minus_8), "game.exe+1200 [10, 18]");
+
+        // Static module pointer without offsets: module_offset adjusted
+        let static_ptr = PointerSpec {
+            base: 0x140000000,
+            module: Some(("game.exe".to_string(), 0x1000)),
+            offsets: vec![],
+            delta: None,
+        };
+        let derived_static = derive_pointer_for_address(&static_ptr, 0x2000, 0x2040);
+        assert_eq!(derived_static.module.as_ref().unwrap().1, 0x1040);
+        assert_eq!(format_pointer_expression(&derived_static), "game.exe+1040");
+
+        // MemoryViewDialog helper method check
+        let mut dialog = MemoryViewDialog {
+            address: 0x5000,
+            tracked_base: None,
+            source_saved_index: None,
+            source_pointer: Some((0x5000, base_ptr)),
+            kind: MemoryViewKind::Bytes,
+            display_type: MemoryDisplayType::ByteHex,
+            relative_addresses: false,
+            pinned: true,
+            elements: vec![],
+            pending_add: None,
+            pending_track: None,
+            pointer_width: 8,
+            previous_bytes: Vec::new(),
+            previous_byte_map: HashMap::new(),
+            track_changes: false,
+            changed_addresses: HashSet::new(),
+            classes: vec![],
+            selected_class: 0,
+            class_detection_status: String::new(),
+            class_detection_attempted: false,
+            auto_dissected: false,
+            history: Vec::new(),
+            structure_back_step: "10".to_string(),
+            structure_forward_step: "10".to_string(),
+            selected_structure_address: None,
+            scroll_offset: 0,
+            memory_columns: 3,
+            reset_memory_scroll: true,
+            memory_scroll_override: None,
+            memory_region_override: None,
+            fit_memory_columns: true,
+            stride_address_a: String::new(),
+            stride_address_b: String::new(),
+            track_range_hex: "1000".to_string(),
+            filter_changed_only: false,
+        };
+        assert_eq!(
+            dialog.pointer_string_for_address(0x5010),
+            Some("game.exe+1200 [10, 30]".to_string())
+        );
+
+        dialog.source_pointer = None;
+        assert_eq!(dialog.pointer_string_for_address(0x5010), None);
     }
 }
