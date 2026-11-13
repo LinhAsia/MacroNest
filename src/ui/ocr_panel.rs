@@ -497,9 +497,20 @@ impl CrosshairApp {
             });
 
             if Self::is_card_active_or_hovered(ui, &card_response) {
+                let mut left = preset.x;
+                let mut top = preset.y;
+                if let Some(ref win_title) = preset.target_window {
+                    let trimmed = win_title.trim();
+                    if !trimmed.is_empty() {
+                        if let Some(bounds) = crate::window_list::window_client_bounds(Some(trimmed)) {
+                            left += bounds.0;
+                            top += bounds.1;
+                        }
+                    }
+                }
                 let r = crate::overlay::VisionRegion {
-                    left: preset.x,
-                    top: preset.y,
+                    left,
+                    top,
                     width: preset.width.max(10),
                     height: preset.height.max(10),
                     is_circle: false,
@@ -734,7 +745,7 @@ impl CrosshairApp {
             .iter_mut()
             .find(|p| p.id == preset_id)
         {
-            if let Some(ref win_title) = preset.target_window {
+            if let Some(win_title) = preset.target_window.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 if let Some(bounds) = crate::window_list::window_client_bounds(Some(win_title)) {
                     preset.x = (screen_x - bounds.0).max(0);
                     preset.y = (screen_y - bounds.1).max(0);
@@ -779,13 +790,15 @@ impl CrosshairApp {
                             let target_window = step
                                 .ocr_target_window
                                 .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
                                 .or_else(|| {
                                     let pid = step.key.trim().parse::<u32>().ok().unwrap_or(0);
                                     self.state
                                         .ocr_presets
                                         .iter()
                                         .find(|p| p.id == pid)
-                                        .and_then(|p| p.target_window.as_deref())
+                                        .and_then(|p| p.target_window.as_deref().map(str::trim).filter(|s| !s.is_empty()))
                                 });
                             if let Some(win_title) = target_window {
                                 if let Some(bounds) =

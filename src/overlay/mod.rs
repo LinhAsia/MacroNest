@@ -1660,9 +1660,15 @@ mod windows_overlay {
 
     pub fn remove_active_preset(preset_id: u32) {
         clear_break_loop_timers_for_preset(preset_id);
-        let mut active = ACTIVE_MACRO_PRESETS.lock();
-        active.remove(&preset_id);
-        drop(active);
+        let is_empty = {
+            let mut active = ACTIVE_MACRO_PRESETS.lock();
+            active.remove(&preset_id);
+            active.is_empty()
+        };
+        if is_empty {
+            crate::window_list::close_window_capture_session();
+            *LAST_OCR_CACHE.lock() = None;
+        }
         request_ui_repaint();
     }
 
@@ -34033,6 +34039,15 @@ mod windows_overlay {
         }
     }
 
+    #[derive(Clone)]
+    struct LastOcrCache {
+        buf_hash: u64,
+        width: u32,
+        height: u32,
+        result: crate::ocr::OcrResult,
+    }
+    static LAST_OCR_CACHE: Lazy<Mutex<Option<LastOcrCache>>> = Lazy::new(|| Mutex::new(None));
+
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {
         let preset_id = step.key.trim().parse::<u32>().ok().unwrap_or(0);
         let text_var = step.ocr_text_var.trim();
@@ -34102,12 +34117,49 @@ mod windows_overlay {
         };
 
         if let Some((rgba, frame_w, frame_h, origin_x, origin_y)) = captured_info {
-            if let Ok(res) = crate::ocr::perform_ocr(
-                &rgba,
-                frame_w,
-                frame_h,
-                &step.ocr_language,
-            ) {
+            let buf_hash = {
+                use std::hash::Hasher;
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                hasher.write(&rgba);
+                hasher.finish()
+            };
+
+            let cached_opt = {
+                let cache = LAST_OCR_CACHE.lock();
+                if let Some(ref c) = *cache {
+                    if c.buf_hash == buf_hash && c.width == frame_w && c.height == frame_h {
+                        Some(c.result.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            let ocr_res = match cached_opt {
+                Some(cached) => Ok(cached),
+                None => {
+                    let performed = crate::ocr::perform_ocr(
+                        &rgba,
+                        frame_w,
+                        frame_h,
+                        &step.ocr_language,
+                    );
+                    if let Ok(ref res) = performed {
+                        let mut cache = LAST_OCR_CACHE.lock();
+                        *cache = Some(LastOcrCache {
+                            buf_hash,
+                            width: frame_w,
+                            height: frame_h,
+                            result: res.clone(),
+                        });
+                    }
+                    performed
+                }
+            };
+
+            if let Ok(res) = ocr_res {
                 let full_text = res.text.clone();
                 // 0. Store full raw text regardless of target_text
 
@@ -34178,6 +34230,7 @@ mod windows_overlay {
         if !success_var.is_empty() {
             set_variable_value(success_var, success as f64);
         }
+        std::thread::yield_now();
     }
 
     #[cfg(test)]
@@ -39143,6 +39196,8 @@ mod windows_overlay {
     }
 
     fn stop_all_active_macros_and_overlays() {
+        crate::window_list::close_window_capture_session();
+        *LAST_OCR_CACHE.lock() = None;
         let active_ids: Vec<u32> = ACTIVE_MACRO_PRESETS.lock().iter().copied().collect();
         for id in active_ids {
             stop_macro_preset_by_id(id);

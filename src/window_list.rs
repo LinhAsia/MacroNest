@@ -374,12 +374,12 @@ mod windows_impl {
             return (Vec::new(), 0, 0, frame.screen_x, frame.screen_y);
         }
 
-        let rel_x = if x >= frame.screen_x && (x - frame.screen_x) < frame.width as i32 {
+        let rel_x = if x >= frame.width as i32 && x >= frame.screen_x && (x - frame.screen_x) < frame.width as i32 {
             (x - frame.screen_x).max(0) as usize
         } else {
             (x.max(0) as usize).min(frame.width.saturating_sub(1))
         };
-        let rel_y = if y >= frame.screen_y && (y - frame.screen_y) < frame.height as i32 {
+        let rel_y = if y >= frame.height as i32 && y >= frame.screen_y && (y - frame.screen_y) < frame.height as i32 {
             (y - frame.screen_y).max(0) as usize
         } else {
             (y.max(0) as usize).min(frame.height.saturating_sub(1))
@@ -1805,15 +1805,17 @@ mod windows_impl {
         let hwnd_key = hwnd.0 as isize;
         let mut manager = WGC_MANAGER.lock();
 
-        // Prune stale or closed windows if map grows
+        // Prune stale, closed windows, or sessions idle for > 2000ms
+        let now = std::time::Instant::now();
+        manager.retain(|_, session| {
+            if now.duration_since(session.last_used).as_millis() > 2000 {
+                return false;
+            }
+            unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(session.hwnd)).as_bool() }
+        });
         if manager.len() > 8 {
-            manager.retain(|_, session| {
-                unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(session.hwnd)).as_bool() }
-            });
-            if manager.len() > 8 {
-                if let Some((&oldest_k, _)) = manager.iter().min_by_key(|(_, s)| s.last_used) {
-                    manager.remove(&oldest_k);
-                }
+            if let Some((&oldest_k, _)) = manager.iter().min_by_key(|(_, s)| s.last_used) {
+                manager.remove(&oldest_k);
             }
         }
 
@@ -2138,12 +2140,12 @@ mod fallback {
             return (Vec::new(), 0, 0, frame.screen_x, frame.screen_y);
         }
 
-        let rel_x = if x >= frame.screen_x && (x - frame.screen_x) < frame.width as i32 {
+        let rel_x = if x >= frame.width as i32 && x >= frame.screen_x && (x - frame.screen_x) < frame.width as i32 {
             (x - frame.screen_x).max(0) as usize
         } else {
             (x.max(0) as usize).min(frame.width.saturating_sub(1))
         };
-        let rel_y = if y >= frame.screen_y && (y - frame.screen_y) < frame.height as i32 {
+        let rel_y = if y >= frame.height as i32 && y >= frame.screen_y && (y - frame.screen_y) < frame.height as i32 {
             (y - frame.screen_y).max(0) as usize
         } else {
             (y.max(0) as usize).min(frame.height.saturating_sub(1))

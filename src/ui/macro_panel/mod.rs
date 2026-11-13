@@ -17777,15 +17777,42 @@ if supports_move_mouse || show_detection_tuning {
                                          has_hover_support = true;
                                          let is_custom = step.key.trim().is_empty() || step.key.trim() == "0";
                                          let selected_id = if is_custom { None } else { step.key.trim().parse::<u32>().ok() };
-                                         let (left, top, w, h) = if let Some(id) = selected_id {
+                                         let (mut left, mut top, w, h, target_window) = if let Some(id) = selected_id {
                                              if let Some(preset) = self.state.ocr_presets.iter().find(|p| p.id == id) {
-                                                 (preset.x, preset.y, preset.width, preset.height)
+                                                 (
+                                                     preset.x,
+                                                     preset.y,
+                                                     preset.width,
+                                                     preset.height,
+                                                     step.ocr_target_window.clone().or_else(|| preset.target_window.clone()),
+                                                 )
                                              } else {
-                                                 (step.x, step.y, step.ocr_width, step.ocr_height)
+                                                 (
+                                                     step.x,
+                                                     step.y,
+                                                     step.ocr_width,
+                                                     step.ocr_height,
+                                                     step.ocr_target_window.clone(),
+                                                 )
                                              }
                                          } else {
-                                             (step.x, step.y, step.ocr_width, step.ocr_height)
+                                             (
+                                                 step.x,
+                                                 step.y,
+                                                 step.ocr_width,
+                                                 step.ocr_height,
+                                                 step.ocr_target_window.clone(),
+                                             )
                                          };
+                                         if let Some(ref win_title) = target_window {
+                                             let trimmed = win_title.trim();
+                                             if !trimmed.is_empty() {
+                                                 if let Some(bounds) = crate::window_list::window_client_bounds(Some(trimmed)) {
+                                                     left += bounds.0;
+                                                     top += bounds.1;
+                                                 }
+                                             }
+                                         }
                                          hover_regions.push(crate::overlay::VisionRegion {
                                              left,
                                              top,
