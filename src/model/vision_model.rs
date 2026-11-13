@@ -182,6 +182,10 @@ pub struct OcrPreset {
     pub pos_var_x: String,
     pub pos_var_y: String,
     pub numeric_var: String,
+    #[serde(default)]
+    pub target_window: Option<String>,
+    #[serde(default = "default_true")]
+    pub match_duplicate_window_titles: bool,
 }
 
 impl OcrPreset {
@@ -201,6 +205,8 @@ impl OcrPreset {
             pos_var_x: String::new(),
             pos_var_y: String::new(),
             numeric_var: String::new(),
+            target_window: None,
+            match_duplicate_window_titles: true,
         }
     }
 }
@@ -233,5 +239,34 @@ impl<'a> VisionExtremesVars<'a> {
             || self.top_y.map_or(false, |s| !s.trim().is_empty())
             || self.bottom_x.map_or(false, |s| !s.trim().is_empty())
             || self.bottom_y.map_or(false, |s| !s.trim().is_empty())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ocr_preset_target_window_serialization() {
+        let mut preset = OcrPreset::new(7);
+        assert!(preset.target_window.is_none());
+        assert!(preset.match_duplicate_window_titles);
+
+        preset.target_window = Some("BlueStacks [The Unfocused One]".to_string());
+        preset.match_duplicate_window_titles = false;
+
+        let json = serde_json::to_string(&preset).expect("serialize ocr preset");
+        let restored: OcrPreset = serde_json::from_str(&json).expect("deserialize ocr preset");
+        assert_eq!(
+            restored.target_window.as_deref(),
+            Some("BlueStacks [The Unfocused One]")
+        );
+        assert!(!restored.match_duplicate_window_titles);
+
+        // Deserializing legacy JSON without window fields should default correctly
+        let legacy_json = r#"{"id":1,"name":"OCR 1","x":0,"y":0,"width":320,"height":180}"#;
+        let legacy: OcrPreset = serde_json::from_str(legacy_json).expect("deserialize legacy ocr preset");
+        assert!(legacy.target_window.is_none());
+        assert!(legacy.match_duplicate_window_titles);
     }
 }

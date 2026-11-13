@@ -15537,6 +15537,30 @@ if supports_move_mouse || show_detection_tuning {
                                                                 }
                                                             }
                                                         });
+                                                    let none_label = if is_custom {
+                                                        Self::tr_lang(
+                                                            language,
+                                                            "Entire Screen (Default)",
+                                                            "Toàn màn hình (Mặc định)",
+                                                        )
+                                                    } else {
+                                                        Self::tr_lang(
+                                                            language,
+                                                            "Preset / Screen (Default)",
+                                                            "Preset / Toàn màn hình (Mặc định)",
+                                                        )
+                                                    };
+                                                    live_sync |= Self::render_window_target_combo_with_duplicate_mode(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, step_index, "ocr-target-window-step"),
+                                                        &none_label,
+                                                        &mut step.ocr_target_window,
+                                                        &mut step.ocr_match_duplicate_window_titles,
+                                                        &self.open_window_infos,
+                                                        135.0,
+                                                        true,
+                                                    );
                                                     Self::render_ocr_outputs_selector(
                                                         ui,
                                                         language,

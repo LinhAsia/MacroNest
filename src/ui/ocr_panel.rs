@@ -185,6 +185,26 @@ impl CrosshairApp {
                     .spacing([14.0, 8.0])
                     .min_col_width(110.0)
                     .show(ui, |ui| {
+                        // Target Window
+                        ui.label(Self::tr_lang(language, "Target Window", "Target Window"));
+                        let none_label = Self::tr_lang(
+                            language,
+                            "Entire Screen (Default)",
+                            "Toàn màn hình (Mặc định)",
+                        );
+                        live_sync |= Self::render_window_target_combo_with_duplicate_mode(
+                            ui,
+                            language,
+                            (preset.id, "ocr-target-window"),
+                            &none_label,
+                            &mut preset.target_window,
+                            &mut preset.match_duplicate_window_titles,
+                            &self.open_window_infos,
+                            260.0,
+                            true,
+                        );
+                        ui.end_row();
+
                         // Language
                         ui.label(Self::tr_lang(language, "Language", "Language"));
                         egui::ComboBox::from_id_salt((preset.id, "ocr-language"))
@@ -556,7 +576,7 @@ impl CrosshairApp {
                 self.state.ocr_test_width = preset.width;
                 self.state.ocr_test_height = preset.height;
             }
-            self.run_ocr_test(ui.ctx());
+            self.run_ocr_test(ui.ctx(), Some(preset_id));
         }
 
         // Live preview sync
@@ -648,23 +668,40 @@ impl CrosshairApp {
         changed
     }
 
-    fn run_ocr_test(&mut self, _ctx: &egui::Context) {
+    fn run_ocr_test(&mut self, _ctx: &egui::Context, preset_id: Option<u32>) {
         self.state.ocr_test_running = true;
         self.state.ocr_test_error = None;
         self.state.ocr_test_result = None;
 
+        let preset = preset_id.and_then(|id| self.state.ocr_presets.iter().find(|p| p.id == id));
+        let target_window = preset.and_then(|p| p.target_window.as_deref().filter(|s| !s.trim().is_empty()));
+        let match_duplicate = preset.map_or(true, |p| p.match_duplicate_window_titles);
+
         let x = self.state.ocr_test_x;
         let y = self.state.ocr_test_y;
-        let w = self.state.ocr_test_width;
-        let h = self.state.ocr_test_height;
-        // Capture virtual screen region
-        if let Some(frame) = capture_virtual_screen_region(x, y, w, h) {
-            match perform_ocr(
-                &frame.rgba,
-                frame.width as u32,
-                frame.height as u32,
-                &self.state.ocr_language,
+        let w = self.state.ocr_test_width.max(10);
+        let h = self.state.ocr_test_height.max(10);
+
+        let captured = if let Some(title) = target_window {
+            if let Some(frame) = crate::window_list::capture_window_region_with_candidates(
+                Some(title),
+                &[],
+                match_duplicate,
             ) {
+                let (cropped_rgba, crop_w, crop_h, _, _) =
+                    crate::window_list::crop_frame_for_ocr(&frame, x, y, w, h);
+                Some((cropped_rgba, crop_w, crop_h))
+            } else {
+                capture_virtual_screen_region(x, y, w, h)
+                    .map(|f| (f.rgba, f.width as u32, f.height as u32))
+            }
+        } else {
+            capture_virtual_screen_region(x, y, w, h)
+                .map(|f| (f.rgba, f.width as u32, f.height as u32))
+        };
+
+        if let Some((rgba, width, height)) = captured {
+            match perform_ocr(&rgba, width, height, &self.state.ocr_language) {
                 Ok(res) => {
                     self.state.ocr_test_result = Some(res);
                 }
@@ -697,8 +734,18 @@ impl CrosshairApp {
             .iter_mut()
             .find(|p| p.id == preset_id)
         {
-            preset.x = screen_x;
-            preset.y = screen_y;
+            if let Some(ref win_title) = preset.target_window {
+                if let Some(bounds) = crate::window_list::window_client_bounds(Some(win_title)) {
+                    preset.x = (screen_x - bounds.0).max(0);
+                    preset.y = (screen_y - bounds.1).max(0);
+                } else {
+                    preset.x = screen_x;
+                    preset.y = screen_y;
+                }
+            } else {
+                preset.x = screen_x;
+                preset.y = screen_y;
+            }
             preset.width = width;
             preset.height = height;
             preset.collapsed = false;
@@ -729,10 +776,33 @@ impl CrosshairApp {
                 for preset in &mut group.presets {
                     if preset.id == preset_id {
                         if let Some(step) = preset.steps.get_mut(step_index) {
-                            step.x = screen_x;
-                            step.y = screen_y;
-                            step.x_expr = screen_x.to_string();
-                            step.y_expr = screen_y.to_string();
+                            let target_window = step
+                                .ocr_target_window
+                                .as_deref()
+                                .or_else(|| {
+                                    let pid = step.key.trim().parse::<u32>().ok().unwrap_or(0);
+                                    self.state
+                                        .ocr_presets
+                                        .iter()
+                                        .find(|p| p.id == pid)
+                                        .and_then(|p| p.target_window.as_deref())
+                                });
+                            if let Some(win_title) = target_window {
+                                if let Some(bounds) =
+                                    crate::window_list::window_client_bounds(Some(win_title))
+                                {
+                                    step.x = (screen_x - bounds.0).max(0);
+                                    step.y = (screen_y - bounds.1).max(0);
+                                } else {
+                                    step.x = screen_x;
+                                    step.y = screen_y;
+                                }
+                            } else {
+                                step.x = screen_x;
+                                step.y = screen_y;
+                            }
+                            step.x_expr = step.x.to_string();
+                            step.y_expr = step.y.to_string();
                             step.ocr_width = width;
                             step.ocr_height = height;
                         }

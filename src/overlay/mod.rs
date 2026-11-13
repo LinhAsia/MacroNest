@@ -34039,7 +34039,7 @@ mod windows_overlay {
         if !text_var.is_empty() {
             set_text_variable_value(text_var, "");
         }
-        let (x, y, w, h, preset_target_text) = {
+        let (x, y, w, h, preset_target_text, preset_target_window, preset_match_duplicates) = {
             let hook_state = HOOK_STATE.lock();
             if let Some(preset) = hook_state.ocr_presets.iter().find(|p| p.id == preset_id) {
                 (
@@ -34048,6 +34048,8 @@ mod windows_overlay {
                     preset.width,
                     preset.height,
                     preset.target_text.clone(),
+                    preset.target_window.clone(),
+                    preset.match_duplicate_window_titles,
                 )
             } else {
                 (
@@ -34056,17 +34058,54 @@ mod windows_overlay {
                     step.ocr_width,
                     step.ocr_height,
                     String::new(),
+                    None,
+                    true,
                 )
             }
         };
         let w = w.max(10);
         let h = h.max(10);
         let mut success = 0;
-        if let Some(frame) = window_list::capture_virtual_screen_region(x, y, w, h) {
+
+        let effective_target_window = step
+            .ocr_target_window
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                preset_target_window
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            });
+
+        let effective_match_duplicates = if step.ocr_target_window.is_some() {
+            step.ocr_match_duplicate_window_titles
+        } else {
+            preset_match_duplicates
+        };
+
+        let captured_info = if let Some(target_win) = effective_target_window {
+            if let Some(frame) = window_list::capture_window_region_with_candidates(
+                Some(target_win),
+                &[],
+                effective_match_duplicates,
+            ) {
+                Some(window_list::crop_frame_for_ocr(&frame, x, y, w, h))
+            } else {
+                window_list::capture_virtual_screen_region(x, y, w, h)
+                    .map(|f| (f.rgba, f.width as u32, f.height as u32, x, y))
+            }
+        } else {
+            window_list::capture_virtual_screen_region(x, y, w, h)
+                .map(|f| (f.rgba, f.width as u32, f.height as u32, x, y))
+        };
+
+        if let Some((rgba, frame_w, frame_h, origin_x, origin_y)) = captured_info {
             if let Ok(res) = crate::ocr::perform_ocr(
-                &frame.rgba,
-                frame.width as u32,
-                frame.height as u32,
+                &rgba,
+                frame_w,
+                frame_h,
                 &step.ocr_language,
             ) {
                 let full_text = res.text.clone();
@@ -34115,8 +34154,8 @@ mod windows_overlay {
                         success = 1;
                         // Absolute position of the center of the matched text on screen
 
-                        let abs_x = x + ((left + right) / 2.0).round() as i32;
-                        let abs_y = y + ((top + bottom) / 2.0).round() as i32;
+                        let abs_x = origin_x + ((left + right) / 2.0).round() as i32;
+                        let abs_y = origin_y + ((top + bottom) / 2.0).round() as i32;
                         let pos_x_var = step.ocr_pos_var_x.trim();
                         let pos_y_var = step.ocr_pos_var_y.trim();
                         if !pos_x_var.is_empty() {

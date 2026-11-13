@@ -664,7 +664,7 @@ pub struct CrosshairApp {
     ui_rx: Receiver<UiCommand>,
     status: String,
     save_name: String,
-    open_window_infos: Vec<WindowInfo>,
+    pub(crate) open_window_infos: Vec<WindowInfo>,
     open_windows_loaded_once: bool,
     open_windows_loading: bool,
     quit_requested: bool,
@@ -9640,7 +9640,7 @@ impl CrosshairApp {
             .on_hover_cursor(egui::CursorIcon::Default)
     }
 
-    fn render_window_target_combo_with_duplicate_mode(
+    pub(crate) fn render_window_target_combo_with_duplicate_mode(
         ui: &mut egui::Ui,
         language: UiLanguage,
         id_source: impl std::hash::Hash + Copy,

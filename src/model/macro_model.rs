@@ -507,6 +507,10 @@ pub struct MacroStep {
     #[serde(default = "default_macro_step_ocr_language")]
     pub ocr_language: String,
     #[serde(default)]
+    pub ocr_target_window: Option<String>,
+    #[serde(default = "default_true")]
+    pub ocr_match_duplicate_window_titles: bool,
+    #[serde(default)]
     pub vision_pos_var_x: String,
     #[serde(default)]
     pub vision_pos_var_y: String,
@@ -723,6 +727,8 @@ impl Default for MacroStep {
             ocr_numeric_var: String::new(),
             ocr_text_var: String::new(),
             ocr_language: default_macro_step_ocr_language(),
+            ocr_target_window: None,
+            ocr_match_duplicate_window_titles: true,
             vision_pos_var_x: String::new(),
             vision_pos_var_y: String::new(),
             vision_found_var: String::new(),
@@ -1358,6 +1364,23 @@ mod tests {
         assert_eq!(restored.x_expr, "400");
         assert_eq!(restored.y_expr, "600");
         assert_eq!(restored.mouse_click_delay_ms, 250);
+    }
+
+    #[test]
+    fn ocr_step_target_window_serialization() {
+        let mut step = MacroStep::default();
+        step.action = MacroAction::OcrSearch;
+        assert!(step.ocr_target_window.is_none());
+        assert!(step.ocr_match_duplicate_window_titles);
+
+        step.ocr_target_window = Some("LDPlayer [Lowest]".to_string());
+        step.ocr_match_duplicate_window_titles = false;
+
+        let json = serde_json::to_string(&step).expect("serialize step");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize step");
+        assert_eq!(restored.action, MacroAction::OcrSearch);
+        assert_eq!(restored.ocr_target_window.as_deref(), Some("LDPlayer [Lowest]"));
+        assert!(!restored.ocr_match_duplicate_window_titles);
     }
 
     #[test]

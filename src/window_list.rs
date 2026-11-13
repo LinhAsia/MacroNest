@@ -363,6 +363,59 @@ mod windows_impl {
         unsafe { capture_window_region_from_hwnd(hwnd) }
     }
 
+    pub fn crop_frame_for_ocr(
+        frame: &ScreenCaptureFrame,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) -> (Vec<u8>, u32, u32, i32, i32) {
+        if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+            return (Vec::new(), 0, 0, frame.screen_x, frame.screen_y);
+        }
+
+        let rel_x = if x >= frame.screen_x && (x - frame.screen_x) < frame.width as i32 {
+            (x - frame.screen_x).max(0) as usize
+        } else {
+            (x.max(0) as usize).min(frame.width.saturating_sub(1))
+        };
+        let rel_y = if y >= frame.screen_y && (y - frame.screen_y) < frame.height as i32 {
+            (y - frame.screen_y).max(0) as usize
+        } else {
+            (y.max(0) as usize).min(frame.height.saturating_sub(1))
+        };
+
+        let w_usize = w.max(10) as usize;
+        let h_usize = h.max(10) as usize;
+        let crop_w = w_usize.min(frame.width.saturating_sub(rel_x)).max(1);
+        let crop_h = h_usize.min(frame.height.saturating_sub(rel_y)).max(1);
+
+        let origin_x = frame.screen_x + rel_x as i32;
+        let origin_y = frame.screen_y + rel_y as i32;
+
+        if rel_x == 0 && rel_y == 0 && crop_w == frame.width && crop_h == frame.height {
+            (
+                frame.rgba.clone(),
+                frame.width as u32,
+                frame.height as u32,
+                origin_x,
+                origin_y,
+            )
+        } else {
+            let mut cropped = Vec::with_capacity(crop_w * crop_h * 4);
+            let row_stride = frame.width * 4;
+            let crop_stride = crop_w * 4;
+            for row in 0..crop_h {
+                let start = (rel_y + row) * row_stride + rel_x * 4;
+                let end = start + crop_stride;
+                if end <= frame.rgba.len() {
+                    cropped.extend_from_slice(&frame.rgba[start..end]);
+                }
+            }
+            (cropped, crop_w as u32, crop_h as u32, origin_x, origin_y)
+        }
+    }
+
     pub fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
         unsafe {
             let left = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -1763,7 +1816,87 @@ mod windows_impl {
         let top = rect.top;
         let width = (rect.right - rect.left).max(1);
         let height = (rect.bottom - rect.top).max(1);
+
+        if let Some(frame) = capture_window_via_print_window(hwnd, left, top, width, height) {
+            return Some(frame);
+        }
+
         capture_screen_region_from_desktop(left, top, width, height)
+    }
+
+    unsafe fn capture_window_via_print_window(
+        hwnd: HWND,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+    ) -> Option<ScreenCaptureFrame> {
+        let screen_dc = GetDC(None);
+        if screen_dc.0.is_null() {
+            return None;
+        }
+
+        let compat_dc = CreateCompatibleDC(Some(screen_dc));
+        if compat_dc.0.is_null() {
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+
+        let mut info = BITMAPINFO::default();
+        info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB.0;
+
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let bitmap =
+            CreateDIBSection(Some(screen_dc), &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        if bitmap.0.is_null() || bits.is_null() {
+            let _ = DeleteDC(compat_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+
+        let old_obj = SelectObject(compat_dc, HGDIOBJ(bitmap.0));
+        let printed =
+            PrintWindow(hwnd, compat_dc, PRINT_WINDOW_FLAGS(PW_RENDERFULLCONTENT)).as_bool();
+        if !printed {
+            let _ = SelectObject(compat_dc, old_obj);
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            let _ = DeleteDC(compat_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+
+        let pixel_count = (width as usize) * (height as usize);
+        let len = pixel_count * 4;
+        let mut rgba = vec![0u8; len];
+        unsafe {
+            let src_ptr = bits as *const u32;
+            let dst_ptr = rgba.as_mut_ptr() as *mut u32;
+            for i in 0..pixel_count {
+                let pixel = *src_ptr.add(i);
+                let b = pixel & 0xFF;
+                let g = (pixel >> 8) & 0xFF;
+                let r = (pixel >> 16) & 0xFF;
+                *dst_ptr.add(i) = r | (g << 8) | (b << 16) | (255 << 24);
+            }
+        }
+
+        let _ = SelectObject(compat_dc, old_obj);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(compat_dc);
+        let _ = ReleaseDC(None, screen_dc);
+
+        Some(ScreenCaptureFrame {
+            screen_x: left,
+            screen_y: top,
+            width: width as usize,
+            height: height as usize,
+            rgba,
+        })
     }
 
     unsafe fn capture_screen_region_from_desktop(
@@ -1931,6 +2064,59 @@ mod fallback {
         _match_duplicate_window_titles: bool,
     ) -> Option<ScreenCaptureFrame> {
         None
+    }
+
+    pub fn crop_frame_for_ocr(
+        frame: &ScreenCaptureFrame,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) -> (Vec<u8>, u32, u32, i32, i32) {
+        if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+            return (Vec::new(), 0, 0, frame.screen_x, frame.screen_y);
+        }
+
+        let rel_x = if x >= frame.screen_x && (x - frame.screen_x) < frame.width as i32 {
+            (x - frame.screen_x).max(0) as usize
+        } else {
+            (x.max(0) as usize).min(frame.width.saturating_sub(1))
+        };
+        let rel_y = if y >= frame.screen_y && (y - frame.screen_y) < frame.height as i32 {
+            (y - frame.screen_y).max(0) as usize
+        } else {
+            (y.max(0) as usize).min(frame.height.saturating_sub(1))
+        };
+
+        let w_usize = w.max(10) as usize;
+        let h_usize = h.max(10) as usize;
+        let crop_w = w_usize.min(frame.width.saturating_sub(rel_x)).max(1);
+        let crop_h = h_usize.min(frame.height.saturating_sub(rel_y)).max(1);
+
+        let origin_x = frame.screen_x + rel_x as i32;
+        let origin_y = frame.screen_y + rel_y as i32;
+
+        if rel_x == 0 && rel_y == 0 && crop_w == frame.width && crop_h == frame.height {
+            (
+                frame.rgba.clone(),
+                frame.width as u32,
+                frame.height as u32,
+                origin_x,
+                origin_y,
+            )
+        } else {
+            let mut cropped = Vec::with_capacity(crop_w * crop_h * 4);
+            let row_stride = frame.width * 4;
+            let crop_stride = crop_w * 4;
+            for row in 0..crop_h {
+                let start = (rel_y + row) * row_stride + rel_x * 4;
+                let end = start + crop_stride;
+                if end <= frame.rgba.len() {
+                    cropped.extend_from_slice(&frame.rgba[start..end]);
+                }
+            }
+            (cropped, crop_w as u32, crop_h as u32, origin_x, origin_y)
+        }
     }
 
     pub(crate) fn close_window_capture_session() {}
@@ -2146,6 +2332,52 @@ mod tests {
         // Invalidation clears cache
         invalidate_window_handle_cache();
         assert!(is_window_handle_cache_empty());
+    }
+
+    #[test]
+    fn test_crop_frame_for_ocr() {
+        let width = 100usize;
+        let height = 60usize;
+        let mut rgba = vec![0u8; width * height * 4];
+        // Mark pixel at (10, 10) with red
+        let idx = (10 * width + 10) * 4;
+        rgba[idx] = 255;
+        rgba[idx + 3] = 255;
+
+        let frame = ScreenCaptureFrame {
+            screen_x: 200,
+            screen_y: 300,
+            width,
+            height,
+            rgba,
+        };
+
+        // 1. Full frame crop when x=0, y=0, w>=width, h>=height
+        let (full_rgba, fw, fh, ox, oy) = crop_frame_for_ocr(&frame, 0, 0, 100, 60);
+        assert_eq!(fw, 100);
+        assert_eq!(fh, 60);
+        assert_eq!(ox, 200);
+        assert_eq!(oy, 300);
+        assert_eq!(full_rgba.len(), 100 * 60 * 4);
+
+        // 2. Window-relative crop at (10, 10), size (20, 20)
+        let (sub_rgba, sw, sh, sox, soy) = crop_frame_for_ocr(&frame, 10, 10, 20, 20);
+        assert_eq!(sw, 20);
+        assert_eq!(sh, 20);
+        assert_eq!(sox, 210);
+        assert_eq!(soy, 310);
+        // The red pixel was at (10, 10) which is at (0, 0) of this cropped frame
+        assert_eq!(sub_rgba[0], 255);
+        assert_eq!(sub_rgba[3], 255);
+
+        // 3. Absolute screen coordinates crop at (210, 310), size (20, 20)
+        let (abs_rgba, aw, ah, aox, aoy) = crop_frame_for_ocr(&frame, 210, 310, 20, 20);
+        assert_eq!(aw, 20);
+        assert_eq!(ah, 20);
+        assert_eq!(aox, 210);
+        assert_eq!(aoy, 310);
+        assert_eq!(abs_rgba[0], 255);
+        assert_eq!(abs_rgba[3], 255);
     }
 }
 
