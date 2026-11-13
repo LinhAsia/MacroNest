@@ -1473,6 +1473,8 @@ mod windows_impl {
         copies_count: usize,
         pub(crate) width: usize,
         pub(crate) height: usize,
+        pub(crate) last_frame: Option<ScreenCaptureFrame>,
+        pub(crate) last_used: std::time::Instant,
     }
 
     unsafe impl Send for WgcSession {}
@@ -1485,7 +1487,8 @@ mod windows_impl {
         }
     }
 
-    static WGC_MANAGER: Lazy<Mutex<Option<WgcSession>>> = Lazy::new(|| Mutex::new(None));
+    static WGC_MANAGER: Lazy<Mutex<std::collections::HashMap<isize, WgcSession>>> =
+        Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
     pub(crate) fn init_wgc_session(hwnd: HWND) -> anyhow::Result<WgcSession> {
         let mut d3d_device: Option<ID3D11Device> = None;
@@ -1521,6 +1524,7 @@ mod windows_impl {
 
         let session = frame_pool.CreateCaptureSession(&item)?;
         let _ = session.SetIsBorderRequired(false);
+        let _ = session.SetIsCursorCaptureEnabled(false);
         session.StartCapture()?;
 
         Ok(WgcSession {
@@ -1534,6 +1538,8 @@ mod windows_impl {
             copies_count: 0,
             width: size.Width.max(1) as usize,
             height: size.Height.max(1) as usize,
+            last_frame: None,
+            last_used: std::time::Instant::now(),
         })
     }
 
@@ -1734,8 +1740,13 @@ mod windows_impl {
             }
 
             // WGC textures use B8G8R8A8; convert to standard RGBA so all downstream previews and overlays match.
-            for pixel in buffer.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
+            let ptr = buffer.as_mut_ptr() as *mut u32;
+            let count = buffer.len() / 4;
+            for i in 0..count {
+                unsafe {
+                    let p = *ptr.add(i);
+                    *ptr.add(i) = (p & 0xFF00FF00) | ((p & 0x00FF0000) >> 16) | ((p & 0x000000FF) << 16);
+                }
             }
 
             self.write_idx = 1 - write_idx;
@@ -1746,37 +1757,70 @@ mod windows_impl {
             let mut rect = RECT::default();
             let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
             let mut buf = Vec::new();
-            for _ in 0..16 {
+
+            // 1. Check if a new frame is available in the pool
+            if self.poll_into_buffer(&mut buf, 0, 0)? {
+                let (_, w, h) = self.staging_textures.as_ref().unwrap();
+                let frame = ScreenCaptureFrame {
+                    screen_x: rect.left,
+                    screen_y: rect.top,
+                    width: *w as usize,
+                    height: *h as usize,
+                    rgba: buf,
+                };
+                self.last_frame = Some(frame.clone());
+                return Ok(frame);
+            }
+
+            // 2. If no new frame arrived, reuse previous frame if we have one (zero lag, instant)
+            if let Some(ref last) = self.last_frame {
+                let mut frame = last.clone();
+                frame.screen_x = rect.left;
+                frame.screen_y = rect.top;
+                return Ok(frame);
+            }
+
+            // 3. Only on first-ever capture for this session: brief wait (up to 3 times, 2ms each)
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
                 if self.poll_into_buffer(&mut buf, 0, 0)? {
                     let (_, w, h) = self.staging_textures.as_ref().unwrap();
-                    return Ok(ScreenCaptureFrame {
+                    let frame = ScreenCaptureFrame {
                         screen_x: rect.left,
                         screen_y: rect.top,
                         width: *w as usize,
                         height: *h as usize,
                         rgba: buf,
-                    });
+                    };
+                    self.last_frame = Some(frame.clone());
+                    return Ok(frame);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(1));
             }
+
             anyhow::bail!("No frame available from WGC pool")
         }
     }
 
     fn capture_wgc_frame(hwnd: HWND) -> Option<ScreenCaptureFrame> {
+        let hwnd_key = hwnd.0 as isize;
         let mut manager = WGC_MANAGER.lock();
-        let mut reinit = true;
-        if let Some(ref session) = *manager {
-            if session.hwnd == hwnd {
-                reinit = false;
+
+        // Prune stale or closed windows if map grows
+        if manager.len() > 8 {
+            manager.retain(|_, session| {
+                unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(session.hwnd)).as_bool() }
+            });
+            if manager.len() > 8 {
+                if let Some((&oldest_k, _)) = manager.iter().min_by_key(|(_, s)| s.last_used) {
+                    manager.remove(&oldest_k);
+                }
             }
         }
 
-        if reinit {
-            *manager = None;
+        if !manager.contains_key(&hwnd_key) {
             match init_wgc_session(hwnd) {
                 Ok(session) => {
-                    *manager = Some(session);
+                    manager.insert(hwnd_key, session);
                 }
                 Err(_) => {
                     return None;
@@ -1784,13 +1828,14 @@ mod windows_impl {
             }
         }
 
-        let session = manager.as_mut().unwrap();
+        let session = manager.get_mut(&hwnd_key)?;
+        session.last_used = std::time::Instant::now();
         match session.get_next_frame() {
             Ok(frame) => Some(frame),
             Err(_) => {
                 unsafe {
                     if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
-                        *manager = None;
+                        manager.remove(&hwnd_key);
                     }
                 }
                 None
@@ -1800,7 +1845,7 @@ mod windows_impl {
 
     pub(crate) fn close_window_capture_session() {
         let mut manager = WGC_MANAGER.lock();
-        *manager = None;
+        manager.clear();
     }
 
     pub(crate) unsafe fn capture_window_region_from_hwnd(hwnd: HWND) -> Option<ScreenCaptureFrame> {
@@ -1860,8 +1905,25 @@ mod windows_impl {
         }
 
         let old_obj = SelectObject(compat_dc, HGDIOBJ(bitmap.0));
-        let printed =
-            PrintWindow(hwnd, compat_dc, PRINT_WINDOW_FLAGS(PW_RENDERFULLCONTENT)).as_bool();
+
+        // 1. Try fast standard PrintWindow (flag 0) first to avoid DWM stall
+        let mut printed = PrintWindow(hwnd, compat_dc, PRINT_WINDOW_FLAGS(0)).as_bool();
+
+        // 2. If flag 0 failed, try BitBlt from GetWindowDC if window is visible and not iconic
+        if !printed && IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() {
+            let win_dc = GetWindowDC(Some(hwnd));
+            if !win_dc.0.is_null() {
+                printed = BitBlt(compat_dc, 0, 0, width, height, Some(win_dc), 0, 0, SRCCOPY).is_ok();
+                let _ = ReleaseDC(Some(hwnd), win_dc);
+            }
+        }
+
+        // 3. Only if both failed, try PW_RENDERFULLCONTENT as last resort
+        if !printed {
+            printed =
+                PrintWindow(hwnd, compat_dc, PRINT_WINDOW_FLAGS(PW_RENDERFULLCONTENT)).as_bool();
+        }
+
         if !printed {
             let _ = SelectObject(compat_dc, old_obj);
             let _ = DeleteObject(HGDIOBJ(bitmap.0));
@@ -1878,10 +1940,9 @@ mod windows_impl {
             let dst_ptr = rgba.as_mut_ptr() as *mut u32;
             for i in 0..pixel_count {
                 let pixel = *src_ptr.add(i);
-                let b = pixel & 0xFF;
-                let g = (pixel >> 8) & 0xFF;
-                let r = (pixel >> 16) & 0xFF;
-                *dst_ptr.add(i) = r | (g << 8) | (b << 16) | (255 << 24);
+                let b_and_r = ((pixel & 0x00FF0000) >> 16) | ((pixel & 0x000000FF) << 16);
+                let g_and_a = (pixel & 0x0000FF00) | 0xFF000000;
+                *dst_ptr.add(i) = b_and_r | g_and_a;
             }
         }
 
