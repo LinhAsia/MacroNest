@@ -1782,10 +1782,11 @@ impl CrosshairApp {
 
             let popup_id =
                 ui.make_persistent_id((preset_id, object_id, label, "geometry-color-popup"));
-            let mut popup_open = ui
+            let was_open = ui
                 .ctx()
                 .data(|data| data.get_temp::<bool>(popup_id))
                 .unwrap_or(false);
+            let mut popup_open = was_open;
 
             let palette_button = ui
                 .add_sized(
@@ -1835,8 +1836,10 @@ impl CrosshairApp {
                     popup_open = false;
                 }
             }
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(popup_id, popup_open));
+            if was_open != popup_open {
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(popup_id, popup_open));
+            }
 
             let screen_pick_response = ui
                 .add_sized(

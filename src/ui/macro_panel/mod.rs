@@ -14173,15 +14173,41 @@ if supports_move_mouse || show_detection_tuning {
                                 .collect::<Vec<_>>();
                             preset_selected_indices.sort_unstable();
 
-                            let step_height_id = ui.make_persistent_id((group.id, preset.id, "macro-step-row-height"));
-                            let mut estimated_step_height = ui.memory(|mem| {
-                                mem.data.get_temp::<f32>(step_height_id).unwrap_or(25.0)
+                            let step_heights_id = ui.make_persistent_id((group.id, preset.id, "macro-step-row-heights-v2"));
+                            let mut cached_step_heights: Vec<f32> = ui.memory(|mem| {
+                                mem.data.get_temp(step_heights_id).unwrap_or_default()
                             });
+                            if cached_step_heights.len() < steps_len {
+                                cached_step_heights.resize(steps_len, 0.0);
+                            } else if cached_step_heights.len() > steps_len {
+                                cached_step_heights.truncate(steps_len);
+                            }
+                            let mut step_heights_changed = false;
                             let cull_rect = ui.clip_rect().expand2(egui::vec2(0.0, 300.0));
 
                             for (display_index, step_index) in
                                 visual_step_order.iter().copied().enumerate()
                             {
+                                let is_expanded = {
+                                    let step_ref = &preset.steps[step_index];
+                                    (step_ref.action == MacroAction::DrawGeometry && !step_ref.geometry_collapsed)
+                                        || (step_ref.geometry_preset_modify_enabled && !step_ref.geometry_collapsed)
+                                        || (step_ref.action == MacroAction::StartAudioSensePreset && !step_ref.audio_sense_collapsed)
+                                        || (step_ref.action == MacroAction::Follow3DTarget && !step_ref.follow_3d_collapsed)
+                                        || (matches!(step_ref.action, MacroAction::StartVisionSearch | MacroAction::ScanVisionOnce) && !step_ref.vision_collapsed)
+                                        || (step_ref.action == MacroAction::ReadEspTarget && !step_ref.geometry_collapsed)
+                                };
+                                let default_expanded_height = 185.0;
+                                let default_collapsed_height = 25.0;
+                                let mut estimated_step_height = cached_step_heights[step_index];
+                                if is_expanded && estimated_step_height < 50.0 {
+                                    estimated_step_height = default_expanded_height;
+                                } else if !is_expanded && estimated_step_height > 50.0 {
+                                    estimated_step_height = default_collapsed_height;
+                                } else if estimated_step_height <= 10.0 {
+                                    estimated_step_height = if is_expanded { default_expanded_height } else { default_collapsed_height };
+                                }
+
                                 let step_is_being_dragged =
                                     active_dragged_indices.contains(&step_index);
                                 let cursor_pos = ui.cursor().min;
@@ -18066,11 +18092,11 @@ if supports_move_mouse || show_detection_tuning {
                                     }
                                 }
                                 let actual_height = row_response.rect.height();
-                                if (actual_height - estimated_step_height).abs() > 0.5 && actual_height > 10.0 {
-                                    estimated_step_height = actual_height;
-                                    ui.memory_mut(|mem| {
-                                        mem.data.insert_temp(step_height_id, actual_height);
-                                    });
+                                if actual_height > 10.0 && step_index < cached_step_heights.len() {
+                                    if (actual_height - cached_step_heights[step_index]).abs() > 0.5 {
+                                        cached_step_heights[step_index] = actual_height;
+                                        step_heights_changed = true;
+                                    }
                                 }
                                 step_rects[step_index] = row_response.rect;
                                 if drag_payload.is_some()
@@ -18094,6 +18120,11 @@ if supports_move_mouse || show_detection_tuning {
                                 if !step_is_being_dragged {
                                     compact_cursor += 1;
                                 }
+                            }
+                            if step_heights_changed {
+                                ui.memory_mut(|mem| {
+                                    mem.data.insert_temp(step_heights_id, cached_step_heights);
+                                });
                             }
                             if let Some((sync_expr, sync_ms, sync_unit)) = sync_delay_to_selected {
                                 for (s_idx, s) in preset.steps.iter_mut().enumerate() {
@@ -24161,7 +24192,7 @@ if supports_move_mouse || show_detection_tuning {
                         );
                     });
                     if !step.geometry_collapsed {
-                        ui.indent("draw_geometry_step_indent", |ui| {
+                        ui.indent((id_prefix, "draw_geometry_step_indent"), |ui| {
                             ui.add_space(4.0);
                             let geometry_editor_changed = Self::render_geometry_spec_editor(
                                 ui,
