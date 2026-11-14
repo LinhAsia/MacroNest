@@ -18,9 +18,9 @@ Các mô-đun dưới đây được thiết kế để hoạt động tương t
 | Mô-đun | Chức năng | Cách hoạt động trong Macro |
 | :--- | :--- | :--- |
 | **Macro Engine** | Chạy phím bấm, hành động chuột, vòng lặp, chờ đợi, điều kiện rẽ nhánh và chia sẻ kịch bản | Xây dựng logic: click nút, điền thông tin, lặp lại công việc, rẽ nhánh bằng biến số, và xuất/nhập mã chia sẻ kịch bản nén qua clipboard |
-| **Computer Vision** | Tìm ảnh trên màn hình, giám sát màu sắc và đếm số pixel trùng khớp | Quét màn hình: tự động tìm icon, đợi một vùng chuyển màu, hoặc kích hoạt khi thanh máu đầy |
-| **OCR** | Trích xuất chữ/số từ màn hình vào biến số, kiểm tra sự tồn tại và tọa độ của văn bản | Đọc số liệu (tọa độ, điểm số) lưu vào biến và rẽ nhánh kịch bản khi văn bản khớp điều kiện |
-| **Window Control** | Di chuyển, đổi kích thước, chia bố cục (layout), ghim nổi và phóng to cửa sổ | Thiết lập không gian: chia đôi màn hình ứng dụng, cắt bớt viền cửa sổ để click tọa độ chính xác |
+| **Computer Vision** | Tìm ảnh trên màn hình hoặc cửa sổ cụ thể (WGC), giám sát màu sắc và đếm số pixel trùng khớp | Quét màn hình hoặc cửa sổ chỉ định (kể cả khi chạy nền/không focus): tự động tìm icon, xuất đa tọa độ cực trị (trái/phải/tâm), hoặc đợi vùng chuyển màu |
+| **OCR** | Trích xuất chữ/số từ màn hình hoặc cửa sổ cụ thể vào biến số, kiểm tra sự tồn tại và tọa độ văn bản | Đọc số liệu từ toàn màn hình hoặc từ cửa sổ chỉ định (kể cả khi chạy ngầm/bị che khuất) lưu vào biến, rẽ nhánh kịch bản khi văn bản khớp điều kiện |
+| **Window Control** | Di chuyển, đổi kích thước, chia/ghép bố cục (layout) đa hướng, ghim nổi (hỗ trợ lật/xoay) và phóng to cửa sổ | Thiết lập không gian: chia đôi màn hình, ghép ô chéo linh hoạt, ghim nổi lật/xoay một phần cửa sổ, cắt bớt viền để click tọa độ chính xác |
 | **Audio Sense** | Giám sát mức âm lượng và tần số (pitch) âm thanh hệ thống hoặc micrô | Nhận diện âm thanh: tự động phản hồi khi có cuộc gọi nói chuyện hoặc âm thanh game phát ra |
 | **Sound Effects** | Phát âm thanh cảnh báo, đọc văn bản thành giọng nói (TTS) và clip tùy chỉnh | Cảnh báo bằng giọng nói: phát âm thanh khi có lỗi, hoặc thông báo trạng thái kịch bản đang chạy |
 | **Crosshair** | Hiển thị hồng tâm tùy chỉnh màn hình theo phong cách riêng của bạn | Hỗ trợ ngắm bắn: hiển thị hồng tâm ảo trên màn hình, bật/tắt tự động bằng kịch bản kịch bản |
@@ -29,6 +29,7 @@ Các mô-đun dưới đây được thiết kế để hoạt động tương t
 | **Timer** | Tạo đồng hồ bấm giờ, đếm ngược và đếm thời gian hồi chiêu trên màn hình | Quản lý thời gian: đọc giá trị đồng hồ bấm giờ/đếm ngược vào biến số thông qua hành động macro, kích hoạt hành động khi đếm xong, hoặc hiển thị thời gian hồi chiêu của chiêu thức |
 | **Script Command** | Chạy trực tiếp lệnh CMD/PowerShell và lưu kết quả trả về vào biến số | Liên kết hệ thống: thực thi các công cụ dòng lệnh, chạy script cục bộ hoặc gọi API bên ngoài |
 | **Hardware Input** | Giả lập chuột bàn phím qua Interception, Arduino, và đường chuột ghi lại | Mô phỏng nhập liệu: gửi tín hiệu chuột/bàn phím cấp thấp nhằm tương thích tối đa với các trò chơi hoặc ứng dụng bảo mật cao |
+| **Resource Monitor** | Giám sát tài nguyên hệ thống/app (CPU, RAM, GPU, Disk, Network) và tự động tối ưu hóa RAM | Tự động giải phóng working set RAM khi rảnh rỗi, hỗ trợ hiển thị HUD nổi để theo dõi hiệu năng hệ thống khi chạy kịch bản nặng |
 
 ## Thao tác Nhanh (Quick Actions)
 
@@ -36,9 +37,10 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 
 | Thao tác | Mô tả chức năng |
 | :--- | :--- |
+| Quick OCR | Chụp nhanh một vùng chữ/số trên màn hình bằng phím tắt và tự động sao chép văn bản vào clipboard |
 | Taskbar | Ẩn hoặc hiển thị lại thanh Taskbar của Windows |
 | Windows Key | Khóa hoặc mở khóa phím Windows trên bàn phím |
-| Window Pin | Ghim nổi một cửa sổ ứng dụng bất kỳ luôn nằm trên cùng |
+| Window Pin | Ghim nổi một cửa sổ ứng dụng bất kỳ luôn nằm trên cùng (hỗ trợ lật ngang, lật dọc và xoay) |
 | Focus Highlight | Làm nổi bật cửa sổ đang hoạt động bằng đường viền và hiệu ứng có thể cấu hình |
 | Focus Mode | Làm tối toàn bộ không gian bên ngoài cửa sổ đang focus hoặc được chọn |
 | Window Opacity | Điều chỉnh độ trong suốt gốc của cửa sổ được chọn trực tiếp từ 0% đến 100% |
@@ -48,7 +50,8 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | Get Color | Lấy mẫu màu màn hình và tùy chọn sao chép mã màu Hex |
 | Key Display | Hiển thị phím nhấn thời gian thực với chế độ Normal và Mascot hoạt hình dễ thương |
 | Draw | Bật/tắt lớp phủ vẽ tự do trên màn hình và định hình phím tắt cho nó |
-| Quay màn hình | Quay toàn màn hình, cửa sổ đang focus, cửa sổ đã chọn hoặc một vùng đã chọn ở 30, 60 hoặc 144 FPS kèm âm thanh WASAPI hệ thống. Tích hợp Thư viện Video (Video Library) với trình phát 60 FPS mượt mà, công cụ cắt (Trim) và nén (Compress) video trực tiếp trong app |
+| Resource Monitor | Theo dõi thông số CPU, RAM, GPU, ổ đĩa và mạng thời gian thực kèm HUD nổi |
+| Quay màn hình | Quay toàn màn hình, cửa sổ đang focus, cửa sổ đã chọn hoặc một vùng đã chọn ở 30, 60 hoặc 144 FPS. Hỗ trợ tự động chuyển cảnh theo cửa sổ focus (Multi-instance), ghi âm đa nguồn/từng cửa sổ, kèm Thư viện Video với trình phát 60 FPS, công cụ cắt (Trim) và nén (Compress) video trực tiếp |
 | Clear Overlays | Xóa nhanh tất cả hình vẽ hình học, HUD và các lớp ghim nổi đang hiển thị |
 | Key Sound | Phát âm thanh gõ phím giả lập cơ học với nhiều loại switch và âm lượng |
 
@@ -75,8 +78,8 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 
 | Cú pháp | Ý nghĩa | Ví dụ | Kết quả |
 | :--- | :--- | :--- | :--- |
-| `pi` | Hằng số Pi | `degrees(pi)` | `180` |
-| `e` | Số Euler | `round(e, 3)` | `2.718` |
+| `math.pi` | Hằng số Pi | `degrees(math.pi)` | `180` |
+| `math.e` | Số Euler | `round(math.e, 3)` | `2.718` |
 
 ### Hàm Cơ bản
 

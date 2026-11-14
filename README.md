@@ -18,9 +18,9 @@ The modules below are built to work with the macro system, so you can combine th
 | Module | What it does | How macros use it |
 | :--- | :--- | :--- |
 | **Macro Engine** | Run key presses, mouse actions, loops, waits, conditional branches, and shareable presets | Build logic: click buttons, enter input fields, loop tasks, branch flow with variables, and export/import compact preset codes via clipboard |
-| **Computer Vision** | Find images on screen, watch colors, and count matching pixels | Scan screen: locate game icons, wait for color changes, or trigger actions when an enemy bar fills up |
-| **OCR** | Extract text/numbers from screen regions and check if specific text is found | Save scan results to variables (e.g. read coordinates/scores) and branch macro logic based on text matches |
-| **Window Control** | Move, resize, layout (arrange in grid), pin, and zoom windows | Setup workspace: tile windows side-by-side, crop active regions, or center windows for precise clicking |
+| **Computer Vision** | Find images on screen or inside a specific target window (via WGC), watch colors, and count matching pixels | Scan screen or target a specific window (even when backgrounded/unfocused): locate icons, export extremes coordinates (left/right/center), or wait for color changes |
+| **OCR** | Extract text/numbers from screen or target background windows into variables, checking if specific text is found | Save scan results from entire screen or specific target windows (even when obscured) into variables, branching macro logic based on text matches |
+| **Window Control** | Move, resize, layout (tile and diagonal merge), pin (with flip and rotation), and zoom windows | Setup workspace: tile windows, merge arbitrary layout cells, pin cropped regions with live flip/rotation, or center windows for precise clicking |
 | **Audio Sense** | Monitor system audio, microphone levels, and audio frequency (pitch) | Handle sound cues: trigger automated responses when a voice call starts or game sound plays |
 | **Sound Effects** | Play sound alerts, text-to-speech, and custom audio clips | Audible alerts: play warning sound on error, or read status messages aloud during execution |
 | **Crosshair** | Render a customizable crosshair overlay on the screen | Visual aid: overlay a targeting crosshair for manual games, toggled on/off via macro steps |
@@ -29,6 +29,7 @@ The modules below are built to work with the macro system, so you can combine th
 | **Timer** | Create stopwatches, countdowns, and cooldown overlays on screen | Track time: read stopwatch/countdown values directly into macro variables, trigger actions after elapsed time, or overlay skill cooldown indicators on screen |
 | **Script Command** | Execute CMD and PowerShell commands, capturing their output to variables | System integration: execute local scripts, run command-line tools, or query network endpoints inside a macro |
 | **Hardware Input** | Send input via Interception driver, Arduino boards, or recorded mouse paths | Emulate input: send low-level mouse and keyboard signals to ensure compatibility with high-security applications or games |
+| **Resource Monitor** | Monitor system and app resource usage (CPU, RAM, GPU, Disk, Network) with automated idle RAM optimization | Automatically trims working set memory when idle, with an optional on-screen HUD overlay to monitor performance during complex macros |
 
 ## Quick Actions
 
@@ -36,9 +37,10 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 | Action | What it does |
 | :--- | :--- |
+| Quick OCR | Instantly capture a screen region with hotkeys and automatically copy recognized text to the clipboard |
 | Taskbar | Hide or restore the Windows taskbar |
 | Windows Key | Lock or unlock the Windows key |
-| Window Pin | Keep a selected window always on top |
+| Window Pin | Keep a selected window always on top (with horizontal flip, vertical flip, and rotation) |
 | Focus Highlight | Outline the active window with a configurable border and decoration |
 | Focus Mode | Dim everything outside the focused or selected window |
 | Window Opacity | Change the selected window's native opacity directly from 0% to 100% |
@@ -48,7 +50,8 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Get Color | Sample a screen color and optionally copy the hex value |
 | Key Display | Show a live key overlay with normal and mascot display modes |
 | Draw | Toggle the screen drawing overlay and configure its hotkey |
-| Screen Recorder | Record the full screen, focused window, selected window, or a selected region at 30, 60, or 144 FPS with WASAPI system audio. Features an integrated Video Library with 60 FPS playback, video trimming, and fast video compression for easy sharing |
+| Resource Monitor | Monitor real-time CPU, RAM, GPU, Disk, and Network usage with an on-screen HUD |
+| Screen Recorder | Record full screen, focused window, selected window, or region at 30, 60, or 144 FPS with auto-scene switching on window focus, per-window and multi-source audio recording, plus an integrated Video Library with 60 FPS playback, trimming, and fast video compression |
 | Clear Overlays | Clear active geometry, HUD, and pin overlays from the screen |
 | Key Sound | Play keyboard sound effects with selectable switch style and volume |
 
