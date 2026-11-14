@@ -1221,8 +1221,25 @@ pub(crate) fn run_vision_once_with_options(
     passes: u8,
     delay_ms: u64,
     tolerance: u8,
+    target_window_override: Option<&str>,
+    match_duplicates_override: Option<bool>,
 ) -> Result<VisionRunOutcome> {
     let effective_tolerance = tolerance;
+    let effective_target_window = target_window_override
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            preset
+                .target_window_title
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        });
+    let effective_match_duplicates = if target_window_override.is_some() {
+        match_duplicates_override.unwrap_or(true)
+    } else {
+        preset.match_duplicate_window_titles
+    };
     let set_found_var = |matched: bool| {
         if let Some(var_name) = found_var.filter(|s| !s.trim().is_empty()) {
             set_variable_value(var_name.trim(), if matched { 1.0 } else { 0.0 });
@@ -1235,7 +1252,16 @@ pub(crate) fn run_vision_once_with_options(
         }
 
         let configured_region = configured_image_search_region(preset);
-        let screen = if let Some(region) = configured_region {
+        let screen = if effective_target_window.is_some()
+            || !preset.extra_target_window_titles.is_empty()
+        {
+            window_list::capture_window_region_with_candidates(
+                effective_target_window,
+                &preset.extra_target_window_titles,
+                effective_match_duplicates,
+            )
+            .context("Failed to capture the target window")?
+        } else if let Some(region) = configured_region {
             window_list::capture_virtual_screen_region(
                 region.left,
                 region.top,
@@ -1243,15 +1269,6 @@ pub(crate) fn run_vision_once_with_options(
                 region.height,
             )
             .context("Failed to capture the selected search area")?
-        } else if preset.target_window_title.is_some()
-            || !preset.extra_target_window_titles.is_empty()
-        {
-            window_list::capture_window_region_with_candidates(
-                preset.target_window_title.as_deref(),
-                &preset.extra_target_window_titles,
-                preset.match_duplicate_window_titles,
-            )
-            .context("Failed to capture the target window")?
         } else {
             let (left, top, width, height) = window_list::virtual_screen_bounds();
             window_list::capture_virtual_screen_region(left, top, width, height)
@@ -1285,8 +1302,41 @@ pub(crate) fn run_vision_once_with_options(
             bail!("No pixel has been picked yet.");
         };
 
-        let screen = window_list::capture_virtual_screen_region(region.left, region.top, 1, 1)
-            .context("Failed to capture the selected pixel")?;
+        let screen = if effective_target_window.is_some()
+            || !preset.extra_target_window_titles.is_empty()
+        {
+            let win_screen = window_list::capture_window_region_with_candidates(
+                effective_target_window,
+                &preset.extra_target_window_titles,
+                effective_match_duplicates,
+            )
+            .context("Failed to capture the target window")?;
+            let rel_x = if region.left >= win_screen.screen_x && (region.left - win_screen.screen_x) < win_screen.width as i32 {
+                (region.left - win_screen.screen_x) as usize
+            } else {
+                (region.left.max(0) as usize).min(win_screen.width.saturating_sub(1))
+            };
+            let rel_y = if region.top >= win_screen.screen_y && (region.top - win_screen.screen_y) < win_screen.height as i32 {
+                (region.top - win_screen.screen_y) as usize
+            } else {
+                (region.top.max(0) as usize).min(win_screen.height.saturating_sub(1))
+            };
+            let pixel_idx = (rel_y * win_screen.width + rel_x) * 4;
+            if pixel_idx + 4 <= win_screen.rgba.len() {
+                window_list::ScreenCaptureFrame {
+                    screen_x: win_screen.screen_x + rel_x as i32,
+                    screen_y: win_screen.screen_y + rel_y as i32,
+                    width: 1,
+                    height: 1,
+                    rgba: win_screen.rgba[pixel_idx..pixel_idx + 4].to_vec(),
+                }
+            } else {
+                win_screen
+            }
+        } else {
+            window_list::capture_virtual_screen_region(region.left, region.top, 1, 1)
+                .context("Failed to capture the selected pixel")?
+        };
 
         if screen.rgba.len() < 4 {
             bail!("Failed to read captured pixel color.");
@@ -1329,7 +1379,16 @@ pub(crate) fn run_vision_once_with_options(
             }
         };
 
-        let screen = if let Some(region) = configured_region {
+        let screen = if effective_target_window.is_some()
+            || !preset.extra_target_window_titles.is_empty()
+        {
+            window_list::capture_window_region_with_candidates(
+                effective_target_window,
+                &preset.extra_target_window_titles,
+                effective_match_duplicates,
+            )
+            .context("Failed to capture the target window")?
+        } else if let Some(region) = configured_region {
             window_list::capture_virtual_screen_region(
                 region.left,
                 region.top,
@@ -1337,15 +1396,6 @@ pub(crate) fn run_vision_once_with_options(
                 region.height,
             )
             .context("Failed to capture the selected search area")?
-        } else if preset.target_window_title.is_some()
-            || !preset.extra_target_window_titles.is_empty()
-        {
-            window_list::capture_window_region_with_candidates(
-                preset.target_window_title.as_deref(),
-                &preset.extra_target_window_titles,
-                preset.match_duplicate_window_titles,
-            )
-            .context("Failed to capture the target window")?
         } else if let Some((anchor_x, anchor_y)) = anchor {
             // Anchor-based color matching scan region padding
             let (virtual_left, virtual_top, virtual_width, virtual_height) =
@@ -1578,10 +1628,18 @@ pub(crate) fn run_vision_once_with_options(
     };
     let configured_region = configured_image_search_region(preset);
     let used_roi_capture = configured_region.is_some()
-        || (preset.target_window_title.is_none()
+        || (effective_target_window.is_none()
             && preset.extra_target_window_titles.is_empty()
             && anchor_hint.is_some());
-    let screen = if let Some(region) = configured_region {
+    let screen = if effective_target_window.is_some() || !preset.extra_target_window_titles.is_empty()
+    {
+        window_list::capture_window_region_with_candidates(
+            effective_target_window,
+            &preset.extra_target_window_titles,
+            effective_match_duplicates,
+        )
+        .context("Failed to capture the target window")?
+    } else if let Some(region) = configured_region {
         let region =
             expand_search_region_to_fit(region, template_width as i32, template_height as i32);
         window_list::capture_virtual_screen_region(
@@ -1591,14 +1649,6 @@ pub(crate) fn run_vision_once_with_options(
             region.height,
         )
         .context("Failed to capture the selected search area")?
-    } else if preset.target_window_title.is_some() || !preset.extra_target_window_titles.is_empty()
-    {
-        window_list::capture_window_region_with_candidates(
-            preset.target_window_title.as_deref(),
-            &preset.extra_target_window_titles,
-            preset.match_duplicate_window_titles,
-        )
-        .context("Failed to capture the target window")?
     } else if let Some((capture_x, capture_y)) = anchor_hint {
         capture_near_last_image_search_region(capture_x, capture_y, template_width, template_height)
             .context("Failed to capture the area near the original template")?
@@ -1778,6 +1828,8 @@ pub(crate) fn run_vision_once(preset: &VisionPreset) -> Result<String> {
         preset.non_interception_move_passes,
         preset.non_interception_move_delay_ms,
         preset.color_tolerance,
+        None,
+        None,
     )
     .map(|outcome| outcome.status)
 }
@@ -1859,6 +1911,8 @@ pub(crate) fn run_image_search_follow_loop(
             passes,
             delay_ms,
             tolerance,
+            None,
+            None,
         ) {
             Ok(_) => {}
 

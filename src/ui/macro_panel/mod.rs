@@ -9202,7 +9202,7 @@ impl CrosshairApp {
                                 .inner_margin(egui::Margin::symmetric(6, 4))
                                 .show(ui, |ui| {
                                         let mut clear_hold_stop_step = false;
-                                        let step = &mut preset.hold_stop_step;
+                                        let step: &mut MacroStep = &mut *preset.hold_stop_step;
                                         let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                         let hint_color = if is_dark_theme {
                                             Color32::from_rgba_unmultiplied(140, 140, 140, 150)
@@ -9860,6 +9860,30 @@ impl CrosshairApp {
                                                     }
                                                                                                    if step.action == MacroAction::ScanVisionOnce {
                                                       ui.add_space(4.0);
+                                                      let none_label = if is_manual {
+                                                          Self::tr_lang(
+                                                              language,
+                                                              "Entire Screen (Default)",
+                                                              "Toàn màn hình (Mặc định)",
+                                                          )
+                                                      } else {
+                                                          Self::tr_lang(
+                                                              language,
+                                                              "Preset / Screen (Default)",
+                                                              "Preset / Toàn màn hình (Mặc định)",
+                                                          )
+                                                      };
+                                                      live_sync |= Self::render_window_target_combo_with_duplicate_mode(
+                                                          ui,
+                                                          language,
+                                                          (group.id, preset.id, "hold-stop-vision-target-window"),
+                                                          &none_label,
+                                                          &mut step.vision_target_window,
+                                                          &mut step.vision_match_duplicate_window_titles,
+                                                          &self.open_window_infos,
+                                                          135.0,
+                                                          true,
+                                                      );
                                                       if is_single_pixel {
                                                           ui.label(Self::tr_lang(language, "Color Var:", "Color Var:"));
                                                           let prev_override = ui.visuals().override_text_color;
@@ -11487,7 +11511,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                 .inner_margin(egui::Margin::symmetric(6, 4))
                                 .show(ui, |ui| {
                                         let mut clear_press_stop_step = false;
-                                        let step = &mut preset.press_stop_step;
+                                        let step: &mut MacroStep = &mut *preset.press_stop_step;
                                         let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                         let hint_color = if is_dark_theme {
                                             Color32::from_rgba_unmultiplied(140, 140, 140, 150)
@@ -12138,6 +12162,30 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     }
                                                                                                    if step.action == MacroAction::ScanVisionOnce {
                                                       ui.add_space(4.0);
+                                                      let none_label = if is_manual {
+                                                          Self::tr_lang(
+                                                              language,
+                                                              "Entire Screen (Default)",
+                                                              "Toàn màn hình (Mặc định)",
+                                                          )
+                                                      } else {
+                                                          Self::tr_lang(
+                                                              language,
+                                                              "Preset / Screen (Default)",
+                                                              "Preset / Toàn màn hình (Mặc định)",
+                                                          )
+                                                      };
+                                                      live_sync |= Self::render_window_target_combo_with_duplicate_mode(
+                                                          ui,
+                                                          language,
+                                                          (group.id, preset.id, "press-stop-vision-target-window"),
+                                                          &none_label,
+                                                          &mut step.vision_target_window,
+                                                          &mut step.vision_match_duplicate_window_titles,
+                                                          &self.open_window_infos,
+                                                          135.0,
+                                                          true,
+                                                      );
                                                       if is_single_pixel {
                                                           ui.label(Self::tr_lang(language, "Color Var:", "Color Var:"));
                                                           let prev_override = ui.visuals().override_text_color;
@@ -15444,6 +15492,30 @@ if supports_move_mouse || show_detection_tuning {
                                                     }
                                                                                                            if step.action == MacroAction::ScanVisionOnce {
                                                           ui.add_space(4.0);
+                                                          let none_label = if is_manual {
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Entire Screen (Default)",
+                                                                  "Toàn màn hình (Mặc định)",
+                                                              )
+                                                          } else {
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Preset / Screen (Default)",
+                                                                  "Preset / Toàn màn hình (Mặc định)",
+                                                              )
+                                                          };
+                                                          live_sync |= Self::render_window_target_combo_with_duplicate_mode(
+                                                              ui,
+                                                              language,
+                                                              (group.id, preset.id, step_index, "vision-target-window-step"),
+                                                              &none_label,
+                                                              &mut step.vision_target_window,
+                                                              &mut step.vision_match_duplicate_window_titles,
+                                                              &self.open_window_infos,
+                                                              135.0,
+                                                              true,
+                                                          );
                                                           if is_single_pixel {
                                                               ui.label(Self::tr_lang(language, "Color Var:", "Color Var:"));
                                                               let prev_override = ui.visuals().override_text_color;
@@ -16969,8 +17041,32 @@ if supports_move_mouse || show_detection_tuning {
                                                          ui.add_space(4.0);
                                                          ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                      }
-                                                     if !is_manual && step.action == MacroAction::ScanVisionOnce {
+                                                     if step.action == MacroAction::ScanVisionOnce {
                                                           ui.add_space(4.0);
+                                                          let none_label = if is_manual {
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Entire Screen (Default)",
+                                                                  "Toàn màn hình (Mặc định)",
+                                                              )
+                                                          } else {
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Preset / Screen (Default)",
+                                                                  "Preset / Toàn màn hình (Mặc định)",
+                                                              )
+                                                          };
+                                                          live_sync |= Self::render_window_target_combo_with_duplicate_mode(
+                                                              ui,
+                                                              language,
+                                                              (group.id, preset.id, step_index, "vision-target-window-reg"),
+                                                              &none_label,
+                                                              &mut step.vision_target_window,
+                                                              &mut step.vision_match_duplicate_window_titles,
+                                                              &self.open_window_infos,
+                                                              135.0,
+                                                              true,
+                                                          );
                                                           if is_single_pixel {
                                                               ui.label(Self::tr_lang(language, "Color Var:", "Color Var:"));
                                                               let prev_override = ui.visuals().override_text_color;
@@ -17845,6 +17941,33 @@ if supports_move_mouse || show_detection_tuning {
                                                          angle_span_deg: None,
                                                      });
                                                  }
+                                             } else {
+                                                 let target_win = step.vision_target_window.as_deref().or(preset.target_window_title.as_deref());
+                                                 if let Some(win_title) = target_win.map(str::trim).filter(|s| !s.is_empty()) {
+                                                     if let Some(bounds) = crate::window_list::window_client_bounds(Some(win_title)) {
+                                                         hover_regions.push(crate::overlay::VisionRegion {
+                                                             left: bounds.0,
+                                                             top: bounds.1,
+                                                             width: bounds.2,
+                                                             height: bounds.3,
+                                                             is_circle: false,
+                                                             angle_offset_deg: None,
+                                                             angle_span_deg: None,
+                                                         });
+                                                     }
+                                                 }
+                                             }
+                                         } else if let Some(win_title) = step.vision_target_window.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                                             if let Some(bounds) = crate::window_list::window_client_bounds(Some(win_title)) {
+                                                 hover_regions.push(crate::overlay::VisionRegion {
+                                                     left: bounds.0,
+                                                     top: bounds.1,
+                                                     width: bounds.2,
+                                                     height: bounds.3,
+                                                     is_circle: false,
+                                                     angle_offset_deg: None,
+                                                     angle_span_deg: None,
+                                                 });
                                              }
                                          }
                                      }

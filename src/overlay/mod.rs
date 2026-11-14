@@ -29940,6 +29940,8 @@ mod windows_overlay {
                         step.vision_move_passes,
                         step.vision_move_delay_ms,
                         step.vision_color_tolerance,
+                        step.vision_target_window.as_deref(),
+                        Some(step.vision_match_duplicate_window_titles),
                     ) {
                         Ok(outcome) => outcome,
                         Err(error) => {
@@ -30775,6 +30777,8 @@ mod windows_overlay {
                             step.vision_move_passes,
                             step.vision_move_delay_ms,
                             step.vision_color_tolerance,
+                            step.vision_target_window.as_deref(),
+                            Some(step.vision_match_duplicate_window_titles),
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -31634,6 +31638,8 @@ mod windows_overlay {
                             step.vision_move_passes,
                             step.vision_move_delay_ms,
                             step.vision_color_tolerance,
+                            step.vision_target_window.as_deref(),
+                            Some(step.vision_match_duplicate_window_titles),
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -32471,6 +32477,8 @@ mod windows_overlay {
                             1,
                             0,
                             preset.color_tolerance,
+                            None,
+                            None,
                         ) {
                             return outcome.matched;
                         }
