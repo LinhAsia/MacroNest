@@ -6303,6 +6303,7 @@ impl CrosshairApp {
             .iter()
             .map(|t| t.name.clone())
             .collect();
+        let runtime_vars_snapshot = crate::overlay::RUNTIME_VARIABLES.lock().clone();
         let mut suggestion_names = std::collections::HashSet::new();
         for name in Self::builtin_variable_suggestions() {
             suggestion_names.insert(name.to_string());
@@ -10240,7 +10241,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                      Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                      let var_name = step.if_variable_name.trim();
                                                                      if !var_name.is_empty() {
-                                                                         let current_val = crate::overlay::RUNTIME_VARIABLES.lock().get(var_name).copied();
+                                                                         let current_val = runtime_vars_snapshot.get(var_name).copied();
                                                                          let val_str = current_val.map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
                                                                          ui.add_space(2.0);
                                                                          ui.label(
@@ -11112,7 +11113,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                 let var_name = step.if_variable_name.trim();
                                                                 if !var_name.is_empty() {
-                                                                    let current_val = crate::overlay::RUNTIME_VARIABLES.lock().get(var_name).copied();
+                                                                    let current_val = runtime_vars_snapshot.get(var_name).copied();
                                                                     let val_str = current_val.map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
                                                                     ui.add_space(2.0);
                                                                     ui.label(
@@ -12542,7 +12543,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                      Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                      let var_name = step.if_variable_name.trim();
                                                                      if !var_name.is_empty() {
-                                                                         let current_val = crate::overlay::RUNTIME_VARIABLES.lock().get(var_name).copied();
+                                                                         let current_val = runtime_vars_snapshot.get(var_name).copied();
                                                                          let val_str = current_val.map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
                                                                          ui.add_space(2.0);
                                                                          ui.label(
@@ -13417,7 +13418,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                 let var_name = step.if_variable_name.trim();
                                                                 if !var_name.is_empty() {
-                                                                    let current_val = crate::overlay::RUNTIME_VARIABLES.lock().get(var_name).copied();
+                                                                    let current_val = runtime_vars_snapshot.get(var_name).copied();
                                                                     let val_str = current_val.map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
                                                                     ui.add_space(2.0);
                                                                     ui.label(
@@ -14132,9 +14133,12 @@ if supports_move_mouse || show_detection_tuning {
                                 );
                                 visual_step_order = compact_order;
                             } else {
-                                ui.memory_mut(|mem| {
-                                    mem.data.remove::<usize>(drag_preview_index_id);
-                                });
+                                let had_drag = ui.memory(|mem| mem.data.get_temp::<usize>(drag_preview_index_id).is_some());
+                                if had_drag {
+                                    ui.memory_mut(|mem| {
+                                        mem.data.remove::<usize>(drag_preview_index_id);
+                                    });
+                                }
                             }
                             let mut step_rects = vec![Rect::ZERO; steps_len];
                             let mut next_compact_preview_index = steps_len;
@@ -14151,18 +14155,47 @@ if supports_move_mouse || show_detection_tuning {
 
                             let mut is_inside_loop = vec![false; steps_len];
                             let mut loop_depth = 0usize;
+                            let mut loop_start_unmatched = vec![false; steps_len];
+                            let mut if_start_unmatched = vec![false; steps_len];
+                            let mut loop_stack: Vec<usize> = Vec::new();
+                            let mut if_stack: Vec<usize> = Vec::new();
+                            let mut block_ranges: Vec<(usize, usize)> = Vec::new();
+
                             for (idx, s) in preset.steps.iter().enumerate() {
                                 if loop_depth > 0 {
                                     is_inside_loop[idx] = true;
                                 }
                                 if s.enabled {
-                                    if s.action == MacroAction::LoopStart {
-                                        loop_depth += 1;
-                                    } else if s.action == MacroAction::LoopEnd {
-                                        loop_depth = loop_depth.saturating_sub(1);
+                                    match s.action {
+                                        MacroAction::LoopStart => {
+                                            loop_depth += 1;
+                                            loop_stack.push(idx);
+                                        }
+                                        MacroAction::LoopEnd => {
+                                            loop_depth = loop_depth.saturating_sub(1);
+                                            if let Some(start_idx) = loop_stack.pop() {
+                                                block_ranges.push((start_idx, idx));
+                                            }
+                                        }
+                                        MacroAction::IfStart => {
+                                            if_stack.push(idx);
+                                        }
+                                        MacroAction::IfEnd => {
+                                            if let Some(start_idx) = if_stack.pop() {
+                                                block_ranges.push((start_idx, idx));
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                             }
+                            for start_idx in loop_stack {
+                                loop_start_unmatched[start_idx] = true;
+                            }
+                            for start_idx in if_stack {
+                                if_start_unmatched[start_idx] = true;
+                            }
+
 
                             let mut preset_selected_indices = selected_steps_snapshot
                                 .iter()
@@ -14183,7 +14216,21 @@ if supports_move_mouse || show_detection_tuning {
                                 cached_step_heights.truncate(steps_len);
                             }
                             let mut step_heights_changed = false;
-                            let cull_rect = ui.clip_rect().expand2(egui::vec2(0.0, 300.0));
+                            let cull_rect = ui.clip_rect().expand2(egui::vec2(0.0, 80.0));
+
+                            let step_font = egui::FontId::proportional(MACRO_STEP_TEXT_SIZE);
+                            for text_style in [
+                                egui::TextStyle::Body,
+                                egui::TextStyle::Button,
+                                egui::TextStyle::Monospace,
+                                egui::TextStyle::Small,
+                            ] {
+                                ui.style_mut()
+                                    .text_styles
+                                    .insert(text_style, step_font.clone());
+                            }
+                            ui.spacing_mut().interact_size.y = MACRO_STEP_CONTROL_HEIGHT;
+                            ui.spacing_mut().button_padding.y = 0.0;
 
                             for (display_index, step_index) in
                                 visual_step_order.iter().copied().enumerate()
@@ -14255,30 +14302,8 @@ if supports_move_mouse || show_detection_tuning {
                                         && !is_inside_loop[step_index]
                                 };
                                 let step_ref = &preset.steps[step_index];
-                                let loop_start_needs_end = step_ref.action == MacroAction::LoopStart && {
-                                    let mut nested = 0usize;
-                                    !preset.steps[step_index + 1..].iter().any(|candidate| {
-                                        match candidate.action {
-                                            MacroAction::LoopStart => nested += 1,
-                                            MacroAction::LoopEnd if nested == 0 => return true,
-                                            MacroAction::LoopEnd => nested -= 1,
-                                            _ => {}
-                                        }
-                                        false
-                                    })
-                                };
-                                let if_start_needs_end = step_ref.action == MacroAction::IfStart && {
-                                    let mut nested = 0usize;
-                                    !preset.steps[step_index + 1..].iter().any(|candidate| {
-                                        match candidate.action {
-                                            MacroAction::IfStart => nested += 1,
-                                            MacroAction::IfEnd if nested == 0 => return true,
-                                            MacroAction::IfEnd => nested -= 1,
-                                            _ => {}
-                                        }
-                                        false
-                                    })
-                                };
+                                let loop_start_needs_end = loop_start_unmatched[step_index];
+                                let if_start_needs_end = if_start_unmatched[step_index];
                                 let is_vision_active = step_ref.action == MacroAction::StartVisionSearch && {
                                     crate::overlay::is_vision_following_active_by_spec(&step_ref.key)
                                 };
@@ -14360,19 +14385,7 @@ if supports_move_mouse || show_detection_tuning {
                                     .stroke(border_stroke)
                                     .inner_margin(egui::Margin::symmetric(4, 2))
                                     .show(ui, |ui| ui.push_id((preset.id, step_index), |ui| {
-                                        let step_font = egui::FontId::proportional(MACRO_STEP_TEXT_SIZE);
-                                        for text_style in [
-                                            egui::TextStyle::Body,
-                                            egui::TextStyle::Button,
-                                            egui::TextStyle::Monospace,
-                                            egui::TextStyle::Small,
-                                        ] {
-                                            ui.style_mut()
-                                                .text_styles
-                                                .insert(text_style, step_font.clone());
-                                        }
-                                        ui.spacing_mut().interact_size.y = MACRO_STEP_CONTROL_HEIGHT;
-                                        ui.spacing_mut().button_padding.y = 0.0;
+
                                         ui.set_min_height(MACRO_STEP_CONTROL_HEIGHT);
                                         ui.set_max_height(MACRO_STEP_CONTROL_HEIGHT);
                                         ui.horizontal(|ui| {
@@ -14744,7 +14757,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     ) {
                                                         macro_presets_persist_requested = true;
                                                     }
-                                                    if !pointer_any_down {
+                                                    if !pointer_any_down && has_dragged {
                                                         let accum_id = edit_id.with("drag-accum");
                                                         child_ui.memory_mut(|mem| {
                                                             mem.data.insert_temp(has_dragged_id, false);
@@ -14873,8 +14886,8 @@ if supports_move_mouse || show_detection_tuning {
                                             let is_open = action_combo_resp.inner.is_some();
                                             if was_open != is_open {
                                                 self.action_search_text.clear();
+                                                ui.ctx().data_mut(|d| d.insert_temp(action_open_id, is_open));
                                             }
-                                            ui.ctx().data_mut(|d| d.insert_temp(action_open_id, is_open));
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
                                                 Self::macro_action_supports_capture(step.action);
@@ -16004,7 +16017,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                      Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                      let var_name = step.if_variable_name.trim();
                                                                      if !var_name.is_empty() {
-                                                                         let current_val = crate::overlay::RUNTIME_VARIABLES.lock().get(var_name).copied();
+                                                                         let current_val = runtime_vars_snapshot.get(var_name).copied();
                                                                          let val_str = current_val.map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
                                                                          ui.add_space(2.0);
                                                                          ui.label(
@@ -16549,7 +16562,11 @@ if supports_move_mouse || show_detection_tuning {
                                                                     Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                        let left_expr = step.if_variable_name.trim();
                                                                        if !left_expr.is_empty() {
-                                                                           let left_val = crate::overlay::evaluate_interpolated_math_expression(left_expr);
+                                                                           let left_val = if !left_expr.contains('{') && !crate::overlay::looks_like_math_expression_text(left_expr) {
+                                                                               runtime_vars_snapshot.get(left_expr).copied().map(|v| v as i32).unwrap_or(0)
+                                                                           } else {
+                                                                               crate::overlay::evaluate_interpolated_math_expression(left_expr)
+                                                                           };
                                                                            ui.add_space(2.0);
                                                                            ui.label(
                                                                                RichText::new(format!("({})", left_val))
@@ -16982,7 +16999,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
                                                                 let var_name = step.if_variable_name.trim();
                                                                 if !var_name.is_empty() {
-                                                                    let current_val = crate::overlay::RUNTIME_VARIABLES.lock().get(var_name).copied();
+                                                                    let current_val = runtime_vars_snapshot.get(var_name).copied();
                                                                     let val_str = current_val.map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
                                                                     ui.add_space(2.0);
                                                                     ui.label(
@@ -18181,41 +18198,11 @@ if supports_move_mouse || show_detection_tuning {
                             // Dynamic hover highlight for Loop and If blocks
                             let hover_pos = ui.ctx().pointer_interact_pos();
                             if let Some(pos) = hover_pos {
-                                struct BlockRange {
-                                    start_idx: usize,
-                                    end_idx: usize,
-                                }
-                                let mut blocks = Vec::new();
-                                let mut loop_stack = Vec::new();
-                                let mut if_stack = Vec::new();
-                                for (idx, s) in preset.steps.iter().enumerate() {
-                                    if s.enabled {
-                                        if s.action == MacroAction::LoopStart {
-                                            loop_stack.push(idx);
-                                        } else if s.action == MacroAction::LoopEnd {
-                                            if let Some(start_idx) = loop_stack.pop() {
-                                                blocks.push(BlockRange {
-                                                    start_idx,
-                                                    end_idx: idx,
-                                                });
-                                            }
-                                        } else if s.action == MacroAction::IfStart {
-                                            if_stack.push(idx);
-                                        } else if s.action == MacroAction::IfEnd {
-                                            if let Some(start_idx) = if_stack.pop() {
-                                                blocks.push(BlockRange {
-                                                    start_idx,
-                                                    end_idx: idx,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                                let mut active_block: Option<&BlockRange> = None;
-                                for block in &blocks {
-                                    if block.start_idx < step_rects.len() && block.end_idx < step_rects.len() {
-                                        let start_rect = step_rects[block.start_idx];
-                                        let end_rect = step_rects[block.end_idx];
+                                let mut active_block: Option<&(usize, usize)> = None;
+                                for block in &block_ranges {
+                                    if block.0 < step_rects.len() && block.1 < step_rects.len() {
+                                        let start_rect = step_rects[block.0];
+                                        let end_rect = step_rects[block.1];
                                         if start_rect != Rect::ZERO && end_rect != Rect::ZERO {
                                             let union_rect = start_rect.union(end_rect);
                                             // Check whether the pointer is inside the union rect, including the vertical gap
@@ -18223,7 +18210,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 match active_block {
                                                     None => active_block = Some(block),
                                                     Some(current) => {
-                                                        if (block.end_idx - block.start_idx) < (current.end_idx - current.start_idx) {
+                                                        if (block.1 - block.0) < (current.1 - current.0) {
                                                             active_block = Some(block);
                                                         }
                                                     }
@@ -18233,8 +18220,8 @@ if supports_move_mouse || show_detection_tuning {
                                     }
                                 }
                                 if let Some(block) = active_block {
-                                    let start_rect = step_rects[block.start_idx];
-                                    let end_rect = step_rects[block.end_idx];
+                                    let start_rect = step_rects[block.0];
+                                    let end_rect = step_rects[block.1];
                                     let union_rect = start_rect.union(end_rect).expand(3.0);
                                     ui.painter().rect_stroke(
                                         union_rect,
@@ -25176,6 +25163,9 @@ if supports_move_mouse || show_detection_tuning {
         _timer_names: &[String],
         require_wrap_open: bool,
     ) {
+        if !response.has_focus() {
+            return;
+        }
         let suggestion_names = ui
             .memory(|mem| {
                 mem.data
@@ -25455,6 +25445,9 @@ if supports_move_mouse || show_detection_tuning {
         _timer_names: &[String],
         _language: UiLanguage,
     ) {
+        if !response.has_focus() {
+            return;
+        }
         let suggestion_names = ui
             .memory(|mem| {
                 mem.data
