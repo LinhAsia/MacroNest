@@ -1482,6 +1482,7 @@ impl MemoryPanelState {
         None
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_emulator_target(&self) -> bool {
         if self.android_bridge.is_connected && self.android_bridge.selected_pid.is_some() {
             return true;
@@ -7663,7 +7664,8 @@ impl CrosshairApp {
                         Self::memory_code_list_cell(ui, 326.0, "Action / Status", None);
                     });
                     ui.separator();
-                    let is_emulator = self.memory_panel.is_emulator_target();
+                    let is_android = self.memory_panel.android_bridge.is_connected
+                        && self.memory_panel.android_bridge.selected_pid.is_some();
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
                         let selected = self.memory_panel.selected_code.contains(&index);
                         let address_str = format!("{}+{:X}", entry.module, entry.offset);
@@ -7754,7 +7756,7 @@ impl CrosshairApp {
 
                                 let action_label = if entry.replaced {
                                     "NOP Active"
-                                } else if entry.instruction.starts_with("Write:") || entry.writes || is_emulator {
+                                } else if entry.instruction.starts_with("Write:") || entry.writes || is_android {
                                     "Watch Writes"
                                 } else {
                                     "Find accessed"
@@ -9083,14 +9085,12 @@ impl CrosshairApp {
             }
         };
 
-        let is_emulator = self.memory_panel.is_emulator_target();
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
         let is_data_watch = entry.writes
             || entry.instruction.starts_with("Write:")
             || entry.instruction.starts_with("Read:")
             || entry.module.starts_with("Android::")
-            || is_emulator
             || is_android;
 
         let text_encoding = self
@@ -9216,45 +9216,18 @@ impl CrosshairApp {
             })
             .unwrap_or(32)
             .max(1);
-        if current_instruction
+        let is_compatible = current_instruction
             .as_ref()
-            .is_none_or(|current| !is_instruction_compatible(&entry.instruction, current))
-        {
-            let (_tx, rx) = mpsc::channel();
-            self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
-                code_index,
-                instruction_address,
-                status: format!(
-                    "Stale code anchor - expected '{}', found '{}'",
-                    entry.instruction,
-                    current_instruction.as_deref().unwrap_or("unreadable code")
-                ),
-                addresses: Vec::new(),
-                rx,
-                active: None,
-                pinned: true,
-                selected: None,
-                selected_indices: HashSet::new(),
-                selection_anchor: None,
-                value_type: self.memory_panel.value_type,
-                text_encoding,
-                text_byte_len,
-                values: HashMap::new(),
-                tracked_name: String::new(),
-                tracked_offset: "0".to_owned(),
-                save_tracked: false,
-                auto_stop_on_hit: false,
-                hits_sort: 0,
-                value_sort: 0,
-                value_search: String::new(),
-                value_filter_enabled: false,
-                value_filter_min: String::new(),
-                value_filter_max: String::new(),
-                feedback_message: None,
-                last_value_refresh: Instant::now(),
-            });
-            return;
-        }
+            .map_or(true, |current| is_instruction_compatible(&entry.instruction, current));
+        let warning_note = if !is_compatible {
+            Some(format!(
+                "Note: instruction changed (expected '{}', found '{}')",
+                entry.instruction,
+                current_instruction.as_deref().unwrap_or("unreadable")
+            ))
+        } else {
+            None
+        };
         self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
         let started = AccessWatch::start(
@@ -9266,7 +9239,10 @@ impl CrosshairApp {
             },
         );
         let (active, status) = match started {
-            Ok(active) => (Some(ActiveInstructionWatch::Execute(active)), "Attaching debugger…".to_owned()),
+            Ok(active) => (
+                Some(ActiveInstructionWatch::Execute(active)),
+                warning_note.unwrap_or_else(|| "Attaching debugger…".to_owned()),
+            ),
             Err(error) => (None, format!("Unable to start debugger: {error}")),
         };
         self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
@@ -14486,9 +14462,8 @@ impl CrosshairApp {
         let notify = move |event| {
             let _ = tx.send(event);
         };
-        let is_emulator = self.memory_panel.is_emulator_target();
         let emu_display_name = self.memory_panel.detected_emulator_name();
-        let started = if is_android || is_emulator {
+        let started = if is_android {
             let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
@@ -14510,7 +14485,7 @@ impl CrosshairApp {
                 tx_watch,
                 modules,
                 all_regions,
-                is_android,
+                true,
                 emu_display_name.clone(),
             );
             Ok(ActiveInstructionWatch::Emulator(session))
@@ -14536,12 +14511,6 @@ impl CrosshairApp {
                 let st = if is_android {
                     let android_pid = self.memory_panel.android_bridge.selected_pid.unwrap_or(0);
                     format!("Active Watcher running (Android PID {android_pid}) — real-time write capture")
-                } else if let Some(emu) = &emu_display_name {
-                    if reads_and_writes {
-                        format!("{emu} detected — polling write capture active (read-access requires hypervisor hook)")
-                    } else {
-                        format!("{emu} detected — real-time polling write capture active")
-                    }
                 } else {
                     "Attaching debugger…".to_owned()
                 };
@@ -14812,7 +14781,6 @@ impl CrosshairApp {
         };
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
-        let is_emulator = self.memory_panel.is_emulator_target();
         let emu_name = self.memory_panel.detected_emulator_name();
         let (tx, rx) = mpsc::channel();
         let tx_watch = tx.clone();
@@ -14820,7 +14788,7 @@ impl CrosshairApp {
             let _ = tx.send(event);
         };
         let reads_and_writes = !dialog.writes_only;
-        let started = if is_android || is_emulator {
+        let started = if is_android {
             let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
@@ -14841,7 +14809,7 @@ impl CrosshairApp {
                 tx_watch,
                 modules,
                 all_regions,
-                is_android,
+                true,
                 emu_name.clone(),
             );
             Ok(ActiveInstructionWatch::Emulator(session))
@@ -14869,8 +14837,6 @@ impl CrosshairApp {
                 dialog.status = if is_android {
                     let android_pid = self.memory_panel.android_bridge.selected_pid.unwrap_or(0);
                     format!("Active Watcher running (Android PID {android_pid}) — real-time write capture")
-                } else if let Some(emu) = emu_name {
-                    format!("{emu} detected — real-time write capture active")
                 } else {
                     "Attaching debugger…".to_owned()
                 };
@@ -16296,7 +16262,6 @@ impl CrosshairApp {
             dialog.status = "Select a process".to_owned();
             return;
         };
-        let is_emulator = self.memory_panel.is_emulator_target();
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
         let entry = self.state.memory_code_list.get(dialog.code_index);
@@ -16305,7 +16270,6 @@ impl CrosshairApp {
                 || e.instruction.starts_with("Write:")
                 || e.instruction.starts_with("Read:")
                 || e.module.starts_with("Android::")
-                || is_emulator
                 || is_android
         });
         if is_data_watch {

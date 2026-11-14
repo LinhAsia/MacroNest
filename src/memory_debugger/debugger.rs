@@ -795,6 +795,45 @@ pub fn process_pointer_width(pid: u32) -> io::Result<usize> {
     Ok(width)
 }
 
+#[cfg(windows)]
+pub fn enable_debug_privilege() -> bool {
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let privilege_name: Vec<u16> = "SeDebugPrivilege\0".encode_utf16().collect();
+        let mut luid = std::mem::zeroed();
+        if LookupPrivilegeValueW(std::ptr::null(), privilege_name.as_ptr(), &mut luid) == 0 {
+            CloseHandle(token);
+            return false;
+        }
+        let mut tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        let res = AdjustTokenPrivileges(
+            token,
+            0,
+            &mut tp,
+            std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+        CloseHandle(token);
+        res != 0
+    }
+}
+
 fn watch_loop<F>(
     pid: u32,
     kind: WatchKind,
@@ -804,6 +843,7 @@ fn watch_loop<F>(
 ) where
     F: Fn(WatchEvent),
 {
+    enable_debug_privilege();
     let process = match Process::open(pid) {
         Ok(process) => process,
         Err(error) => {
@@ -833,6 +873,7 @@ fn watch_loop<F>(
         )));
         return;
     }
+    let attach_time = Instant::now();
     let mut first_breakpoint = true;
     let mut debugger_started = false;
     let mut threads = HashMap::new();
@@ -850,6 +891,35 @@ fn watch_loop<F>(
         _ => None,
     };
     while !stop.load(Ordering::Acquire) {
+        if !debugger_started
+            && first_breakpoint
+            && attach_time.elapsed() >= Duration::from_millis(150)
+            && !threads.is_empty()
+        {
+            first_breakpoint = false;
+            let (armed, total, _) = arm_process_threads(
+                pid,
+                &mut threads,
+                &kind,
+                architecture,
+                active_slot_start,
+            );
+            if armed > 0 {
+                debugger_started = true;
+                last_slot_rotation = Instant::now();
+                duty_phase_start = Instant::now();
+                notify(WatchEvent::Started {
+                    armed_threads: armed,
+                    total_threads: total,
+                });
+                if kind.single_pass() {
+                    notify(WatchEvent::BatchProgress {
+                        completed_batches: 0,
+                        total_batches: kind.batch_count(),
+                    });
+                }
+            }
+        }
         if debugger_started {
             if let Some((burst, pause)) = duty_cycle {
                 if duty_state_burst {
@@ -909,15 +979,8 @@ fn watch_loop<F>(
             },
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
-                if debugger_started && duty_state_burst
-                    && let Err(error) =
-                        arm_thread(thread, &kind, architecture, active_slot_start)
-                {
-                    notify(WatchEvent::Error(format!(
-                        "unable to arm new game thread {}: {error}",
-                        event.dwThreadId
-                    )));
-                    stop.store(true, Ordering::Release);
+                if debugger_started && duty_state_burst {
+                    let _ = arm_thread(thread, &kind, architecture, active_slot_start);
                 }
                 threads.insert(event.dwThreadId, thread);
             },
@@ -1394,7 +1457,7 @@ fn decode_previous_access(
 ) -> Option<(usize, Instruction, String)> {
     let next_ip = context.Rip as usize;
     let mut best = None;
-    let mut write_fallback = None;
+    let mut fallback = None;
     for length in 1..=15usize {
         let start = next_ip.checked_sub(length)?;
         let mut bytes = [0u8; 15];
@@ -1426,15 +1489,16 @@ fn decode_previous_access(
             let candidate = (start, instruction, text);
             if memory_access_overlaps(&candidate.1, context, data_address, 4) {
                 best = prefer_longer_access_candidate(best, candidate);
-            } else if writes_only {
-                // The hardware watchpoint already proves the previous instruction overlapped the
-                // watched bytes. Keep a write fallback for implicit/string writes and instructions
-                // whose post-execution register state no longer reconstructs the original address.
-                write_fallback = prefer_longer_access_candidate(write_fallback, candidate);
+            } else {
+                // The hardware watchpoint already proves the previous instruction hit the
+                // watched bytes. Keep a fallback for instructions whose post-execution
+                // register state no longer reconstructs the original address (e.g. mov rax, [rax]),
+                // or for read-accesses where registers were modified.
+                fallback = prefer_longer_access_candidate(fallback, candidate);
             }
         }
     }
-    best.or(write_fallback)
+    best.or(fallback)
 }
 
 fn prefer_longer_access_candidate(
