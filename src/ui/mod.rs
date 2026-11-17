@@ -5114,7 +5114,30 @@ impl CrosshairApp {
                     .data(|data| data.get_temp::<bool>(popup_was_open_id))
                     .unwrap_or(false);
 
-                let is_button_hovered = button_response.hovered();
+                let is_corner_hovered = matches!(
+                    action_kind,
+                    TitlebarQuickActionKind::VideoRecord
+                        | TitlebarQuickActionKind::Ocr
+                        | TitlebarQuickActionKind::ScreenDraw
+                ) && ui.ctx().input(|i| {
+                    i.pointer.hover_pos().map_or(false, |pos| {
+                        let top_right_corner = egui::Rect::from_min_size(
+                            pos2(button_response.rect.right() - 34.0, button_response.rect.top()),
+                            vec2(34.0, 34.0),
+                        );
+                        let top_left_corner = if action_kind == TitlebarQuickActionKind::ScreenDraw {
+                            egui::Rect::from_min_size(
+                                button_response.rect.left_top(),
+                                vec2(34.0, 34.0),
+                            )
+                        } else {
+                            egui::Rect::NOTHING
+                        };
+                        top_right_corner.contains(pos) || top_left_corner.contains(pos)
+                    })
+                });
+
+                let is_button_hovered = button_response.hovered() && !is_corner_hovered;
 
                 // If the button is hovered, this action kind becomes the active one immediately
                 if is_button_hovered {
@@ -5145,6 +5168,13 @@ impl CrosshairApp {
                 let mouse_in_card_prev =
                     if let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
                         prev_card_rect.contains(mouse_pos)
+                            || (action_kind == TitlebarQuickActionKind::VideoRecord
+                                && prev_card_rect != egui::Rect::NOTHING
+                                && egui::Rect::from_min_max(
+                                    pos2(button_response.rect.right(), button_response.rect.top() - 15.0),
+                                    pos2(prev_card_rect.left() + 4.0, button_response.rect.bottom() + 15.0),
+                                )
+                                .contains(mouse_pos))
                     } else {
                         false
                     };
@@ -5209,7 +5239,12 @@ impl CrosshairApp {
                             | TitlebarQuickActionKind::Protractor
                             | TitlebarQuickActionKind::Ruler
                     );
-                    let (pos, pivot) = if opens_up {
+                    let (pos, pivot) = if action_kind == TitlebarQuickActionKind::VideoRecord {
+                        (
+                            pos2(button_response.rect.right() + 8.0, button_response.rect.top() - 10.0),
+                            egui::Align2::LEFT_TOP,
+                        )
+                    } else if opens_up {
                         (
                             button_response.rect.left_top() + vec2(-42.0, -4.0),
                             egui::Align2::LEFT_BOTTOM,
