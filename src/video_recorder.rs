@@ -1227,7 +1227,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                     "-f",
                     "rawvideo",
                     "-pix_fmt",
-                    "bgra",
+                    "rgba",
                     "-s",
                     &format!("{width}x{height}"),
                     "-r",

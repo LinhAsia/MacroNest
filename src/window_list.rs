@@ -1572,6 +1572,55 @@ mod windows_impl {
         }
     }
 
+    /// In-place Red and Blue channel swap for 32-bit pixel buffers (RGBA <-> BGRA).
+    /// Uses SSSE3 SIMD `_mm_shuffle_epi8` if supported, with scalar fallback.
+    pub fn swap_rb_in_place(buf: &mut [u8]) {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if is_x86_feature_detected!("ssse3") {
+                unsafe {
+                    swap_rb_ssse3(buf);
+                    return;
+                }
+            }
+        }
+        swap_rb_scalar(buf);
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[target_feature(enable = "ssse3")]
+    unsafe fn swap_rb_ssse3(buf: &mut [u8]) {
+        #[cfg(target_arch = "x86")]
+        use std::arch::x86::*;
+        #[cfg(target_arch = "x86_64")]
+        use std::arch::x86_64::*;
+
+        let mask = _mm_setr_epi8(2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+        let mut ptr = buf.as_mut_ptr();
+        let chunks = buf.len() / 16;
+
+        for _ in 0..chunks {
+            let v = _mm_loadu_si128(ptr as *const __m128i);
+            let shuffled = _mm_shuffle_epi8(v, mask);
+            _mm_storeu_si128(ptr as *mut __m128i, shuffled);
+            ptr = ptr.add(16);
+        }
+
+        let rem_start = chunks * 16;
+        swap_rb_scalar(&mut buf[rem_start..]);
+    }
+
+    fn swap_rb_scalar(buf: &mut [u8]) {
+        let count = buf.len() / 4;
+        let ptr = buf.as_mut_ptr() as *mut u32;
+        for i in 0..count {
+            unsafe {
+                let p = *ptr.add(i);
+                *ptr.add(i) = ((p & 0x00FF0000) >> 16) | ((p & 0x000000FF) << 16) | (p & 0xFF00FF00);
+            }
+        }
+    }
+
     impl WgcSession {
         pub(crate) fn poll_into_buffer(
             &mut self,
@@ -1740,14 +1789,7 @@ mod windows_impl {
             }
 
             // WGC textures use B8G8R8A8; convert to standard RGBA so all downstream previews and overlays match.
-            let ptr = buffer.as_mut_ptr() as *mut u32;
-            let count = buffer.len() / 4;
-            for i in 0..count {
-                unsafe {
-                    let p = *ptr.add(i);
-                    *ptr.add(i) = (p & 0xFF00FF00) | ((p & 0x00FF0000) >> 16) | ((p & 0x000000FF) << 16);
-                }
-            }
+            swap_rb_in_place(buffer);
 
             self.write_idx = 1 - write_idx;
             Ok(true)
@@ -2183,6 +2225,17 @@ mod fallback {
     }
 
     pub(crate) fn close_window_capture_session() {}
+
+    pub fn swap_rb_in_place(buf: &mut [u8]) {
+        let count = buf.len() / 4;
+        let ptr = buf.as_mut_ptr() as *mut u32;
+        for i in 0..count {
+            unsafe {
+                let p = *ptr.add(i);
+                *ptr.add(i) = ((p & 0x00FF0000) >> 16) | ((p & 0x000000FF) << 16) | (p & 0xFF00FF00);
+            }
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -2441,6 +2494,40 @@ mod tests {
         assert_eq!(aoy, 310);
         assert_eq!(abs_rgba[0], 255);
         assert_eq!(abs_rgba[3], 255);
+    }
+
+    #[test]
+    fn test_swap_rb_in_place() {
+        let mut pixels = vec![
+            10, 20, 30, 255,   // pixel 0
+            40, 50, 60, 255,   // pixel 1
+            70, 80, 90, 255,   // pixel 2
+            100, 110, 120, 255, // pixel 3 (16 bytes, exactly 1 SIMD chunk)
+            130, 140, 150, 255, // pixel 4 (extra pixel for scalar remainder)
+        ];
+        swap_rb_in_place(&mut pixels);
+        assert_eq!(
+            pixels,
+            vec![
+                30, 20, 10, 255,
+                60, 50, 40, 255,
+                90, 80, 70, 255,
+                120, 110, 100, 255,
+                150, 140, 130, 255,
+            ]
+        );
+        // Double swap returns to original
+        swap_rb_in_place(&mut pixels);
+        assert_eq!(
+            pixels,
+            vec![
+                10, 20, 30, 255,
+                40, 50, 60, 255,
+                70, 80, 90, 255,
+                100, 110, 120, 255,
+                130, 140, 150, 255,
+            ]
+        );
     }
 }
 

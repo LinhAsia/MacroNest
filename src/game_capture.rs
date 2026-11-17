@@ -814,6 +814,11 @@ impl GameCaptureSession {
             self.d3d_context.Unmap(read_tex, 0);
             self.write_idx = (write_idx + 1) % 3;
 
+            // If the shared texture format is BGRA (formats 87..=93), convert to standard RGBA so all downstream buffers match.
+            if matches!(desc.Format.0, 87 | 88 | 90 | 91 | 93) {
+                crate::window_list::swap_rb_in_place(buffer);
+            }
+
             Ok(true)
         }
     }
