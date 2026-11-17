@@ -7333,6 +7333,24 @@ impl CrosshairApp {
                                             }
 
                                             if self.state.quick_video_switch_on_focus {
+                                                ui.add_space(1.0);
+                                                let dup_resp = ui.checkbox(
+                                                    &mut self.state.quick_video_switch_match_duplicate,
+                                                    Self::tr_lang(
+                                                        self.state.ui_language,
+                                                        "Match all windows with same title",
+                                                        "Khớp tất cả cửa sổ cùng tên",
+                                                    ),
+                                                ).on_hover_text(Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Automatically switch between all windows/instances that share the same title (e.g. 2 game instances) without requiring specific PIDs or window handles. Works seamlessly even after closing and reopening the game.",
+                                                    "Tự động chuyển cảnh giữa tất cả các cửa sổ có cùng tên (ví dụ: mở 2 tab game/giả lập cùng tên) mà không cần đúng PID/HWND cụ thể. Hoạt động bình thường cả khi tắt và mở lại game.",
+                                                ));
+                                                if dup_resp.changed() {
+                                                    self.sync_quick_video_record_config();
+                                                    self.persist();
+                                                }
+
                                                 let mut add_switch_selector = String::new();
                                                 let switch_combo = egui::ComboBox::from_id_salt("quick-video-switch-add-win")
                                                     .width(186.0)
@@ -7342,19 +7360,33 @@ impl CrosshairApp {
                                                         "+ Thêm cửa sổ chuyển cảnh...",
                                                     ))
                                                     .show_ui(ui, |ui| {
+                                                        let target_base = Self::selector_base_title(&self.state.quick_video_record_target_window).trim();
                                                         for window in &self.open_window_infos {
                                                             let is_main = window.selector == self.state.quick_video_record_target_window;
+                                                            let win_base = Self::selector_base_title(&window.selector).trim();
+                                                            let is_auto_matched = self.state.quick_video_switch_match_duplicate
+                                                                && !target_base.is_empty()
+                                                                && win_base == target_base;
                                                             let is_added = self.state.quick_video_switch_windows.contains(&window.selector);
+                                                            let tag = if is_main {
+                                                                "[Main]"
+                                                            } else if is_auto_matched {
+                                                                "[Auto]"
+                                                            } else if is_added {
+                                                                "[x]"
+                                                            } else {
+                                                                "[+]"
+                                                            };
                                                             let label = format!(
                                                                 "{} {}",
-                                                                if is_main { "[Main]" } else if is_added { "[x]" } else { "[+]" },
+                                                                tag,
                                                                 Self::truncate_window_title(
                                                                     &Self::quick_action_window_display(&window.selector, &self.open_window_infos),
                                                                     24,
                                                                 )
                                                             );
                                                             if !is_main {
-                                                                if ui.selectable_label(is_added, label).clicked() {
+                                                                if ui.selectable_label(is_added || is_auto_matched, label).clicked() {
                                                                     add_switch_selector = window.selector.clone();
                                                                 }
                                                             } else {

@@ -1036,6 +1036,8 @@ pub struct AppState {
     #[serde(default)]
     pub quick_video_switch_windows: Vec<String>,
     #[serde(default)]
+    pub quick_video_switch_match_duplicate: bool,
+    #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
     pub quick_key_sound_style: u32,
@@ -1416,6 +1418,7 @@ impl Default for AppState {
             quick_video_audio_app_windows: Vec::new(),
             quick_video_switch_on_focus: false,
             quick_video_switch_windows: Vec::new(),
+            quick_video_switch_match_duplicate: false,
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),
@@ -1440,6 +1443,7 @@ mod tests {
         assert_eq!(state.memory_dump_range_count, 500);
         assert_eq!(state.memory_dump_stride, super::MemoryDumpStride::Auto);
         assert_eq!(state.memory_dump_direction, super::MemoryDumpDirection::Surrounding);
+        assert!(!state.quick_video_switch_match_duplicate);
     }
 
     #[test]

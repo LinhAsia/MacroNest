@@ -403,6 +403,7 @@ impl CrosshairApp {
             audio_app_windows: self.state.quick_video_audio_app_windows.clone(),
             switch_on_focus: self.state.quick_video_switch_on_focus,
             switch_windows: self.state.quick_video_switch_windows.clone(),
+            switch_match_duplicate: self.state.quick_video_switch_match_duplicate,
         });
     }
 

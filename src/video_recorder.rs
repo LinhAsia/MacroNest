@@ -54,6 +54,7 @@ pub struct VideoRecorderConfig {
     pub audio_app_windows: Vec<String>,
     pub switch_on_focus: bool,
     pub switch_windows: Vec<String>,
+    pub switch_match_duplicate: bool,
 }
 
 impl Default for VideoRecorderConfig {
@@ -74,6 +75,7 @@ impl Default for VideoRecorderConfig {
             audio_app_windows: Vec::new(),
             switch_on_focus: false,
             switch_windows: Vec::new(),
+            switch_match_duplicate: false,
         }
     }
 }
@@ -1352,8 +1354,21 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         };
         let initial_hwnd_val = initial_hwnd.0 as isize;
         let switch_on_focus = config.switch_on_focus;
+        let switch_match_duplicate = config.switch_match_duplicate;
         let mut switch_targets: Vec<isize> = Vec::new();
+        let mut switch_base_titles: Vec<String> = Vec::new();
         if switch_on_focus {
+            let add_base_title = |titles: &mut Vec<String>, sel: &str| {
+                let base = crate::window_list::selector_base_title(sel).trim();
+                if !base.is_empty() && !titles.iter().any(|t| t == base) {
+                    titles.push(base.to_string());
+                }
+            };
+            add_base_title(&mut switch_base_titles, &config.target_window);
+            for s in &config.switch_windows {
+                add_base_title(&mut switch_base_titles, s);
+            }
+
             if initial_hwnd_val != 0 {
                 switch_targets.push(initial_hwnd_val);
             }
@@ -1368,6 +1383,18 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                     let val = h.0 as isize;
                     if !switch_targets.contains(&val) {
                         switch_targets.push(val);
+                    }
+                }
+            }
+
+            if switch_match_duplicate {
+                for base in &switch_base_titles {
+                    let matching_hwnds = crate::window_list::find_all_windows_by_candidate(base, true);
+                    for h in matching_hwnds {
+                        let val = h.0 as isize;
+                        if !switch_targets.contains(&val) {
+                            switch_targets.push(val);
+                        }
                     }
                 }
             }
@@ -1451,7 +1478,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                     frame_count = 0;
                 }
 
-                if switch_on_focus && !switch_targets.is_empty() {
+                if switch_on_focus && (!switch_targets.is_empty() || !switch_base_titles.is_empty()) {
                     check_tick += 1;
                     if check_tick % 3 == 0 {
                         let fg = unsafe { GetForegroundWindow() };
@@ -1465,13 +1492,27 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                                 if r.0.is_null() { fg } else { r }
                             };
                             let root_val = root_fg.0 as isize;
-                            let matched = if switch_targets.contains(&fg_val) {
+                            let mut matched = if switch_targets.contains(&fg_val) {
                                 Some(fg_val)
                             } else if switch_targets.contains(&root_val) {
                                 Some(root_val)
                             } else {
                                 None
                             };
+
+                            if matched.is_none() && switch_match_duplicate {
+                                let candidate = if root_val != 0 { root_fg } else { fg };
+                                if let Some(title) = crate::window_list::window_title(candidate) {
+                                    let base = crate::window_list::selector_base_title(&title).trim();
+                                    if switch_base_titles.iter().any(|t| t == base || t == title.trim()) {
+                                        let cand_val = candidate.0 as isize;
+                                        if !switch_targets.contains(&cand_val) {
+                                            switch_targets.push(cand_val);
+                                        }
+                                        matched = Some(cand_val);
+                                    }
+                                }
+                            }
 
                             if let Some(new_target_val) = matched {
                                 let new_target = HWND(new_target_val as *mut _);
@@ -2341,12 +2382,28 @@ fn region_source(mut region: RECT, fps: u32) -> Result<CaptureSource, String> {
 }
 
 fn selector_hwnd(selector: &str) -> Option<HWND> {
-    crate::window_list::find_window_handle(Some(selector)).or_else(|| {
-        let marker = selector.rfind("(0x")?;
-        let hex = selector.get(marker + 3..selector.len().checked_sub(1)?)?;
-        let raw = usize::from_str_radix(hex, 16).ok()?;
-        Some(HWND(raw as *mut _))
-    })
+    if let Some(h) = crate::window_list::find_window_handle(Some(selector)) {
+        if unsafe { IsWindow(Some(h)).as_bool() } {
+            return Some(h);
+        }
+    }
+    let base = crate::window_list::selector_base_title(selector).trim();
+    if !base.is_empty() && base != selector.trim() {
+        if let Some(h) = crate::window_list::find_window_handle(Some(base)) {
+            if unsafe { IsWindow(Some(h)).as_bool() } {
+                return Some(h);
+            }
+        }
+    }
+    let marker = selector.rfind("(0x")?;
+    let hex = selector.get(marker + 3..selector.len().checked_sub(1)?)?;
+    let raw = usize::from_str_radix(hex, 16).ok()?;
+    let h = HWND(raw as *mut _);
+    if unsafe { IsWindow(Some(h)).as_bool() } {
+        Some(h)
+    } else {
+        None
+    }
 }
 
 fn unique_output_path(dir: &Path, stem: &str) -> PathBuf {
@@ -2933,5 +2990,42 @@ mod tests {
         assert_eq!(compute_playback_size(1280, 720), (960, 540));
         assert_eq!(compute_playback_size(1080, 1920), (540, 960));
         assert_eq!(compute_playback_size(640, 480), (960, 720));
+    }
+
+    #[test]
+    fn test_switch_duplicate_base_title_matching() {
+        let config = VideoRecorderConfig {
+            switch_on_focus: true,
+            switch_match_duplicate: true,
+            target_window: "MuMuPlayer (0x12345)".to_string(),
+            switch_windows: vec!["Roblox (0x67890)".to_string()],
+            ..Default::default()
+        };
+
+        let mut switch_base_titles: Vec<String> = Vec::new();
+        let add_base_title = |titles: &mut Vec<String>, sel: &str| {
+            let base = crate::window_list::selector_base_title(sel).trim();
+            if !base.is_empty() && !titles.iter().any(|t| t == base) {
+                titles.push(base.to_string());
+            }
+        };
+        add_base_title(&mut switch_base_titles, &config.target_window);
+        for s in &config.switch_windows {
+            add_base_title(&mut switch_base_titles, s);
+        }
+
+        assert_eq!(switch_base_titles, vec!["MuMuPlayer", "Roblox"]);
+
+        let new_instance_title_1 = "MuMuPlayer";
+        let new_instance_title_2 = "MuMuPlayer (0xABCDEF)";
+        let new_instance_base_1 = crate::window_list::selector_base_title(new_instance_title_1).trim();
+        let new_instance_base_2 = crate::window_list::selector_base_title(new_instance_title_2).trim();
+
+        assert!(switch_base_titles.iter().any(|t| t == new_instance_base_1 || t == new_instance_title_1.trim()));
+        assert!(switch_base_titles.iter().any(|t| t == new_instance_base_2 || t == new_instance_title_2.trim()));
+
+        let other_window = "Chrome (0x9999)";
+        let other_base = crate::window_list::selector_base_title(other_window).trim();
+        assert!(!switch_base_titles.iter().any(|t| t == other_base || t == other_window.trim()));
     }
 }
