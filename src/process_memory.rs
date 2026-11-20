@@ -1345,6 +1345,8 @@ impl Drop for ScanProcess {
 
 impl ScanProcess {
     fn open(pid: u32, write: bool) -> io::Result<Self> {
+        #[cfg(windows)]
+        let _ = crate::memory_debugger::debugger::enable_debug_privilege();
         let access = PROCESS_QUERY_LIMITED_INFORMATION
             | PROCESS_QUERY_INFORMATION
             | PROCESS_VM_READ

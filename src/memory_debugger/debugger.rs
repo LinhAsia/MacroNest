@@ -216,6 +216,7 @@ pub fn invalidate_process_modules_cache() {
 }
 
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
+    let _ = enable_debug_privilege();
     if let Ok(guard) = MODULE_CACHE.lock() {
         if let Some((timestamp, modules)) = guard.get(&pid) {
             if timestamp.elapsed() < Duration::from_secs(5) {

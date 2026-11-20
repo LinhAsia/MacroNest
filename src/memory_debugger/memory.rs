@@ -14,6 +14,7 @@ pub struct Process {
 
 impl Process {
     pub fn open(pid: u32) -> io::Result<Self> {
+        let _ = super::debugger::enable_debug_privilege();
         let handle =
             unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid) };
         if handle.is_null() {
