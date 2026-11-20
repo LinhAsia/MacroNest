@@ -32860,11 +32860,20 @@ mod windows_overlay {
         module_offset: usize,
         offsets: &[isize],
     ) -> Option<usize> {
-        let (module_base, module_size, pointer_width) = macro_memory_process_info(pid, module)?;
-        if module_offset >= module_size {
-            return None;
-        }
-        let mut address = module_base.checked_add(module_offset)?;
+        let (mut address, pointer_width) = if let Some((dll_name, symbol_name)) = module.split_once('!') {
+            let (_, _, pointer_width) = macro_memory_process_info(pid, dll_name.trim())?;
+            let sym_addr = crate::memory_debugger::debugger::resolve_module_export(pid, dll_name.trim(), symbol_name.trim()).ok()?;
+            (sym_addr.checked_add(module_offset)?, pointer_width)
+        } else if module.is_empty() {
+            let pointer_width = crate::memory_debugger::debugger::process_pointer_width(pid).unwrap_or(8);
+            (module_offset, pointer_width)
+        } else {
+            let (module_base, module_size, pointer_width) = macro_memory_process_info(pid, module)?;
+            if module_offset >= module_size {
+                return None;
+            }
+            (module_base.checked_add(module_offset)?, pointer_width)
+        };
         for offset in offsets {
             let next = match pointer_width {
                 4 => match crate::process_memory::read_scan_value(
@@ -33459,16 +33468,22 @@ mod windows_overlay {
         {
             let close = open + 1 + close_rel;
             let root = text[..open].trim();
-            let (module, module_offset_str) = root.split_once('+')?;
-            let module_offset = parse_memory_address(module_offset_str.trim())
-                .or_else(|| usize::from_str_radix(
-                    module_offset_str
-                        .trim()
-                        .strip_prefix("0x")
-                        .or_else(|| module_offset_str.trim().strip_prefix("0X"))
-                        .unwrap_or(module_offset_str.trim()),
-                    16,
-                ).ok())?;
+            let (module, module_offset) = if let Some((module, module_offset_str)) = root.split_once('+') {
+                let offset = parse_memory_address(module_offset_str.trim())
+                    .or_else(|| usize::from_str_radix(
+                        module_offset_str
+                            .trim()
+                            .strip_prefix("0x")
+                            .or_else(|| module_offset_str.trim().strip_prefix("0X"))
+                            .unwrap_or(module_offset_str.trim()),
+                        16,
+                    ).ok())?;
+                (module.trim(), offset)
+            } else if root.contains('!') {
+                (root, 0)
+            } else {
+                ("", parse_memory_address(root)?)
+            };
             let mut offsets = parse_pointer_offsets(&text[open + 1..close])?;
             let trailing = text[close + 1..].trim();
             if !trailing.is_empty() {
@@ -33479,12 +33494,12 @@ mod windows_overlay {
                 let last = offsets.last_mut()?;
                 *last = apply_offset_math_signed(*last, &compact)?;
             }
-            return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets)
+            return resolve_memory_pointer_entry(pid, module, module_offset, &offsets)
                 .map(|address| (pid, address));
         }
         if let Some((module, rest)) = text.split_once('+') {
             let module = module.trim();
-            if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+            if (module.contains('.') || module.contains('!')) && !module.starts_with("0x") && !module.starts_with("0X") {
                 let offset = parse_memory_address(rest.trim())
                     .or_else(|| usize::from_str_radix(
                         rest.trim()
@@ -33498,6 +33513,11 @@ mod windows_overlay {
                         return Some((pid, address));
                     }
                 }
+            }
+        }
+        if text.contains('!') && !text.starts_with("0x") && !text.starts_with("0X") {
+            if let Some(address) = resolve_memory_pointer_entry(pid, text.trim(), 0, &[]) {
+                return Some((pid, address));
             }
         }
         parse_memory_address(text).map(|address| (pid, address))
@@ -41866,6 +41886,24 @@ mod tests {
 
         let res_z = resolve_memory_action_target(Some(1234), "{test_base_addr} + 4", false);
         assert_eq!(res_z, Some((1234, 0x2813B5CC924)));
+    }
+
+    #[test]
+    fn test_resolve_memory_action_target_export_syntax() {
+        let _guard = super::windows_overlay::tests::TEST_MUTEX.lock().unwrap();
+        use super::windows_overlay::resolve_memory_action_target;
+
+        let pid = std::process::id();
+        let res = resolve_memory_action_target(Some(pid), "kernel32.dll!GetCurrentProcessId", false);
+        assert!(res.is_some(), "Should resolve kernel32.dll!GetCurrentProcessId");
+        let base_addr = res.unwrap().1;
+        assert_ne!(base_addr, 0);
+
+        let res_with_off = resolve_memory_action_target(Some(pid), "kernel32.dll!GetCurrentProcessId + 0x20", false);
+        assert_eq!(res_with_off, Some((pid, base_addr + 0x20)));
+
+        let res_with_hex = resolve_memory_action_target(Some(pid), "kernel32.dll!GetCurrentProcessId + A758", false);
+        assert_eq!(res_with_hex, Some((pid, base_addr + 0xA758)));
     }
 
     #[test]

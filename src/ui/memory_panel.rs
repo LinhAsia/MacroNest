@@ -25037,13 +25037,13 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
         let root = text[..offsets_start].trim();
         let (module_spec, base) = if let Some((module, module_offset_expr)) = root.split_once('+') {
             let module = module.trim();
-            if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+            if (module.contains('.') || module.contains('!')) && !module.starts_with("0x") && !module.starts_with("0X") {
                 let module_offset = parse_hex_offset_expr(module_offset_expr)?;
                 (Some((module.to_owned(), module_offset)), 0)
             } else {
                 (None, parse_memory_address(root)?)
             }
-        } else if root.contains('.') && !root.starts_with("0x") && !root.starts_with("0X") {
+        } else if (root.contains('.') || root.contains('!')) && !root.starts_with("0x") && !root.starts_with("0X") {
             (Some((root.to_owned(), 0)), 0)
         } else if root.is_empty() {
             (None, 0)
@@ -25057,9 +25057,15 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
             delta: None,
         })
     } else {
-        let (module, offset_expr) = text.split_once('+')?;
+        let (module, offset_expr) = if let Some(pair) = text.split_once('+') {
+            pair
+        } else if text.contains('!') && !text.starts_with("0x") && !text.starts_with("0X") {
+            (text, "0")
+        } else {
+            return None;
+        };
         let module = module.trim();
-        if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+        if (module.contains('.') || module.contains('!')) && !module.starts_with("0x") && !module.starts_with("0X") {
             let offset = parse_hex_offset_expr(offset_expr)?;
             Some(PointerSpec {
                 base: 0,

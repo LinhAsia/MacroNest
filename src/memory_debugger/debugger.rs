@@ -129,6 +129,10 @@ pub fn module_offset_for_address(pid: u32, address: usize) -> io::Result<(String
 }
 
 pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Result<usize> {
+    if let Some((mod_name, symbol)) = module.split_once('!') {
+        let func_addr = resolve_module_export(pid, mod_name.trim(), symbol.trim())?;
+        return Ok(func_addr.wrapping_add(offset));
+    }
     process_modules(pid)?
         .into_iter()
         .find(|(name, _, _)| name.eq_ignore_ascii_case(module))
@@ -206,6 +210,9 @@ pub fn invalidate_process_modules_cache() {
     if let Ok(mut guard) = POINTER_WIDTH_CACHE.lock() {
         guard.clear();
     }
+    if let Ok(mut guard) = EXPORT_CACHE.lock() {
+        guard.clear();
+    }
 }
 
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
@@ -262,6 +269,165 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
         guard.insert(pid, (Instant::now(), modules.clone()));
     }
     Ok(modules)
+}
+
+static EXPORT_CACHE: once_cell::sync::Lazy<
+    Mutex<std::collections::HashMap<(u32, String, String), (Instant, usize)>>,
+> = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+pub fn resolve_module_export(pid: u32, module: &str, symbol: &str) -> io::Result<usize> {
+    let cache_key = (pid, module.to_ascii_lowercase(), symbol.to_ascii_lowercase());
+    if let Ok(guard) = EXPORT_CACHE.lock() {
+        if let Some((timestamp, address)) = guard.get(&cache_key) {
+            if timestamp.elapsed() < Duration::from_secs(10) {
+                return Ok(*address);
+            }
+        }
+    }
+
+    let (base, size) = process_modules(pid)?
+        .into_iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(module))
+        .map(|(_, base, size)| (base, size))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("module '{module}' is not loaded")))?;
+
+    let process = Process::open(pid)?;
+
+    let mut dos_header = [0u8; 64];
+    process.read(base, &mut dos_header)?;
+    if &dos_header[0..2] != b"MZ" {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid DOS header"));
+    }
+    let e_lfanew = u32::from_le_bytes(dos_header[0x3C..0x40].try_into().unwrap()) as usize;
+    if e_lfanew.saturating_add(264) > size {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid e_lfanew offset"));
+    }
+
+    let mut nt_header = [0u8; 264];
+    process.read(base.wrapping_add(e_lfanew), &mut nt_header)?;
+    if &nt_header[0..4] != b"PE\0\0" {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid NT header"));
+    }
+
+    let magic = u16::from_le_bytes(nt_header[24..26].try_into().unwrap());
+    let export_dir_offset = match magic {
+        0x20B => 24 + 112,
+        0x10B => 24 + 96,
+        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "unknown PE optional header magic")),
+    };
+
+    let export_rva = u32::from_le_bytes(nt_header[export_dir_offset..export_dir_offset + 4].try_into().unwrap()) as usize;
+    let export_size = u32::from_le_bytes(nt_header[export_dir_offset + 4..export_dir_offset + 8].try_into().unwrap()) as usize;
+    if export_rva == 0 || export_size == 0 || export_rva >= size {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "module has no export directory"));
+    }
+
+    let buf_size = export_size.min(16 * 1024 * 1024);
+    let mut exp_buf = vec![0u8; buf_size];
+    process.read(base.wrapping_add(export_rva), &mut exp_buf)?;
+    if exp_buf.len() < 40 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "export directory too small"));
+    }
+
+    let number_of_names = u32::from_le_bytes(exp_buf[24..28].try_into().unwrap()) as usize;
+    let addr_of_functions = u32::from_le_bytes(exp_buf[28..32].try_into().unwrap()) as usize;
+    let addr_of_names = u32::from_le_bytes(exp_buf[32..36].try_into().unwrap()) as usize;
+    let addr_of_name_ordinals = u32::from_le_bytes(exp_buf[36..40].try_into().unwrap()) as usize;
+
+    let rva_to_buf = |rva: usize| -> Option<usize> {
+        let offset = rva.checked_sub(export_rva)?;
+        if offset < exp_buf.len() {
+            Some(offset)
+        } else {
+            None
+        }
+    };
+
+    let mut matched_idx = None;
+    let symbol_bytes = symbol.as_bytes();
+
+    for i in 0..number_of_names {
+        let name_rva_addr = addr_of_names + i * 4;
+        let name_rva = if let Some(buf_offset) = rva_to_buf(name_rva_addr) {
+            if buf_offset + 4 <= exp_buf.len() {
+                u32::from_le_bytes(exp_buf[buf_offset..buf_offset + 4].try_into().unwrap()) as usize
+            } else {
+                continue;
+            }
+        } else {
+            let mut buf = [0u8; 4];
+            if process.read(base.wrapping_add(name_rva_addr), &mut buf).is_err() {
+                continue;
+            }
+            u32::from_le_bytes(buf) as usize
+        };
+
+        if name_rva == 0 {
+            continue;
+        }
+
+        let is_match = if let Some(name_buf_offset) = rva_to_buf(name_rva) {
+            let slice = &exp_buf[name_buf_offset..];
+            let name_len = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
+            slice[..name_len].eq_ignore_ascii_case(symbol_bytes)
+        } else {
+            let mut name_buf = vec![0u8; symbol_bytes.len() + 1];
+            if process.read(base.wrapping_add(name_rva), &mut name_buf).is_ok() {
+                name_buf[..symbol_bytes.len()].eq_ignore_ascii_case(symbol_bytes) && name_buf[symbol_bytes.len()] == 0
+            } else {
+                false
+            }
+        };
+
+        if is_match {
+            matched_idx = Some(i);
+            break;
+        }
+    }
+
+    let idx = matched_idx.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("symbol '{symbol}' not found in module '{module}'"),
+        )
+    })?;
+
+    let ordinal_addr = addr_of_name_ordinals + idx * 2;
+    let ordinal = if let Some(buf_offset) = rva_to_buf(ordinal_addr) {
+        if buf_offset + 2 <= exp_buf.len() {
+            u16::from_le_bytes(exp_buf[buf_offset..buf_offset + 2].try_into().unwrap()) as usize
+        } else {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "ordinal read error"));
+        }
+    } else {
+        let mut buf = [0u8; 2];
+        process.read(base.wrapping_add(ordinal_addr), &mut buf)?;
+        u16::from_le_bytes(buf) as usize
+    };
+
+    let func_rva_addr = addr_of_functions + ordinal * 4;
+    let func_rva = if let Some(buf_offset) = rva_to_buf(func_rva_addr) {
+        if buf_offset + 4 <= exp_buf.len() {
+            u32::from_le_bytes(exp_buf[buf_offset..buf_offset + 4].try_into().unwrap()) as usize
+        } else {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "func_rva read error"));
+        }
+    } else {
+        let mut buf = [0u8; 4];
+        process.read(base.wrapping_add(func_rva_addr), &mut buf)?;
+        u32::from_le_bytes(buf) as usize
+    };
+
+    let target = base.wrapping_add(func_rva);
+
+    if let Ok(mut guard) = EXPORT_CACHE.lock() {
+        if guard.len() > 128 {
+            guard.retain(|_, (t, _)| t.elapsed() < Duration::from_secs(30));
+        }
+        guard.insert(cache_key, (Instant::now(), target));
+    }
+
+    Ok(target)
 }
 
 const ERROR_SEM_TIMEOUT: i32 = 121;
@@ -2124,5 +2290,18 @@ mod tests {
         );
         access_watch.stop();
         let _ = child.wait();
+    }
+
+    #[test]
+    fn test_resolve_module_export_kernel32() {
+        let pid = std::process::id();
+        let addr = resolve_module_export(pid, "kernel32.dll", "GetCurrentProcessId");
+        assert!(addr.is_ok(), "Failed to resolve GetCurrentProcessId: {:?}", addr.err());
+        let addr_val = addr.unwrap();
+        assert_ne!(addr_val, 0);
+
+        let addr_with_offset = resolve_module_offset(pid, "kernel32.dll!GetCurrentProcessId", 0x10);
+        assert!(addr_with_offset.is_ok());
+        assert_eq!(addr_with_offset.unwrap(), addr_val + 0x10);
     }
 }
