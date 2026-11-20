@@ -52,6 +52,7 @@ impl CrosshairApp {
         self.sync_quick_video_record_config();
         self.sync_quick_ocr_config();
         self.sync_quick_key_sound_config();
+        self.sync_quick_fps_overlay_config();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
         self.startup_overlay_sync_pending = false;
@@ -441,6 +442,30 @@ impl CrosshairApp {
                 enabled: config.0,
                 style: config.1,
                 volume: config.2,
+            },
+        );
+    }
+
+    pub(crate) fn sync_quick_fps_overlay_config(&mut self) {
+        let config = (
+            self.state.quick_fps_overlay_enabled,
+            self.state.quick_fps_overlay_target_window.clone(),
+            self.state.quick_fps_overlay_position,
+            self.state.quick_fps_overlay_font_size,
+            self.state.quick_fps_overlay_color,
+            self.state.quick_fps_overlay_format.clone(),
+        );
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            config,
+            &mut self.last_synced_quick_fps_overlay_config,
+            |config| OverlayCommand::UpdateQuickFpsOverlayConfig {
+                enabled: config.0,
+                target_window: config.1.clone(),
+                position: config.2,
+                font_size: config.3,
+                color: config.4,
+                format: config.5.clone(),
             },
         );
     }

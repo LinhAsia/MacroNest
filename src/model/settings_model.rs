@@ -46,6 +46,23 @@ fn default_memory_dump_range_count() -> usize {
     500
 }
 
+fn default_quick_fps_overlay_font_size() -> f32 {
+    20.0
+}
+
+fn default_quick_fps_overlay_color() -> RgbaColor {
+    RgbaColor {
+        r: 50,
+        g: 255,
+        b: 50,
+        a: 255,
+    }
+}
+
+fn default_quick_fps_overlay_format() -> String {
+    "{fps} FPS".to_string()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MemoryDumpStride {
     #[default]
@@ -1051,6 +1068,18 @@ pub struct AppState {
     pub quick_ocr_language: String,
     #[serde(default = "default_screen_draw_freeze")]
     pub quick_ocr_freeze: bool,
+    #[serde(default)]
+    pub quick_fps_overlay_enabled: bool,
+    #[serde(default)]
+    pub quick_fps_overlay_target_window: String,
+    #[serde(default)]
+    pub quick_fps_overlay_position: u8,
+    #[serde(default = "default_quick_fps_overlay_font_size")]
+    pub quick_fps_overlay_font_size: f32,
+    #[serde(default = "default_quick_fps_overlay_color")]
+    pub quick_fps_overlay_color: RgbaColor,
+    #[serde(default = "default_quick_fps_overlay_format")]
+    pub quick_fps_overlay_format: String,
 }
 
 impl AppState {
@@ -1426,6 +1455,12 @@ impl Default for AppState {
             quick_ocr_hotkey: None,
             quick_ocr_language: default_ocr_language_code(),
             quick_ocr_freeze: default_screen_draw_freeze(),
+            quick_fps_overlay_enabled: false,
+            quick_fps_overlay_target_window: String::new(),
+            quick_fps_overlay_position: 0,
+            quick_fps_overlay_font_size: default_quick_fps_overlay_font_size(),
+            quick_fps_overlay_color: default_quick_fps_overlay_color(),
+            quick_fps_overlay_format: default_quick_fps_overlay_format(),
         }
     }
 }
@@ -1435,6 +1470,19 @@ mod tests {
     use serde_json::json;
 
     use super::AppState;
+
+    #[test]
+    fn app_state_defaults_quick_fps_overlay() {
+        let state = AppState::default();
+        assert!(!state.quick_fps_overlay_enabled);
+        assert_eq!(state.quick_fps_overlay_target_window, "");
+        assert_eq!(state.quick_fps_overlay_position, 0);
+        assert_eq!(state.quick_fps_overlay_font_size, 20.0);
+        assert_eq!(state.quick_fps_overlay_format, "{fps} FPS");
+        assert_eq!(state.quick_fps_overlay_color.r, 50);
+        assert_eq!(state.quick_fps_overlay_color.g, 255);
+        assert_eq!(state.quick_fps_overlay_color.b, 50);
+    }
 
     #[test]
     fn app_state_defaults_memory_pinned_ui_scale() {

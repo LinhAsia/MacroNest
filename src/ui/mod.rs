@@ -157,6 +157,7 @@ enum TitlebarQuickActionKind {
     Ocr,
     ClearOverlays,
     KeySound,
+    FpsOverlay,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -724,6 +725,7 @@ pub struct CrosshairApp {
     )>,
     last_synced_quick_ocr_config: Option<(bool, Option<HotkeyBinding>, String, bool)>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
+    last_synced_quick_fps_overlay_config: Option<(bool, String, u8, f32, RgbaColor, String)>,
     last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
     last_synced_macros_master_enabled: Option<bool>,
     last_synced_windows_key_locked: Option<bool>,
@@ -1109,6 +1111,7 @@ impl CrosshairApp {
             last_synced_quick_screen_draw_config: None,
             last_synced_quick_ocr_config: None,
             last_synced_quick_key_sound_config: None,
+            last_synced_quick_fps_overlay_config: None,
             last_synced_macro_master_hotkey: None,
             last_synced_macros_master_enabled: None,
             last_synced_windows_key_locked: None,
@@ -4969,6 +4972,30 @@ impl CrosshairApp {
                     egui::Stroke::new(1.8, icon_color),
                 );
             }
+            TitlebarQuickActionKind::FpsOverlay => {
+                let frame_rect = rect.shrink2(vec2(16.0, 16.0));
+                painter.rect_stroke(
+                    frame_rect,
+                    4.0,
+                    egui::Stroke::new(1.8, icon_color),
+                    StrokeKind::Inside,
+                );
+                let center = frame_rect.center();
+                painter.text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    "FPS",
+                    egui::FontId::proportional(11.0),
+                    icon_color,
+                );
+                if active {
+                    let dot_rect = egui::Rect::from_center_size(
+                        pos2(frame_rect.right() - 2.0, frame_rect.top() + 2.0),
+                        vec2(6.0, 6.0),
+                    );
+                    painter.rect_filled(dot_rect, 3.0, Color32::from_rgb(0, 255, 128));
+                }
+            }
         }
     }
 
@@ -5238,6 +5265,7 @@ impl CrosshairApp {
                             | TitlebarQuickActionKind::WindowOpacity
                             | TitlebarQuickActionKind::Protractor
                             | TitlebarQuickActionKind::Ruler
+                            | TitlebarQuickActionKind::FpsOverlay
                     );
                     let (pos, pivot) = if action_kind == TitlebarQuickActionKind::VideoRecord {
                         (
@@ -8145,6 +8173,248 @@ impl CrosshairApp {
                                     if (self.state.quick_key_sound_volume - vol_before).abs() > 1e-4
                                     {
                                         self.sync_quick_key_sound_config();
+                                        self.persist_deferred(ui.ctx());
+                                    }
+
+                                    false
+                                })
+                                .inner
+                            },
+                        );
+                    },
+                );
+
+                // FpsOverlay Action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::FpsOverlay,
+                            self.state.quick_fps_overlay_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.quick_fps_overlay_enabled =
+                                !self.state.quick_fps_overlay_enabled;
+                            self.sync_quick_fps_overlay_config();
+                            self.persist();
+                            self.status = if self.state.quick_fps_overlay_enabled {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "FPS overlay enabled.",
+                                    "Bật hiển thị FPS.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "FPS overlay disabled.",
+                                    "Tắt hiển thị FPS.",
+                                )
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(6.0);
+                        let fps_label = Self::tr_lang(self.state.ui_language, "FPS Counter", "Hiện FPS");
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(fps_label).size(11.0).color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
+                                ));
+                            },
+                        );
+
+                        // Popup settings
+                        render_popup(
+                            ui,
+                            &button_response,
+                            TitlebarQuickActionKind::FpsOverlay,
+                            &mut |ui| {
+                                ui.vertical_centered(|ui| {
+                                    // Window selector
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Game Window",
+                                            "Cửa sổ game",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let selected_text = if self.state.quick_fps_overlay_target_window.is_empty() {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "(Focused Window)",
+                                            "(Cửa sổ hiện tại)",
+                                        )
+                                        .to_string()
+                                    } else {
+                                        Self::truncate_window_title(
+                                            &Self::quick_action_window_display(
+                                                &self.state.quick_fps_overlay_target_window,
+                                                &self.open_window_infos,
+                                            ),
+                                            24,
+                                        )
+                                    };
+                                    let response = egui::ComboBox::from_id_salt("quick-fps-overlay-target-window")
+                                        .width(180.0)
+                                        .selected_text(selected_text)
+                                        .show_ui(ui, |ui| {
+                                            let mut changed = false;
+                                            changed |= ui
+                                                .selectable_value(
+                                                    &mut self.state.quick_fps_overlay_target_window,
+                                                    String::new(),
+                                                    Self::tr_lang(
+                                                        self.state.ui_language,
+                                                        "(Focused Window)",
+                                                        "(Cửa sổ hiện tại)",
+                                                    ),
+                                                )
+                                                .clicked();
+                                            for window in &self.open_window_infos {
+                                                changed |= ui
+                                                    .selectable_value(
+                                                        &mut self.state.quick_fps_overlay_target_window,
+                                                        window.selector.clone(),
+                                                        Self::truncate_window_title(
+                                                            &Self::quick_action_window_display(
+                                                                &window.selector,
+                                                                &self.open_window_infos,
+                                                            ),
+                                                            24,
+                                                        ),
+                                                    )
+                                                    .clicked();
+                                            }
+                                            changed
+                                        });
+                                    if response.response.clicked() {
+                                        self.ensure_open_windows_ready(true);
+                                    }
+                                    if response.inner.unwrap_or(false) {
+                                        self.sync_quick_fps_overlay_config();
+                                        self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+
+                                    // Position selector
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Position",
+                                            "Vị trí",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let pos_names = [
+                                        Self::tr_lang(self.state.ui_language, "Top-Right", "Góc trên phải"),
+                                        Self::tr_lang(self.state.ui_language, "Top-Left", "Góc trên trái"),
+                                        Self::tr_lang(self.state.ui_language, "Bottom-Right", "Góc dưới phải"),
+                                        Self::tr_lang(self.state.ui_language, "Bottom-Left", "Góc dưới trái"),
+                                    ];
+                                    let current_pos_idx = (self.state.quick_fps_overlay_position as usize).min(3);
+                                    let pos_response = egui::ComboBox::from_id_salt("quick-fps-overlay-position")
+                                        .width(180.0)
+                                        .selected_text(pos_names[current_pos_idx])
+                                        .show_ui(ui, |ui| {
+                                            let mut changed = false;
+                                            for (idx, name) in pos_names.iter().enumerate() {
+                                                changed |= ui
+                                                    .selectable_value(
+                                                        &mut self.state.quick_fps_overlay_position,
+                                                        idx as u8,
+                                                        *name,
+                                                    )
+                                                    .clicked();
+                                            }
+                                            changed
+                                        });
+                                    if pos_response.inner.unwrap_or(false) {
+                                        self.sync_quick_fps_overlay_config();
+                                        self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+
+                                    // Font size slider
+                                    let font_size_changed = ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.state.quick_fps_overlay_font_size,
+                                                12.0..=48.0,
+                                            )
+                                            .text(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Font Size",
+                                                "Cỡ chữ",
+                                            ))
+                                            .suffix("px"),
+                                        )
+                                        .changed();
+                                    if font_size_changed {
+                                        self.sync_quick_fps_overlay_config();
+                                        self.persist_deferred(ui.ctx());
+                                    }
+
+                                    ui.add_space(4.0);
+
+                                    // Text color
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Text Color",
+                                                "Màu chữ",
+                                            ))
+                                            .size(11.0),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                let color_changed = Self::edit_rgba_color(
+                                                    ui,
+                                                    &mut self.state.quick_fps_overlay_color,
+                                                )
+                                                .changed();
+                                                if color_changed {
+                                                    self.sync_quick_fps_overlay_config();
+                                                    self.persist_deferred(ui.ctx());
+                                                }
+                                            },
+                                        );
+                                    });
+
+                                    ui.add_space(4.0);
+
+                                    // Text format
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Format ({fps})",
+                                            "Định dạng ({fps})",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let format_changed = ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut self.state.quick_fps_overlay_format)
+                                                .desired_width(180.0)
+                                                .hint_text("{fps} FPS"),
+                                        )
+                                        .changed();
+                                    if format_changed {
+                                        self.sync_quick_fps_overlay_config();
                                         self.persist_deferred(ui.ctx());
                                     }
 

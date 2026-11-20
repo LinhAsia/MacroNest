@@ -2165,6 +2165,14 @@ mod windows_overlay {
             language: String,
             freeze: bool,
         },
+        UpdateQuickFpsOverlayConfig {
+            enabled: bool,
+            target_window: String,
+            position: u8,
+            font_size: f32,
+            color: RgbaColor,
+            format: String,
+        },
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3168,6 +3176,14 @@ mod windows_overlay {
         interactive_pin_enabled: bool,
         protractor_hwnd: HWND,
         active_focus_highlight_hwnd: Option<HWND>,
+        fps_overlay_hwnd: HWND,
+        quick_fps_overlay_enabled: bool,
+        quick_fps_overlay_target_window: String,
+        quick_fps_overlay_position: u8,
+        quick_fps_overlay_font_size: f32,
+        quick_fps_overlay_color: crate::model::RgbaColor,
+        quick_fps_overlay_format: String,
+        fps_tracker: Option<WgcFpsTracker>,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -3963,6 +3979,24 @@ mod windows_overlay {
                 None,
             )?;
             INTERACTIVE_PIN_OVERLAY_HWND.store(interactive_pin_hwnd.0 as isize, Ordering::Relaxed);
+            let fps_overlay_hwnd = CreateWindowExW(
+                WS_EX_LAYERED
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE
+                    | WS_EX_TRANSPARENT,
+                w!("CrosshairToolbox"),
+                w!("CrosshairFpsOverlay"),
+                WS_POPUP,
+                0,
+                0,
+                160,
+                64,
+                None,
+                None,
+                Some(instance),
+                None,
+            )?;
             let tray_menu = CreatePopupMenu()?;
             let _ = AppendMenuW(tray_menu, MF_STRING, MENU_SHOW, w!("Open settings"));
             let _ = AppendMenuW(tray_menu, MF_SEPARATOR, 0, PCWSTR::null());
@@ -4050,6 +4084,19 @@ mod windows_overlay {
                 interactive_pin_enabled: false,
                 protractor_hwnd,
                 active_focus_highlight_hwnd: None,
+                fps_overlay_hwnd,
+                quick_fps_overlay_enabled: false,
+                quick_fps_overlay_target_window: String::new(),
+                quick_fps_overlay_position: 0,
+                quick_fps_overlay_font_size: 20.0,
+                quick_fps_overlay_color: crate::model::RgbaColor {
+                    r: 50,
+                    g: 255,
+                    b: 50,
+                    a: 255,
+                },
+                quick_fps_overlay_format: "{fps} FPS".to_string(),
+                fps_tracker: None,
             });
             let _controller_hwnd = CreateWindowExW(
                 WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
@@ -4670,6 +4717,10 @@ mod windows_overlay {
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
 
+                    if runtime.quick_fps_overlay_enabled {
+                        update_quick_fps_overlay(runtime);
+                    }
+
                     if runtime.native_focus_highlight_enabled
                         && focus_highlight_decoration_is_animated(
                             runtime.focus_highlight_decoration,
@@ -4765,6 +4816,10 @@ mod windows_overlay {
 
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
+
+                    if runtime.quick_fps_overlay_enabled {
+                        update_quick_fps_overlay(runtime);
+                    }
                     refresh_overlay_timer(hwnd, runtime);
                 }
 
@@ -10671,6 +10726,33 @@ mod windows_overlay {
                         );
                     }
                     let _ = refresh_screen_draw_overlay(runtime);
+                }
+
+                OverlayCommand::UpdateQuickFpsOverlayConfig {
+                    enabled,
+                    target_window,
+                    position,
+                    font_size,
+                    color,
+                    format,
+                } => {
+                    let target_changed = runtime.quick_fps_overlay_target_window != target_window;
+                    let enabled_changed = runtime.quick_fps_overlay_enabled != enabled;
+                    runtime.quick_fps_overlay_enabled = enabled;
+                    runtime.quick_fps_overlay_target_window = target_window;
+                    runtime.quick_fps_overlay_position = position;
+                    runtime.quick_fps_overlay_font_size = font_size;
+                    runtime.quick_fps_overlay_color = color;
+                    runtime.quick_fps_overlay_format = format;
+
+                    if !enabled {
+                        runtime.fps_tracker = None;
+                        let _ = ShowWindow(runtime.fps_overlay_hwnd, SW_HIDE);
+                    } else if target_changed || enabled_changed {
+                        runtime.fps_tracker = None;
+                    }
+                    refresh_overlay_timer(hwnd, runtime);
+                    update_quick_fps_overlay(runtime);
                 }
 
                 OverlayCommand::SetInteractivePinEnabled(enabled) => {
@@ -18467,6 +18549,10 @@ mod windows_overlay {
     }
 
     fn desired_timer_interval_ms(runtime: &Runtime) -> u32 {
+        if runtime.quick_fps_overlay_enabled {
+            return 200;
+        }
+
         if runtime.interactive_pin_enabled {
             return 30;
         }
@@ -40648,6 +40734,403 @@ mod windows_overlay {
         )
     }
 
+    struct WgcFpsTracker {
+        target_hwnd: HWND,
+        counter: Arc<std::sync::atomic::AtomicU32>,
+        session: windows::Graphics::Capture::GraphicsCaptureSession,
+        frame_pool: windows::Graphics::Capture::Direct3D11CaptureFramePool,
+        token: i64,
+        last_calc_time: Instant,
+        last_count: u32,
+        current_fps: u32,
+    }
+
+    impl Drop for WgcFpsTracker {
+        fn drop(&mut self) {
+            let _ = self.frame_pool.RemoveFrameArrived(self.token);
+            let _ = self.session.Close();
+            let _ = self.frame_pool.Close();
+        }
+    }
+
+    impl WgcFpsTracker {
+        fn new(hwnd: HWND) -> Option<Self> {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            use windows::{
+                Foundation::TypedEventHandler,
+                Graphics::{
+                    Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem},
+                    DirectX::{DirectXPixelFormat, Direct3D11::IDirect3DDevice},
+                },
+                Win32::{
+                    Foundation::HMODULE,
+                    Graphics::{
+                        Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+                        Direct3D11::{
+                            D3D11CreateDevice, ID3D11Device, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                            D3D11_SDK_VERSION,
+                        },
+                        Dxgi::IDXGIDevice,
+                    },
+                    System::WinRT::{
+                        Direct3D11::CreateDirect3D11DeviceFromDXGIDevice,
+                        Graphics::Capture::IGraphicsCaptureItemInterop,
+                    },
+                },
+                core::Interface,
+            };
+
+            unsafe {
+                if !IsWindow(Some(hwnd)).as_bool() {
+                    return None;
+                }
+            }
+
+            let mut d3d_device: Option<ID3D11Device> = None;
+            unsafe {
+                D3D11CreateDevice(
+                    None,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&mut d3d_device),
+                    None,
+                    None,
+                )
+                .ok()?;
+            }
+            let d3d_device = d3d_device?;
+            let dxgi_device: IDXGIDevice = d3d_device.cast().ok()?;
+            let dxgi_device_winrt =
+                unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device).ok()? };
+            let dxgi_device_winrt: IDirect3DDevice = dxgi_device_winrt.cast().ok()?;
+
+            let interop =
+                windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().ok()?;
+            let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(hwnd).ok()? };
+            let size = item.Size().ok()?;
+            if size.Width <= 0 || size.Height <= 0 {
+                return None;
+            }
+
+            let frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
+                &dxgi_device_winrt,
+                DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                2,
+                size,
+            )
+            .ok()?;
+
+            let counter = Arc::new(AtomicU32::new(0));
+            let c = counter.clone();
+            let handler = TypedEventHandler::<Direct3D11CaptureFramePool, windows::core::IInspectable>::new(
+                move |pool, _| {
+                    if let Some(pool) = pool.as_ref() {
+                        let _ = pool.TryGetNextFrame();
+                    }
+                    c.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                },
+            );
+            let token = frame_pool.FrameArrived(&handler).ok()?;
+
+            let session = frame_pool.CreateCaptureSession(&item).ok()?;
+            let _ = session.SetIsBorderRequired(false);
+            let _ = session.SetIsCursorCaptureEnabled(false);
+            session.StartCapture().ok()?;
+
+            Some(Self {
+                target_hwnd: hwnd,
+                counter,
+                session,
+                frame_pool,
+                token,
+                last_calc_time: Instant::now(),
+                last_count: 0,
+                current_fps: 0,
+            })
+        }
+
+        fn update_fps(&mut self) -> u32 {
+            use std::sync::atomic::Ordering;
+            let now = Instant::now();
+            let elapsed = now.duration_since(self.last_calc_time).as_secs_f64();
+            if elapsed >= 0.4 {
+                let count = self.counter.load(Ordering::Relaxed);
+                let frames = count.saturating_sub(self.last_count);
+                self.current_fps = ((frames as f64) / elapsed).round() as u32;
+                self.last_count = count;
+                self.last_calc_time = now;
+            }
+            self.current_fps
+        }
+    }
+
+    unsafe fn paint_fps_overlay(
+        hwnd: HWND,
+        text: &str,
+        font_size: f32,
+        text_color: &crate::model::RgbaColor,
+        position: u8,
+        target_rect: &RECT,
+    ) -> Result<()> {
+        let font_size = font_size.clamp(10.0, 72.0);
+        let screen_dc = GetDC(None);
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+
+        let font_name = "Segoe UI"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let font = CreateFontW(
+            -(font_size.round() as i32).max(1),
+            0,
+            0,
+            0,
+            FW_BOLD.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,
+            FF_DONTCARE.0 as u32,
+            PCWSTR(font_name.as_ptr()),
+        );
+        let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+
+        let mut wide = text
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut text_size = SIZE::default();
+        let _ = GetTextExtentPoint32W(
+            mem_dc,
+            &wide[..wide.len().saturating_sub(1)],
+            &mut text_size,
+        );
+
+        let pad_x = 10;
+        let pad_y = 5;
+        let width = (text_size.cx + pad_x * 2).max(36);
+        let height = (text_size.cy + pad_y * 2).max(20);
+
+        let bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits_ptr: *mut c_void = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(
+            Some(mem_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits_ptr,
+            None,
+            0,
+        )?;
+        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+
+        let bg_alpha = 190u8;
+        let bg_r = 18u8;
+        let bg_g = 18u8;
+        let bg_b = 18u8;
+        let bytes_len = (width as usize) * (height as usize) * 4;
+        let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, bytes_len);
+        let radius = 6.0f32;
+
+        for py in 0..height {
+            for px in 0..width {
+                let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
+                let px_f = px as f32 + 0.5;
+                let py_f = py as f32 + 0.5;
+                let inner_left = radius;
+                let inner_right = width as f32 - radius;
+                let inner_top = radius;
+                let inner_bottom = height as f32 - radius;
+                let inside = if (px_f >= inner_left && px_f <= inner_right)
+                    || (py_f >= inner_top && py_f <= inner_bottom)
+                {
+                    true
+                } else {
+                    let corner_x = if px_f < inner_left { inner_left } else { inner_right };
+                    let corner_y = if py_f < inner_top { inner_top } else { inner_bottom };
+                    let dx = px_f - corner_x;
+                    let dy = py_f - corner_y;
+                    (dx * dx) + (dy * dy) <= radius * radius
+                };
+
+                if inside {
+                    pixels[index] = bg_b;
+                    pixels[index + 1] = bg_g;
+                    pixels[index + 2] = bg_r;
+                    pixels[index + 3] = bg_alpha;
+                } else {
+                    pixels[index] = 0;
+                    pixels[index + 1] = 0;
+                    pixels[index + 2] = 0;
+                    pixels[index + 3] = 0;
+                }
+            }
+        }
+
+        let _ = SetBkMode(mem_dc, TRANSPARENT);
+        let _ = SetTextColor(
+            mem_dc,
+            COLORREF(
+                ((text_color.b as u32) << 16)
+                    | ((text_color.g as u32) << 8)
+                    | (text_color.r as u32),
+            ),
+        );
+
+        let mut text_rect = RECT {
+            left: pad_x,
+            top: pad_y,
+            right: width - pad_x,
+            bottom: height - pad_y,
+        };
+        let _ = DrawTextW(
+            mem_dc,
+            &mut wide,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
+
+        let text_alpha = text_color.a.max(1);
+        for py in 0..height {
+            for px in 0..width {
+                let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
+                let chunk = &mut pixels[index..index + 4];
+                let looks_like_bg = chunk[0] == bg_b
+                    && chunk[1] == bg_g
+                    && chunk[2] == bg_r
+                    && chunk[3] == bg_alpha;
+                let alpha = if looks_like_bg {
+                    bg_alpha
+                } else if chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0 && chunk[3] == 0 {
+                    0
+                } else {
+                    text_alpha
+                };
+                chunk[3] = alpha;
+                chunk[0] = ((chunk[0] as u32 * alpha as u32) / 255) as u8;
+                chunk[1] = ((chunk[1] as u32 * alpha as u32) / 255) as u8;
+                chunk[2] = ((chunk[2] as u32 * alpha as u32) / 255) as u8;
+            }
+        }
+
+        let margin = 14;
+        let (window_x, window_y) = match position {
+            1 => (target_rect.left + margin, target_rect.top + margin),
+            2 => (target_rect.right - width - margin, target_rect.bottom - height - margin),
+            3 => (target_rect.left + margin, target_rect.bottom - height - margin),
+            _ => (target_rect.right - width - margin, target_rect.top + margin),
+        };
+
+        let mut pt_src = POINT::default();
+        let mut pt_dst = POINT {
+            x: window_x,
+            y: window_y,
+        };
+        let mut size_wnd = SIZE {
+            cx: width,
+            cy: height,
+        };
+        let mut blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+
+        let _ = UpdateLayeredWindow(
+            hwnd,
+            Some(screen_dc),
+            Some(&mut pt_dst),
+            Some(&mut size_wnd),
+            Some(mem_dc),
+            Some(&mut pt_src),
+            COLORREF(0),
+            Some(&mut blend),
+            ULW_ALPHA,
+        );
+
+        let _ = SelectObject(mem_dc, old_font);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        let _ = SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(None, screen_dc);
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+
+        Ok(())
+    }
+
+    unsafe fn update_quick_fps_overlay(runtime: &mut Runtime) {
+        if !runtime.quick_fps_overlay_enabled {
+            if runtime.fps_tracker.is_some() {
+                runtime.fps_tracker = None;
+                let _ = ShowWindow(runtime.fps_overlay_hwnd, SW_HIDE);
+            }
+            return;
+        }
+
+        let target = if runtime.quick_fps_overlay_target_window.trim().is_empty() {
+            GetForegroundWindow()
+        } else {
+            crate::window_list::find_window_handle(Some(runtime.quick_fps_overlay_target_window.trim()))
+                .unwrap_or_default()
+        };
+
+        if target.0.is_null() || !IsWindow(Some(target)).as_bool() || IsIconic(target).as_bool() {
+            let _ = ShowWindow(runtime.fps_overlay_hwnd, SW_HIDE);
+            return;
+        }
+
+        if runtime.fps_tracker.as_ref().map_or(true, |t| t.target_hwnd != target) {
+            runtime.fps_tracker = WgcFpsTracker::new(target);
+        }
+
+        let fps = if let Some(tracker) = runtime.fps_tracker.as_mut() {
+            tracker.update_fps()
+        } else {
+            0
+        };
+
+        let mut rect = RECT::default();
+        if GetWindowRect(target, &mut rect).is_err() {
+            let _ = ShowWindow(runtime.fps_overlay_hwnd, SW_HIDE);
+            return;
+        }
+
+        let fps_str = fps.to_string();
+        let display_text = if runtime.quick_fps_overlay_format.contains("{fps}") {
+            runtime.quick_fps_overlay_format.replace("{fps}", &fps_str)
+        } else {
+            format!("{} {}", fps_str, runtime.quick_fps_overlay_format.trim())
+        };
+
+        let _ = paint_fps_overlay(
+            runtime.fps_overlay_hwnd,
+            &display_text,
+            runtime.quick_fps_overlay_font_size,
+            &runtime.quick_fps_overlay_color,
+            runtime.quick_fps_overlay_position,
+            &rect,
+        );
+    }
+
     unsafe fn paint_timer_hwnd(hwnd: HWND, preset: &TimerPreset, text: &str) -> Result<()> {
         let window_x = preset.x.max(0);
         let window_y = preset.y.max(0);
@@ -41542,6 +42025,14 @@ mod fallback {
             hotkey: Option<HotkeyBinding>,
             language: String,
             freeze: bool,
+        },
+        UpdateQuickFpsOverlayConfig {
+            enabled: bool,
+            target_window: String,
+            position: u8,
+            font_size: f32,
+            color: RgbaColor,
+            format: String,
         },
         SetUiVisible(bool),
         SetTrayIconVisible(bool),
