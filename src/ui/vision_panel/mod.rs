@@ -1368,6 +1368,7 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
                 | VisionCaptureTarget::QuickActionsColor
                 | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                | VisionCaptureTarget::QuickActionsFpsOverlayPosition
                 | VisionCaptureTarget::PinPresetColor(_)
                 | VisionCaptureTarget::PinPresetRegion(_)
                 | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -1654,6 +1655,7 @@ impl CrosshairApp {
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
                         | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                        | VisionCaptureTarget::QuickActionsFpsOverlayPosition
                         | VisionCaptureTarget::PinPresetColor(_)
                         | VisionCaptureTarget::PinPresetRegion(_)
                         | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -1770,6 +1772,25 @@ impl CrosshairApp {
                             }
                             _ => {
                                 format!("Key display position set: X={}, Y={}", screen_x, screen_y)
+                            }
+                        };
+                    }
+                    VisionCaptureTarget::QuickActionsFpsOverlayPosition => {
+                        self.clear_image_search_capture_state();
+                        self.state.quick_fps_overlay_custom_x = screen_x;
+                        self.state.quick_fps_overlay_custom_y = screen_y;
+                        self.state.quick_fps_overlay_position = 4;
+                        self.sync_quick_fps_overlay_config();
+                        self.persist();
+                        self.status = match self.state.ui_language {
+                            crate::model::UiLanguage::Vietnamese => {
+                                format!(
+                                    "Da dat vi tri FPS: X={}, Y={}",
+                                    screen_x, screen_y
+                                )
+                            }
+                            _ => {
+                                format!("FPS overlay position set: X={}, Y={}", screen_x, screen_y)
                             }
                         };
                     }
@@ -2023,6 +2044,7 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
             | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::QuickActionsFpsOverlayPosition
             | VisionCaptureTarget::PinPresetColor(_)
             | VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2246,6 +2268,9 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 "Key display position does not support color picking.".to_owned()
             }
+            VisionCaptureTarget::QuickActionsFpsOverlayPosition => {
+                "FPS overlay position does not support color picking.".to_owned()
+            }
 
             VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2295,6 +2320,7 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
             | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::QuickActionsFpsOverlayPosition
             | VisionCaptureTarget::PinPresetColor(_)
             | VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)

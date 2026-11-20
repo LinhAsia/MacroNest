@@ -214,6 +214,7 @@ pub(crate) enum VisionCaptureTarget {
     QuickActionsCoordinates,
     QuickActionsColor,
     QuickActionsKeyDisplayPosition,
+    QuickActionsFpsOverlayPosition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -725,7 +726,20 @@ pub struct CrosshairApp {
     )>,
     last_synced_quick_ocr_config: Option<(bool, Option<HotkeyBinding>, String, bool)>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
-    last_synced_quick_fps_overlay_config: Option<(bool, String, u8, f32, RgbaColor, String)>,
+    last_synced_quick_fps_overlay_config: Option<(
+        bool,
+        String,
+        u8,
+        f32,
+        RgbaColor,
+        String,
+        bool,
+        f32,
+        i32,
+        i32,
+        i32,
+        i32,
+    )>,
     last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
     last_synced_macros_master_enabled: Option<bool>,
     last_synced_windows_key_locked: Option<bool>,
@@ -8322,8 +8336,9 @@ impl CrosshairApp {
                                         Self::tr_lang(self.state.ui_language, "Top-Left", "Góc trên trái"),
                                         Self::tr_lang(self.state.ui_language, "Bottom-Right", "Góc dưới phải"),
                                         Self::tr_lang(self.state.ui_language, "Bottom-Left", "Góc dưới trái"),
+                                        Self::tr_lang(self.state.ui_language, "Custom (X, Y)", "Tùy chỉnh (X, Y)"),
                                     ];
-                                    let current_pos_idx = (self.state.quick_fps_overlay_position as usize).min(3);
+                                    let current_pos_idx = (self.state.quick_fps_overlay_position as usize).min(4);
                                     let pos_response = egui::ComboBox::from_id_salt("quick-fps-overlay-position")
                                         .width(180.0)
                                         .selected_text(pos_names[current_pos_idx])
@@ -8343,6 +8358,108 @@ impl CrosshairApp {
                                     if pos_response.inner.unwrap_or(false) {
                                         self.sync_quick_fps_overlay_config();
                                         self.persist();
+                                    }
+
+                                    // Offset controls if one of the 4 corners is selected
+                                    if self.state.quick_fps_overlay_position < 4 {
+                                        ui.add_space(2.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("X:").size(10.0));
+                                            let changed_x = ui.add(
+                                                egui::DragValue::new(&mut self.state.quick_fps_overlay_offset_x)
+                                                    .range(0..=800)
+                                                    .suffix("px"),
+                                            ).changed();
+                                            ui.label(RichText::new("Y:").size(10.0));
+                                            let changed_y = ui.add(
+                                                egui::DragValue::new(&mut self.state.quick_fps_overlay_offset_y)
+                                                    .range(0..=800)
+                                                    .suffix("px"),
+                                            ).changed();
+                                            if changed_x || changed_y {
+                                                self.sync_quick_fps_overlay_config();
+                                                self.persist_deferred(ui.ctx());
+                                            }
+                                        });
+                                    } else {
+                                        // Custom coordinates & Pick button
+                                        ui.add_space(2.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("X:").size(10.0));
+                                            let changed_x = ui.add(
+                                                egui::DragValue::new(&mut self.state.quick_fps_overlay_custom_x)
+                                                    .range(-3840..=7680)
+                                                    .suffix("px"),
+                                            ).changed();
+                                            ui.label(RichText::new("Y:").size(10.0));
+                                            let changed_y = ui.add(
+                                                egui::DragValue::new(&mut self.state.quick_fps_overlay_custom_y)
+                                                    .range(-2160..=4320)
+                                                    .suffix("px"),
+                                            ).changed();
+                                            if changed_x || changed_y {
+                                                self.sync_quick_fps_overlay_config();
+                                                self.persist_deferred(ui.ctx());
+                                            }
+                                        });
+
+                                        ui.add_space(2.0);
+                                        let is_pick_active = self.vision_capture_active
+                                            && self.vision_capture_target
+                                                == Some(VisionCaptureTarget::QuickActionsFpsOverlayPosition);
+                                        let pick_text = if is_pick_active {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Click screen to set...",
+                                                "Click màn hình để đặt...",
+                                            )
+                                        } else {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Pick on screen",
+                                                "Chọn trên màn hình",
+                                            )
+                                        };
+                                        if ui.button(pick_text).clicked() {
+                                            self.begin_image_search_capture(
+                                                ui.ctx(),
+                                                VisionCaptureTarget::QuickActionsFpsOverlayPosition,
+                                                VisionCaptureMode::SinglePixel,
+                                            );
+                                        }
+                                    }
+
+                                    ui.add_space(4.0);
+
+                                    // Background toggle & opacity
+                                    let bg_toggled = ui.checkbox(
+                                        &mut self.state.quick_fps_overlay_show_bg,
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Background badge",
+                                            "Khung nền",
+                                        ),
+                                    ).changed();
+                                    if bg_toggled {
+                                        self.sync_quick_fps_overlay_config();
+                                        self.persist();
+                                    }
+                                    if self.state.quick_fps_overlay_show_bg {
+                                        let mut opacity_pct = (self.state.quick_fps_overlay_bg_opacity * 100.0).round() as u8;
+                                        let opacity_changed = ui.add(
+                                            egui::Slider::new(&mut opacity_pct, 0..=100)
+                                                .text(Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Bg Opacity",
+                                                    "Độ mờ nền",
+                                                ))
+                                                .suffix("%"),
+                                        ).changed();
+                                        if opacity_changed {
+                                            self.state.quick_fps_overlay_bg_opacity = (opacity_pct as f32) / 100.0;
+                                            self.sync_quick_fps_overlay_config();
+                                            self.persist_deferred(ui.ctx());
+                                        }
                                     }
 
                                     ui.add_space(4.0);
@@ -17369,6 +17486,22 @@ impl eframe::App for CrosshairApp {
                                         }
                                         _ => {
                                             format!("Key display position set: X={}, Y={}", x, y)
+                                        }
+                                    };
+                                }
+                                VisionCaptureTarget::QuickActionsFpsOverlayPosition => {
+                                    self.clear_image_search_capture_state();
+                                    self.state.quick_fps_overlay_custom_x = x;
+                                    self.state.quick_fps_overlay_custom_y = y;
+                                    self.state.quick_fps_overlay_position = 4;
+                                    self.sync_quick_fps_overlay_config();
+                                    self.persist();
+                                    self.status = match self.state.ui_language {
+                                        crate::model::UiLanguage::Vietnamese => {
+                                            format!("Da dat vi tri FPS: X={}, Y={}", x, y)
+                                        }
+                                        _ => {
+                                            format!("FPS overlay position set: X={}, Y={}", x, y)
                                         }
                                     };
                                 }

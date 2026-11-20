@@ -454,6 +454,12 @@ impl CrosshairApp {
             self.state.quick_fps_overlay_font_size,
             self.state.quick_fps_overlay_color,
             self.state.quick_fps_overlay_format.clone(),
+            self.state.quick_fps_overlay_show_bg,
+            self.state.quick_fps_overlay_bg_opacity,
+            self.state.quick_fps_overlay_offset_x,
+            self.state.quick_fps_overlay_offset_y,
+            self.state.quick_fps_overlay_custom_x,
+            self.state.quick_fps_overlay_custom_y,
         );
         Self::sync_overlay_command_with_state_if_changed(
             &self.overlay_tx,
@@ -466,6 +472,12 @@ impl CrosshairApp {
                 font_size: config.3,
                 color: config.4,
                 format: config.5.clone(),
+                show_bg: config.6,
+                bg_opacity: config.7,
+                offset_x: config.8,
+                offset_y: config.9,
+                custom_x: config.10,
+                custom_y: config.11,
             },
         );
     }

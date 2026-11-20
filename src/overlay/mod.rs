@@ -74,7 +74,7 @@ mod windows_overlay {
                     BITMAPINFOHEADER, BLACKNESS, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
                     ClientToScreen, ScreenToClient, CombineRgn, CreateBitmap, CreateCompatibleDC, CreateDIBSection,
                     CreateFontW, CreateRectRgn, CreateRoundRectRgn, DEFAULT_CHARSET,
-                    DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
+                    DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
                     DrawTextW, EndPaint, FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
                     GetTextExtentPoint32W, GetTextMetricsW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST,
                     MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PatBlt,
@@ -2172,6 +2172,12 @@ mod windows_overlay {
             font_size: f32,
             color: RgbaColor,
             format: String,
+            show_bg: bool,
+            bg_opacity: f32,
+            offset_x: i32,
+            offset_y: i32,
+            custom_x: i32,
+            custom_y: i32,
         },
     }
 
@@ -3183,6 +3189,12 @@ mod windows_overlay {
         quick_fps_overlay_font_size: f32,
         quick_fps_overlay_color: crate::model::RgbaColor,
         quick_fps_overlay_format: String,
+        quick_fps_overlay_show_bg: bool,
+        quick_fps_overlay_bg_opacity: f32,
+        quick_fps_overlay_offset_x: i32,
+        quick_fps_overlay_offset_y: i32,
+        quick_fps_overlay_custom_x: i32,
+        quick_fps_overlay_custom_y: i32,
         fps_tracker: Option<WgcFpsTracker>,
     }
 
@@ -4096,6 +4108,12 @@ mod windows_overlay {
                     a: 255,
                 },
                 quick_fps_overlay_format: "{fps} FPS".to_string(),
+                quick_fps_overlay_show_bg: true,
+                quick_fps_overlay_bg_opacity: 0.75,
+                quick_fps_overlay_offset_x: 14,
+                quick_fps_overlay_offset_y: 14,
+                quick_fps_overlay_custom_x: 100,
+                quick_fps_overlay_custom_y: 100,
                 fps_tracker: None,
             });
             let _controller_hwnd = CreateWindowExW(
@@ -10735,6 +10753,12 @@ mod windows_overlay {
                     font_size,
                     color,
                     format,
+                    show_bg,
+                    bg_opacity,
+                    offset_x,
+                    offset_y,
+                    custom_x,
+                    custom_y,
                 } => {
                     let target_changed = runtime.quick_fps_overlay_target_window != target_window;
                     let enabled_changed = runtime.quick_fps_overlay_enabled != enabled;
@@ -10744,6 +10768,12 @@ mod windows_overlay {
                     runtime.quick_fps_overlay_font_size = font_size;
                     runtime.quick_fps_overlay_color = color;
                     runtime.quick_fps_overlay_format = format;
+                    runtime.quick_fps_overlay_show_bg = show_bg;
+                    runtime.quick_fps_overlay_bg_opacity = bg_opacity;
+                    runtime.quick_fps_overlay_offset_x = offset_x;
+                    runtime.quick_fps_overlay_offset_y = offset_y;
+                    runtime.quick_fps_overlay_custom_x = custom_x;
+                    runtime.quick_fps_overlay_custom_y = custom_y;
 
                     if !enabled {
                         runtime.fps_tracker = None;
@@ -40874,6 +40904,12 @@ mod windows_overlay {
         font_size: f32,
         text_color: &crate::model::RgbaColor,
         position: u8,
+        show_bg: bool,
+        bg_opacity: f32,
+        offset_x: i32,
+        offset_y: i32,
+        custom_x: i32,
+        custom_y: i32,
         target_rect: &RECT,
     ) -> Result<()> {
         let font_size = font_size.clamp(10.0, 72.0);
@@ -40906,17 +40942,22 @@ mod windows_overlay {
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
-        let mut text_size = SIZE::default();
-        let _ = GetTextExtentPoint32W(
-            mem_dc,
-            &wide[..wide.len().saturating_sub(1)],
-            &mut text_size,
-        );
 
-        let pad_x = 10;
-        let pad_y = 5;
-        let width = (text_size.cx + pad_x * 2).max(36);
-        let height = (text_size.cy + pad_y * 2).max(20);
+        // Calculate exact bounding rectangle of the formatted text
+        let mut calc_rect = RECT::default();
+        let _ = DrawTextW(
+            mem_dc,
+            &mut wide,
+            &mut calc_rect,
+            DT_CALCRECT | DT_SINGLELINE,
+        );
+        let text_w = (calc_rect.right - calc_rect.left).max(1);
+        let text_h = (calc_rect.bottom - calc_rect.top).max(1);
+
+        let pad_x = 14;
+        let pad_y = 6;
+        let width = text_w + pad_x * 2 + 8;
+        let height = text_h + pad_y * 2 + 4;
 
         let bitmap_info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -40941,7 +40982,11 @@ mod windows_overlay {
         )?;
         let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
 
-        let bg_alpha = 190u8;
+        let bg_alpha = if show_bg {
+            (bg_opacity.clamp(0.0, 1.0) * 255.0).round() as u8
+        } else {
+            0u8
+        };
         let bg_r = 18u8;
         let bg_g = 18u8;
         let bg_b = 18u8;
@@ -40970,7 +41015,7 @@ mod windows_overlay {
                     (dx * dx) + (dy * dy) <= radius * radius
                 };
 
-                if inside {
+                if inside && bg_alpha > 0 {
                     pixels[index] = bg_b;
                     pixels[index + 1] = bg_g;
                     pixels[index + 2] = bg_r;
@@ -40995,16 +41040,16 @@ mod windows_overlay {
         );
 
         let mut text_rect = RECT {
-            left: pad_x,
-            top: pad_y,
-            right: width - pad_x,
-            bottom: height - pad_y,
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
         };
         let _ = DrawTextW(
             mem_dc,
             &mut wide,
             &mut text_rect,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP,
         );
 
         let text_alpha = text_color.a.max(1);
@@ -41012,13 +41057,14 @@ mod windows_overlay {
             for px in 0..width {
                 let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
                 let chunk = &mut pixels[index..index + 4];
-                let looks_like_bg = chunk[0] == bg_b
+                let is_pure_bg = chunk[0] == bg_b
                     && chunk[1] == bg_g
                     && chunk[2] == bg_r
-                    && chunk[3] == bg_alpha;
-                let alpha = if looks_like_bg {
+                    && bg_alpha > 0;
+                let is_transparent = chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0;
+                let alpha = if is_pure_bg {
                     bg_alpha
-                } else if chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0 && chunk[3] == 0 {
+                } else if is_transparent {
                     0
                 } else {
                     text_alpha
@@ -41030,12 +41076,12 @@ mod windows_overlay {
             }
         }
 
-        let margin = 14;
         let (window_x, window_y) = match position {
-            1 => (target_rect.left + margin, target_rect.top + margin),
-            2 => (target_rect.right - width - margin, target_rect.bottom - height - margin),
-            3 => (target_rect.left + margin, target_rect.bottom - height - margin),
-            _ => (target_rect.right - width - margin, target_rect.top + margin),
+            1 => (target_rect.left + offset_x, target_rect.top + offset_y),
+            2 => (target_rect.right - width - offset_x, target_rect.bottom - height - offset_y),
+            3 => (target_rect.left + offset_x, target_rect.bottom - height - offset_y),
+            4 => (custom_x, custom_y),
+            _ => (target_rect.right - width - offset_x, target_rect.top + offset_y),
         };
 
         let mut pt_src = POINT::default();
@@ -41086,11 +41132,18 @@ mod windows_overlay {
             return;
         }
 
+        let fg = GetForegroundWindow();
         let target = if runtime.quick_fps_overlay_target_window.trim().is_empty() {
-            GetForegroundWindow()
+            fg
         } else {
-            crate::window_list::find_window_handle(Some(runtime.quick_fps_overlay_target_window.trim()))
-                .unwrap_or_default()
+            let specific = crate::window_list::find_window_handle(Some(runtime.quick_fps_overlay_target_window.trim()))
+                .unwrap_or_default();
+            // Requirement: When a specific window is selected, if user tabs to another window, do NOT show FPS!
+            if specific.0.is_null() || fg != specific {
+                let _ = ShowWindow(runtime.fps_overlay_hwnd, SW_HIDE);
+                return;
+            }
+            specific
         };
 
         if target.0.is_null() || !IsWindow(Some(target)).as_bool() || IsIconic(target).as_bool() {
@@ -41127,6 +41180,12 @@ mod windows_overlay {
             runtime.quick_fps_overlay_font_size,
             &runtime.quick_fps_overlay_color,
             runtime.quick_fps_overlay_position,
+            runtime.quick_fps_overlay_show_bg,
+            runtime.quick_fps_overlay_bg_opacity,
+            runtime.quick_fps_overlay_offset_x,
+            runtime.quick_fps_overlay_offset_y,
+            runtime.quick_fps_overlay_custom_x,
+            runtime.quick_fps_overlay_custom_y,
             &rect,
         );
     }
@@ -42033,6 +42092,12 @@ mod fallback {
             font_size: f32,
             color: RgbaColor,
             format: String,
+            show_bg: bool,
+            bg_opacity: f32,
+            offset_x: i32,
+            offset_y: i32,
+            custom_x: i32,
+            custom_y: i32,
         },
         SetUiVisible(bool),
         SetTrayIconVisible(bool),

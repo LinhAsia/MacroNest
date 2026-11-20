@@ -63,6 +63,26 @@ fn default_quick_fps_overlay_format() -> String {
     "{fps} FPS".to_string()
 }
 
+fn default_quick_fps_overlay_show_bg() -> bool {
+    true
+}
+
+fn default_quick_fps_overlay_bg_opacity() -> f32 {
+    0.75
+}
+
+fn default_quick_fps_overlay_offset() -> i32 {
+    14
+}
+
+fn default_quick_fps_overlay_custom_x() -> i32 {
+    100
+}
+
+fn default_quick_fps_overlay_custom_y() -> i32 {
+    100
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MemoryDumpStride {
     #[default]
@@ -1080,6 +1100,18 @@ pub struct AppState {
     pub quick_fps_overlay_color: RgbaColor,
     #[serde(default = "default_quick_fps_overlay_format")]
     pub quick_fps_overlay_format: String,
+    #[serde(default = "default_quick_fps_overlay_show_bg")]
+    pub quick_fps_overlay_show_bg: bool,
+    #[serde(default = "default_quick_fps_overlay_bg_opacity")]
+    pub quick_fps_overlay_bg_opacity: f32,
+    #[serde(default = "default_quick_fps_overlay_offset")]
+    pub quick_fps_overlay_offset_x: i32,
+    #[serde(default = "default_quick_fps_overlay_offset")]
+    pub quick_fps_overlay_offset_y: i32,
+    #[serde(default = "default_quick_fps_overlay_custom_x")]
+    pub quick_fps_overlay_custom_x: i32,
+    #[serde(default = "default_quick_fps_overlay_custom_y")]
+    pub quick_fps_overlay_custom_y: i32,
 }
 
 impl AppState {
@@ -1461,6 +1493,12 @@ impl Default for AppState {
             quick_fps_overlay_font_size: default_quick_fps_overlay_font_size(),
             quick_fps_overlay_color: default_quick_fps_overlay_color(),
             quick_fps_overlay_format: default_quick_fps_overlay_format(),
+            quick_fps_overlay_show_bg: default_quick_fps_overlay_show_bg(),
+            quick_fps_overlay_bg_opacity: default_quick_fps_overlay_bg_opacity(),
+            quick_fps_overlay_offset_x: default_quick_fps_overlay_offset(),
+            quick_fps_overlay_offset_y: default_quick_fps_overlay_offset(),
+            quick_fps_overlay_custom_x: default_quick_fps_overlay_custom_x(),
+            quick_fps_overlay_custom_y: default_quick_fps_overlay_custom_y(),
         }
     }
 }
@@ -1482,6 +1520,12 @@ mod tests {
         assert_eq!(state.quick_fps_overlay_color.r, 50);
         assert_eq!(state.quick_fps_overlay_color.g, 255);
         assert_eq!(state.quick_fps_overlay_color.b, 50);
+        assert!(state.quick_fps_overlay_show_bg);
+        assert_eq!(state.quick_fps_overlay_bg_opacity, 0.75);
+        assert_eq!(state.quick_fps_overlay_offset_x, 14);
+        assert_eq!(state.quick_fps_overlay_offset_y, 14);
+        assert_eq!(state.quick_fps_overlay_custom_x, 100);
+        assert_eq!(state.quick_fps_overlay_custom_y, 100);
     }
 
     #[test]
