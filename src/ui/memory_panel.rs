@@ -1281,6 +1281,11 @@ pub(crate) struct MemoryPanelState {
     pub(crate) batch_replace_status: String,
     pub(crate) batch_replace_filter: String,
     pub(crate) android_bridge: crate::android_bridge::AndroidBridgeState,
+    pub(crate) hex_calc_open: bool,
+    pub(crate) hex_calc_expr: String,
+    pub(crate) hex_calc_val_a: String,
+    pub(crate) hex_calc_val_b: String,
+    pub(crate) hex_calc_op: u8,
 }
 
 impl Default for MemoryPanelState {
@@ -1431,6 +1436,11 @@ impl Default for MemoryPanelState {
             batch_replace_status: String::new(),
             batch_replace_filter: String::new(),
             android_bridge: crate::android_bridge::AndroidBridgeState::new(),
+            hex_calc_open: false,
+            hex_calc_expr: String::new(),
+            hex_calc_val_a: String::new(),
+            hex_calc_val_b: String::new(),
+            hex_calc_op: 0,
             address_list_filter_mode: false,
             address_list_base_values: HashMap::new(),
             address_list_base_texts: HashMap::new(),
@@ -1810,6 +1820,13 @@ impl CrosshairApp {
                 }
                 ui.menu_button(self.tr("Tools", "Công cụ"), |ui| {
                     if ui
+                        .button(self.tr("Hex calculator", "Máy tính Hex"))
+                        .clicked()
+                    {
+                        self.memory_panel.hex_calc_open = true;
+                        ui.close();
+                    }
+                    if ui
                         .button(self.tr("Batch update bases", "Đổi base hàng loạt"))
                         .clicked()
                     {
@@ -1987,6 +2004,15 @@ impl CrosshairApp {
             Self::render_batch_replace_dialog,
         ) {
             self.memory_panel.batch_replace_open = false;
+        }
+        if !self.render_detached_memory_popup(
+            ui.ctx(),
+            "memory-hex-calculator-host",
+            "Hex calculator",
+            self.memory_panel.hex_calc_open,
+            Self::render_hex_calculator_dialog,
+        ) {
+            self.memory_panel.hex_calc_open = false;
         }
         let stable_active = self.memory_panel.stable_pointer_dialog.is_some();
         if !self.render_detached_memory_popup(
@@ -2264,6 +2290,15 @@ impl CrosshairApp {
             Self::render_batch_replace_dialog,
         ) {
             self.memory_panel.batch_replace_open = false;
+        }
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-hex-calculator-host",
+            "Hex calculator",
+            self.memory_panel.hex_calc_open,
+            Self::render_hex_calculator_dialog,
+        ) {
+            self.memory_panel.hex_calc_open = false;
         }
         let stable_active = self.memory_panel.stable_pointer_dialog.is_some();
         if !self.render_detached_memory_popup(
@@ -6402,6 +6437,257 @@ impl CrosshairApp {
                 }
             });
     }
+
+    fn sync_hex_calc_from_two_values(&mut self) {
+        let a = self.memory_panel.hex_calc_val_a.trim();
+        let b = self.memory_panel.hex_calc_val_b.trim();
+        if a.is_empty() {
+            return;
+        }
+        let a_fmt = if a.starts_with("0x") || a.starts_with("0X") {
+            a.to_string()
+        } else {
+            format!("0x{}", a)
+        };
+        let op_str = if self.memory_panel.hex_calc_op == 0 { "-" } else { "+" };
+        if b.is_empty() {
+            self.memory_panel.hex_calc_expr = a_fmt;
+        } else {
+            let b_fmt = if b.starts_with("0x") || b.starts_with("0X") {
+                b.to_string()
+            } else {
+                format!("0x{}", b)
+            };
+            self.memory_panel.hex_calc_expr = format!("{} {} {}", a_fmt, op_str, b_fmt);
+        }
+    }
+
+    fn render_hex_calculator_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.memory_panel.hex_calc_open {
+            return;
+        }
+
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(self.tr(
+                "Hexadecimal and decimal address offset calculator.",
+                "Máy tính địa chỉ hex, offset và số học.",
+            ))
+            .weak(),
+        );
+        ui.separator();
+
+        egui::Grid::new("hex_calc_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new(self.tr("Expression:", "Biểu thức:")).strong());
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.memory_panel.hex_calc_expr)
+                            .hint_text("e.g. 0x258D23EBB54 - 0x84")
+                            .desired_width(260.0),
+                    );
+                    if ui.button(self.tr("Clear", "Xóa")).clicked() {
+                        self.memory_panel.hex_calc_expr.clear();
+                        self.memory_panel.hex_calc_val_a.clear();
+                        self.memory_panel.hex_calc_val_b.clear();
+                    }
+                });
+                ui.end_row();
+
+                ui.label(RichText::new(self.tr("Value A:", "Giá trị A:")).strong());
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.memory_panel.hex_calc_val_a)
+                                .hint_text("e.g. 258D23EBB54")
+                                .desired_width(170.0),
+                        )
+                        .changed()
+                    {
+                        self.sync_hex_calc_from_two_values();
+                    }
+                    if ui.selectable_label(self.memory_panel.hex_calc_op == 0, "-").clicked() {
+                        self.memory_panel.hex_calc_op = 0;
+                        self.sync_hex_calc_from_two_values();
+                    }
+                    if ui.selectable_label(self.memory_panel.hex_calc_op == 1, "+").clicked() {
+                        self.memory_panel.hex_calc_op = 1;
+                        self.sync_hex_calc_from_two_values();
+                    }
+                });
+                ui.end_row();
+
+                ui.label(RichText::new(self.tr("Value B:", "Giá trị B:")).strong());
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.memory_panel.hex_calc_val_b)
+                                .hint_text("e.g. 84 or 0x84")
+                                .desired_width(170.0),
+                        )
+                        .changed()
+                    {
+                        self.sync_hex_calc_from_two_values();
+                    }
+                });
+                ui.end_row();
+            });
+
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(self.tr("Quick:", "Nhanh:")).weak());
+            for offset_str in &["-0x84", "-0x14", "+0x08", "+0x10", "+0x70", "+0x84", "+0x8C"] {
+                if ui.small_button(*offset_str).clicked() {
+                    let base = self.memory_panel.hex_calc_expr.trim();
+                    if base.is_empty() {
+                        if !self.memory_panel.hex_calc_val_a.is_empty() {
+                            let val_a = self.memory_panel.hex_calc_val_a.trim().trim_start_matches("0x").trim_start_matches("0X");
+                            self.memory_panel.hex_calc_expr = format!("0x{} {}", val_a, offset_str);
+                        } else {
+                            self.memory_panel.hex_calc_expr = offset_str.to_string();
+                        }
+                    } else {
+                        self.memory_panel.hex_calc_expr = format!("{} {}", base, offset_str);
+                    }
+                }
+            }
+        });
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        let expr_to_eval = self.memory_panel.hex_calc_expr.trim();
+        if !expr_to_eval.is_empty() {
+            match Self::eval_hex_calc_expression(expr_to_eval) {
+                Ok(res) => {
+                    egui::Grid::new("hex_calc_result_grid")
+                        .num_columns(3)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Hex:").strong());
+                            ui.label(RichText::new(format!("0x{:X}", res)).monospace().strong());
+                            ui.horizontal(|ui| {
+                                if ui.small_button(self.tr("Copy", "Sao chép")).clicked() {
+                                    ui.ctx().copy_text(format!("0x{:X}", res));
+                                }
+                                if ui.small_button(self.tr("Use as Value A", "Dùng làm A")).clicked() {
+                                    self.memory_panel.hex_calc_val_a = format!("{:X}", res);
+                                    self.memory_panel.hex_calc_expr = format!("0x{:X}", res);
+                                    self.memory_panel.hex_calc_val_b.clear();
+                                }
+                            });
+                            ui.end_row();
+
+                            ui.label(RichText::new("Dec:").strong());
+                            ui.label(RichText::new(format!("{}", res)).monospace());
+                            if ui.small_button(self.tr("Copy", "Sao chép")).clicked() {
+                                ui.ctx().copy_text(format!("{}", res));
+                            }
+                            ui.end_row();
+
+                            let signed = res as i64;
+                            if signed < 0 {
+                                ui.label(RichText::new("Signed:").strong());
+                                ui.label(
+                                    RichText::new(format!("-0x{:X}  ({})", signed.unsigned_abs(), signed))
+                                        .monospace(),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                }
+                Err(_) => {
+                    ui.label(
+                        RichText::new(self.tr(
+                            "Invalid expression or hexadecimal format",
+                            "Biểu thức hoặc định dạng hex không hợp lệ",
+                        ))
+                        .weak(),
+                    );
+                }
+            }
+        } else {
+            ui.label(
+                RichText::new(self.tr(
+                    "Enter an expression (e.g. 0x258D23EBB54 - 0x84) above",
+                    "Nhập biểu thức (ví dụ 0x258D23EBB54 - 0x84) ở trên",
+                ))
+                .weak(),
+            );
+        }
+    }
+
+fn eval_hex_calc_token(token: &str) -> Option<u64> {
+    let s = token.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        return u64::from_str_radix(rest.trim(), 16).ok();
+    }
+    if let Some(rest) = s.strip_prefix('#') {
+        return rest.trim().parse::<u64>().ok();
+    }
+    if let Some(rest) = s.strip_suffix('h').or_else(|| s.strip_suffix('H')) {
+        return u64::from_str_radix(rest.trim(), 16).ok();
+    }
+    if let Ok(v) = u64::from_str_radix(s, 16) {
+        return Some(v);
+    }
+    s.parse::<u64>().ok()
+}
+
+fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Err(());
+    }
+
+    let mut total: u64 = 0;
+    let mut current_op = '+';
+    let mut current_token = String::new();
+    let mut has_token = false;
+
+    for ch in expr.chars() {
+        if ch == '+' || ch == '-' {
+            let t = current_token.trim();
+            if !t.is_empty() {
+                let val = Self::eval_hex_calc_token(t).ok_or(())?;
+                total = if current_op == '+' {
+                    total.wrapping_add(val)
+                } else {
+                    total.wrapping_sub(val)
+                };
+                has_token = true;
+            }
+            current_op = ch;
+            current_token.clear();
+        } else {
+            current_token.push(ch);
+        }
+    }
+
+    let t = current_token.trim();
+    if !t.is_empty() {
+        let val = Self::eval_hex_calc_token(t).ok_or(())?;
+        total = if current_op == '+' {
+            total.wrapping_add(val)
+        } else {
+            total.wrapping_sub(val)
+        };
+        has_token = true;
+    }
+
+    if has_token {
+        Ok(total)
+    } else {
+        Err(())
+    }
+}
 
     fn render_android_bridge_popup(&mut self, ctx: &egui::Context) {
         if !self.render_detached_memory_popup(
@@ -26448,6 +26734,34 @@ pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String,
 mod tests {
     use super::*;
     use crate::memory_debugger::debugger::normalize_instruction;
+
+    #[test]
+    fn test_hex_calculator_eval() {
+        assert_eq!(
+            CrosshairApp::eval_hex_calc_expression("0x258D23EBB54 - 0x84"),
+            Ok(0x258D23EBAD0)
+        );
+        assert_eq!(
+            CrosshairApp::eval_hex_calc_expression("0x258D23EBAD0 + 0x8C"),
+            Ok(0x258D23EBB5C)
+        );
+        assert_eq!(
+            CrosshairApp::eval_hex_calc_expression("258D23EBB54 - 84"),
+            Ok(0x258D23EBAD0)
+        );
+        assert_eq!(
+            CrosshairApp::eval_hex_calc_expression("0x100 - 0x20 + 0x10"),
+            Ok(0xF0)
+        );
+        assert_eq!(
+            CrosshairApp::eval_hex_calc_expression("84h + 10h"),
+            Ok(0x94)
+        );
+        assert_eq!(
+            CrosshairApp::eval_hex_calc_expression("#100 + #50"),
+            Ok(150)
+        );
+    }
 
     #[test]
     fn test_emulator_target_and_data_watch_recognition() {
