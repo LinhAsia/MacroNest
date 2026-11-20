@@ -18580,7 +18580,7 @@ mod windows_overlay {
 
     fn desired_timer_interval_ms(runtime: &Runtime) -> u32 {
         if runtime.quick_fps_overlay_enabled {
-            return 200;
+            return 100;
         }
 
         if runtime.interactive_pin_enabled {
@@ -40769,6 +40769,9 @@ mod windows_overlay {
         counter: Arc<std::sync::atomic::AtomicU32>,
         session: windows::Graphics::Capture::GraphicsCaptureSession,
         frame_pool: windows::Graphics::Capture::Direct3D11CaptureFramePool,
+        item: windows::Graphics::Capture::GraphicsCaptureItem,
+        device: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice,
+        last_size: windows::Graphics::SizeInt32,
         token: i64,
         last_calc_time: Instant,
         last_count: u32,
@@ -40848,7 +40851,7 @@ mod windows_overlay {
             let frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
                 &dxgi_device_winrt,
                 DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                2,
+                8,
                 size,
             )
             .ok()?;
@@ -40858,9 +40861,17 @@ mod windows_overlay {
             let handler = TypedEventHandler::<Direct3D11CaptureFramePool, windows::core::IInspectable>::new(
                 move |pool, _| {
                     if let Some(pool) = pool.as_ref() {
-                        let _ = pool.TryGetNextFrame();
+                        let mut drained = 0;
+                        while let Ok(frame) = pool.TryGetNextFrame() {
+                            let _ = frame.Close();
+                            drained += 1;
+                        }
+                        if drained > 0 {
+                            c.fetch_add(drained, Ordering::Relaxed);
+                        } else {
+                            c.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
-                    c.fetch_add(1, Ordering::Relaxed);
                     Ok(())
                 },
             );
@@ -40876,6 +40887,9 @@ mod windows_overlay {
                 counter,
                 session,
                 frame_pool,
+                item,
+                device: dxgi_device_winrt,
+                last_size: size,
                 token,
                 last_calc_time: Instant::now(),
                 last_count: 0,
@@ -40885,9 +40899,26 @@ mod windows_overlay {
 
         fn update_fps(&mut self) -> u32 {
             use std::sync::atomic::Ordering;
+            use windows::Graphics::DirectX::DirectXPixelFormat;
+
+            // Handle window resize dynamically without dropping capture
+            if let Ok(new_size) = self.item.Size() {
+                if new_size.Width > 0 && new_size.Height > 0
+                    && (new_size.Width != self.last_size.Width || new_size.Height != self.last_size.Height)
+                {
+                    let _ = self.frame_pool.Recreate(
+                        &self.device,
+                        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                        8,
+                        new_size,
+                    );
+                    self.last_size = new_size;
+                }
+            }
+
             let now = Instant::now();
             let elapsed = now.duration_since(self.last_calc_time).as_secs_f64();
-            if elapsed >= 0.4 {
+            if elapsed >= 0.25 {
                 let count = self.counter.load(Ordering::Relaxed);
                 let frames = count.saturating_sub(self.last_count);
                 self.current_fps = ((frames as f64) / elapsed).round() as u32;
