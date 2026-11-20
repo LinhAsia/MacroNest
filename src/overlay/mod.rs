@@ -40880,6 +40880,7 @@ mod windows_overlay {
             let session = frame_pool.CreateCaptureSession(&item).ok()?;
             let _ = session.SetIsBorderRequired(false);
             let _ = session.SetIsCursorCaptureEnabled(false);
+            let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: 10_000 });
             session.StartCapture().ok()?;
 
             Some(Self {
