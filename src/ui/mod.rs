@@ -10589,6 +10589,7 @@ impl CrosshairApp {
             MacroAction::SetDataTable => "SetDataTable",
             MacroAction::ReadMemory => "ReadMemory",
             MacroAction::WriteMemory => "WriteMemory",
+            MacroAction::AutoAssembler => "AutoAssembler",
             MacroAction::ScanAob => "ScanAOB",
             MacroAction::ScanInstruction => "ScanInstruction",
             MacroAction::StopInstructionScan => "StopInstructionScan",
@@ -10909,6 +10910,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.write_memory",
                 "Write one value to an address in the selected process.",
             ),
+            MacroAction::AutoAssembler => (
+                "macro_action_tooltip.auto_assembler",
+                "Execute Cheat Engine Auto Assembler script ([ENABLE] / [DISABLE]).",
+            ),
             MacroAction::ScanAob => (
                 "macro_action_tooltip.scan_aob",
                 "Scan memory for an Array of Bytes (AOB) pattern and save the address to a variable.",
@@ -11097,6 +11102,7 @@ impl CrosshairApp {
             MacroAction::SetDataTable => 0xe228,
             MacroAction::ReadMemory => 0xe30a,
             MacroAction::WriteMemory => 0xe3c9,
+            MacroAction::AutoAssembler => 0xe86f,
             MacroAction::ScanAob => 0xe8b6,
             MacroAction::ScanInstruction => 0xe8b6,
             MacroAction::StopInstructionScan => 0xe047,
@@ -11273,6 +11279,7 @@ impl CrosshairApp {
             MacroAction::SetDataTable => ("macro_action_short_label.set_data_table", "DataTable"),
             MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadMemory"),
             MacroAction::WriteMemory => ("macro_action_short_label.write_memory", "WriteMemory"),
+            MacroAction::AutoAssembler => ("macro_action_short_label.auto_assembler", "AutoASM"),
             MacroAction::ScanAob => ("macro_action_short_label.scan_aob", "ScanAOB"),
             MacroAction::ScanInstruction => ("macro_action_short_label.scan_instruction", "ScanInst"),
             MacroAction::StopInstructionScan => ("macro_action_short_label.stop_instruction_scan", "StopScan"),
@@ -11547,6 +11554,7 @@ impl CrosshairApp {
                 | MacroAction::SetDataTable
                 | MacroAction::ReadMemory
                 | MacroAction::WriteMemory
+                | MacroAction::AutoAssembler
                 | MacroAction::ScanAob
                 | MacroAction::ScanInstruction
                 | MacroAction::BackgroundClick

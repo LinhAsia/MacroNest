@@ -20,6 +20,9 @@ const PROCESS_VM_OPERATION: u32 = 0x0008;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
 const MEM_COMMIT: u32 = 0x1000;
+const MEM_RESERVE: u32 = 0x2000;
+const MEM_RELEASE: u32 = 0x8000;
+const MEM_FREE: u32 = 0x10000;
 const MEM_PRIVATE: u32 = 0x0002_0000;
 const MEM_MAPPED: u32 = 0x0004_0000;
 const MEM_IMAGE: u32 = 0x0100_0000;
@@ -1630,6 +1633,120 @@ pub fn write_code_bytes(pid: u32, address: usize, bytes: &[u8]) -> io::Result<()
         Err(io::Error::last_os_error())
     } else {
         Ok(())
+    }
+}
+
+pub fn allocate_memory_near(pid: u32, near_address: usize, size: usize) -> io::Result<usize> {
+    let process = ScanProcess::open(pid, true)?;
+    let page_size = 4096;
+    let size = (size + page_size - 1) & !(page_size - 1);
+
+    // Try scanning downward first within 2GB (0x7000_0000)
+    let min_addr = near_address.saturating_sub(0x7000_0000).max(0x10000);
+    let max_addr = near_address.saturating_add(0x7000_0000);
+
+    let mut current = (near_address.saturating_sub(65536)) & !0xFFFF;
+    while current >= min_addr {
+        let mut information = MaybeUninit::<MemoryBasicInformation>::uninit();
+        let queried = unsafe {
+            VirtualQueryEx(
+                process.handle,
+                current as *const c_void,
+                information.as_mut_ptr(),
+                size_of::<MemoryBasicInformation>(),
+            )
+        };
+        if queried != 0 {
+            let info = unsafe { information.assume_init() };
+            if info.state == MEM_FREE && info.region_size >= size {
+                let allocated = unsafe {
+                    VirtualAllocEx(
+                        process.handle,
+                        info.base_address,
+                        size,
+                        MEM_COMMIT | MEM_RESERVE,
+                        PAGE_EXECUTE_READWRITE,
+                    )
+                };
+                if !allocated.is_null() {
+                    return Ok(allocated as usize);
+                }
+            }
+            let base = info.base_address as usize;
+            if base <= 65536 {
+                break;
+            }
+            current = base.saturating_sub(65536) & !0xFFFF;
+        } else {
+            current = current.saturating_sub(65536);
+        }
+    }
+
+    // Try scanning upward
+    let mut current = (near_address + 65536) & !0xFFFF;
+    while current <= max_addr {
+        let mut information = MaybeUninit::<MemoryBasicInformation>::uninit();
+        let queried = unsafe {
+            VirtualQueryEx(
+                process.handle,
+                current as *const c_void,
+                information.as_mut_ptr(),
+                size_of::<MemoryBasicInformation>(),
+            )
+        };
+        if queried != 0 {
+            let info = unsafe { information.assume_init() };
+            if info.state == MEM_FREE && info.region_size >= size {
+                let allocated = unsafe {
+                    VirtualAllocEx(
+                        process.handle,
+                        info.base_address,
+                        size,
+                        MEM_COMMIT | MEM_RESERVE,
+                        PAGE_EXECUTE_READWRITE,
+                    )
+                };
+                if !allocated.is_null() {
+                    return Ok(allocated as usize);
+                }
+            }
+            current = (info.base_address as usize + info.region_size + 65535) & !0xFFFF;
+        } else {
+            current += 65536;
+        }
+    }
+
+    // Fallback: system picks address
+    let allocated = unsafe {
+        VirtualAllocEx(
+            process.handle,
+            std::ptr::null_mut(),
+            size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_EXECUTE_READWRITE,
+        )
+    };
+    if !allocated.is_null() {
+        Ok(allocated as usize)
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+pub fn free_allocated_memory(pid: u32, address: usize) -> io::Result<()> {
+    let process = ScanProcess::open(pid, true)?;
+    let ok = unsafe {
+        VirtualFreeEx(
+            process.handle,
+            address as *mut c_void,
+            0,
+            MEM_RELEASE,
+        )
+    };
+    if ok != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
@@ -5696,7 +5813,7 @@ fn claim_result_slots(total: &AtomicUsize, requested: usize, limit: usize) -> us
 pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::Result<String> {
     let mut bytes = [0u8; 8];
     let width = match value_type {
-        MemoryValueType::I8 | MemoryValueType::Bytes => 1,
+        MemoryValueType::I8 | MemoryValueType::Bytes | MemoryValueType::AutoAssembler => 1,
         MemoryValueType::I16 => 2,
         MemoryValueType::I32 | MemoryValueType::F32 => 4,
         MemoryValueType::I64 | MemoryValueType::F64 => 8,
@@ -5712,6 +5829,7 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
     Ok(match value_type {
         MemoryValueType::I8 => i8::from_le_bytes(bytes[..1].try_into().unwrap()).to_string(),
         MemoryValueType::Bytes => format!("{:02X}", bytes[0]),
+        MemoryValueType::AutoAssembler => format!("{:02X}", bytes[0]),
         MemoryValueType::I16 => i16::from_le_bytes(bytes[..2].try_into().unwrap()).to_string(),
         MemoryValueType::I32 => i32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
         MemoryValueType::F32 => f32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
@@ -5749,6 +5867,19 @@ unsafe extern "system" {
         size: usize,
         new_protect: u32,
         old_protect: *mut u32,
+    ) -> i32;
+    fn VirtualAllocEx(
+        process: *mut c_void,
+        address: *mut c_void,
+        size: usize,
+        allocation_type: u32,
+        protect: u32,
+    ) -> *mut c_void;
+    fn VirtualFreeEx(
+        process: *mut c_void,
+        address: *mut c_void,
+        size: usize,
+        free_type: u32,
     ) -> i32;
     fn FlushInstructionCache(process: *mut c_void, address: *const c_void, size: usize) -> i32;
     fn GetExitCodeProcess(process: *mut c_void, exit_code: *mut u32) -> i32;

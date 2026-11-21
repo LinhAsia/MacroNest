@@ -104,6 +104,8 @@ pub enum MacroAction {
     SetDataTable,
     ReadMemory,
     WriteMemory,
+    #[serde(alias = "CheatEngineScript", alias = "CheatEngine", alias = "InjectCode")]
+    AutoAssembler,
     #[serde(alias = "AobScan", alias = "ScanAOB", alias = "AOBScan")]
     ScanAob,
     #[serde(alias = "ScanMemoryInstruction", alias = "InstructionScan", alias = "ScanMemory")]
@@ -152,6 +154,8 @@ pub enum MemoryValueType {
     F64,
     #[serde(alias = "HexBytes", alias = "Hex")]
     Bytes,
+    #[serde(alias = "AutoAssembler", alias = "CheatEngine", alias = "CheatEngineScript", alias = "Script", alias = "CE")]
+    AutoAssembler,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]

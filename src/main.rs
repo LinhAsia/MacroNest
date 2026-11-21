@@ -5,6 +5,7 @@ mod ai;
 mod app_icon;
 mod audio;
 mod audiosense;
+pub mod auto_assembler;
 mod frida_injector;
 mod hotkey;
 mod lang;

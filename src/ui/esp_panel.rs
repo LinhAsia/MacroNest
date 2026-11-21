@@ -2174,6 +2174,7 @@ fn memory_type_name(value_type: MemoryValueType) -> &'static str {
         MemoryValueType::I64 => "8 Bytes",
         MemoryValueType::F64 => "Double (8 Bytes)",
         MemoryValueType::Bytes => "Hex Bytes (Patch)",
+        MemoryValueType::AutoAssembler => "Auto Assembler (Script)",
     }
 }
 
@@ -2491,14 +2492,18 @@ fn read_esp_f32_from_address(
     value_type: crate::model::MemoryValueType,
 ) -> Option<f32> {
     let width = match value_type {
-        crate::model::MemoryValueType::I8 | crate::model::MemoryValueType::Bytes => 1,
+        crate::model::MemoryValueType::I8
+        | crate::model::MemoryValueType::Bytes
+        | crate::model::MemoryValueType::AutoAssembler => 1,
         crate::model::MemoryValueType::I16 => 2,
         crate::model::MemoryValueType::I32 | crate::model::MemoryValueType::F32 => 4,
         crate::model::MemoryValueType::I64 | crate::model::MemoryValueType::F64 => 8,
     };
     let bytes = crate::process_memory::read_memory_bytes(pid, address, width).ok()?;
     match value_type {
-        crate::model::MemoryValueType::I8 | crate::model::MemoryValueType::Bytes => bytes.first().map(|&b| b as i8 as f32),
+        crate::model::MemoryValueType::I8
+        | crate::model::MemoryValueType::Bytes
+        | crate::model::MemoryValueType::AutoAssembler => bytes.first().map(|&b| b as i8 as f32),
         crate::model::MemoryValueType::I16 => {
             bytes.get(0..2).and_then(|b| b.try_into().ok()).map(|b| i16::from_le_bytes(b) as f32)
         }

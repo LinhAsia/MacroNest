@@ -271,6 +271,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(Vec::new()));
     static ACTIVE_MEMORY_PATCHES: Lazy<Mutex<HashMap<u32, Vec<(u32, usize, Vec<u8>)>>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
+    static ACTIVE_AA_SESSIONS: Lazy<Mutex<HashMap<u32, Vec<crate::auto_assembler::ActiveHookSession>>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
     // One debugger attachment per process. Concurrent rebinds can stall or crash the target.
     static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<u32, Instant>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
@@ -1683,6 +1685,12 @@ mod windows_overlay {
         if let Some(patches) = patches {
             for (pid, address, orig_bytes) in patches {
                 let _ = crate::process_memory::write_code_bytes(pid, address, &orig_bytes);
+            }
+        }
+        let sessions = ACTIVE_AA_SESSIONS.lock().remove(&preset_id);
+        if let Some(sessions) = sessions {
+            for session in sessions {
+                crate::auto_assembler::restore_hook_session(session.pid, &session);
             }
         }
     }
@@ -26848,12 +26856,15 @@ mod windows_overlay {
             crate::model::MemoryValueType::I64 => 4,
             crate::model::MemoryValueType::F64 => 5,
             crate::model::MemoryValueType::Bytes => 6,
+            crate::model::MemoryValueType::AutoAssembler => 7,
         }
     }
 
     fn esp_value_width(value_type: crate::model::MemoryValueType) -> usize {
         match value_type {
-            crate::model::MemoryValueType::I8 | crate::model::MemoryValueType::Bytes => 1,
+            crate::model::MemoryValueType::I8
+            | crate::model::MemoryValueType::Bytes
+            | crate::model::MemoryValueType::AutoAssembler => 1,
             crate::model::MemoryValueType::I16 => 2,
             crate::model::MemoryValueType::I32 | crate::model::MemoryValueType::F32 => 4,
             crate::model::MemoryValueType::I64 | crate::model::MemoryValueType::F64 => 8,
@@ -26871,7 +26882,9 @@ mod windows_overlay {
             crate::model::MemoryValueType::F32 => f32::from_le_bytes(bytes.try_into().ok()?),
             crate::model::MemoryValueType::I64 => i64::from_le_bytes(bytes.try_into().ok()?) as f32,
             crate::model::MemoryValueType::F64 => f64::from_le_bytes(bytes.try_into().ok()?) as f32,
-            crate::model::MemoryValueType::Bytes => bytes.first().map(|&b| b as f32)?,
+            crate::model::MemoryValueType::Bytes | crate::model::MemoryValueType::AutoAssembler => {
+                bytes.first().map(|&b| b as f32)?
+            }
         })
     }
 
@@ -30195,7 +30208,7 @@ mod windows_overlay {
                 execute_read_memory_action_step(step);
             }
 
-            MacroAction::WriteMemory => {
+            MacroAction::WriteMemory | MacroAction::AutoAssembler => {
                 execute_write_memory_action_step(step, Some(preset_id));
             }
 
@@ -30612,7 +30625,7 @@ mod windows_overlay {
                 MacroAction::SetDataTable => execute_set_data_table_step(step),
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
-                MacroAction::WriteMemory => execute_write_memory_action_step(step, Some(preset_id)),
+                MacroAction::WriteMemory | MacroAction::AutoAssembler => execute_write_memory_action_step(step, Some(preset_id)),
                 MacroAction::ScanAob => execute_scan_aob_action_step(step),
                 MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
                 MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
@@ -31509,7 +31522,7 @@ mod windows_overlay {
                 MacroAction::SetDataTable => execute_set_data_table_step(step),
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
-                MacroAction::WriteMemory => execute_write_memory_action_step(step, Some(preset_id)),
+                MacroAction::WriteMemory | MacroAction::AutoAssembler => execute_write_memory_action_step(step, Some(preset_id)),
                 MacroAction::ScanAob => execute_scan_aob_action_step(step),
                 MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
                 MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
@@ -33725,6 +33738,29 @@ mod windows_overlay {
     }
 
     fn execute_write_memory_action_step(step: &MacroStep, preset_id: Option<u32>) {
+        if step.memory_value_type == crate::model::MemoryValueType::AutoAssembler
+            || step.action == crate::model::MacroAction::AutoAssembler
+        {
+            let pid = macro_memory_target_pid(step.memory_target_window.as_deref()).or_else(|| {
+                let raw_key = interpolate_variables(&step.key);
+                resolve_memory_action_target(None, &raw_key, true).map(|(p, _)| p)
+            });
+            let Some(pid) = pid else { return; };
+            let raw_value = interpolate_variables(&step.memory_write_value);
+            let script = if !raw_value.trim().is_empty() {
+                raw_value
+            } else {
+                interpolate_variables(&step.key)
+            };
+            if let Ok(session) = crate::auto_assembler::execute_auto_assembler_script(pid, &script, true) {
+                if step.memory_restore_on_exit {
+                    let id = preset_id.unwrap_or(0);
+                    ACTIVE_AA_SESSIONS.lock().entry(id).or_default().push(session);
+                }
+            }
+            return;
+        }
+
         let raw_key = interpolate_variables(&step.key);
         let Some((pid, address)) = resolve_memory_action_target(
             macro_memory_target_pid(step.memory_target_window.as_deref()),
@@ -33814,7 +33850,7 @@ mod windows_overlay {
                 }
                 value.to_string()
             }
-            crate::model::MemoryValueType::Bytes => return,
+            crate::model::MemoryValueType::Bytes | crate::model::MemoryValueType::AutoAssembler => return,
         };
         let value = match step.memory_value_type {
             crate::model::MemoryValueType::I8 => match value.trim().parse() {
@@ -33841,7 +33877,7 @@ mod windows_overlay {
                 Ok(value) => crate::process_memory::ScanValue::F64(value),
                 Err(_) => return,
             },
-            crate::model::MemoryValueType::Bytes => return,
+            crate::model::MemoryValueType::Bytes | crate::model::MemoryValueType::AutoAssembler => return,
         };
 
         if step.memory_restore_on_exit {
@@ -39460,6 +39496,12 @@ mod windows_overlay {
         for (_preset_id, patches) in remaining_patches {
             for (pid, address, orig_bytes) in patches {
                 let _ = crate::process_memory::write_code_bytes(pid, address, &orig_bytes);
+            }
+        }
+        let remaining_sessions = std::mem::take(&mut *ACTIVE_AA_SESSIONS.lock());
+        for (_preset_id, sessions) in remaining_sessions {
+            for session in sessions {
+                crate::auto_assembler::restore_hook_session(session.pid, &session);
             }
         }
 

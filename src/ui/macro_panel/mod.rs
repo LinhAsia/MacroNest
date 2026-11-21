@@ -274,6 +274,7 @@ impl CrosshairApp {
                     MemoryValueType::I64 => "8 Bytes",
                     MemoryValueType::F64 => "Double",
                     MemoryValueType::Bytes => "Hex Bytes",
+                    MemoryValueType::AutoAssembler => "Auto Assembler",
                 })
                 .show_ui(ui, |ui| {
                     changed |= ui.selectable_value(&mut step.memory_value_type, MemoryValueType::I8, "1 Byte (integer)").changed();
@@ -292,6 +293,9 @@ impl CrosshairApp {
                         .changed();
                     changed |= ui
                         .selectable_value(&mut step.memory_value_type, MemoryValueType::Bytes, "Hex Bytes (Patch / NOP)")
+                        .changed();
+                    changed |= ui
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::AutoAssembler, "Auto Assembler (CE Script)")
                         .changed();
                 });
 
@@ -426,15 +430,17 @@ impl CrosshairApp {
                 &[],
                 language,
             );
-            if step.action == MacroAction::WriteMemory {
+            if step.action == MacroAction::WriteMemory || step.action == MacroAction::AutoAssembler {
                 ui.label("=");
                 let val_len = step.memory_write_value.chars().count();
                 let normal_w = if val_len == 0 {
                     24.0
                 } else {
-                    (val_len as f32 * 7.5 + 14.0).clamp(24.0, 115.0)
+                    (val_len as f32 * 7.5 + 14.0).clamp(24.0, 180.0)
                 };
-                let hint = if step.memory_value_type == MemoryValueType::Bytes {
+                let hint = if step.memory_value_type == MemoryValueType::AutoAssembler || step.action == MacroAction::AutoAssembler {
+                    "[ENABLE] alloc(newmem,2048)..."
+                } else if step.memory_value_type == MemoryValueType::Bytes {
                     "e.g. 90 90"
                 } else {
                     "val"
@@ -20359,6 +20365,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         crate::model::MemoryValueType::I16 => "2 Bytes",
                                                         crate::model::MemoryValueType::I8 => "Byte",
                                                         crate::model::MemoryValueType::Bytes => "Hex Bytes",
+                                                        crate::model::MemoryValueType::AutoAssembler => "Auto Assembler",
                                                     };
                                                     egui::ComboBox::from_id_salt(ui.make_persistent_id(("table_val_type", table_id)))
                                                         .selected_text(val_type_label)
@@ -20372,6 +20379,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 (crate::model::MemoryValueType::I16, "2 Bytes"),
                                                                 (crate::model::MemoryValueType::I8, "Byte"),
                                                                 (crate::model::MemoryValueType::Bytes, "Hex Bytes"),
+                                                                (crate::model::MemoryValueType::AutoAssembler, "Auto Assembler"),
                                                             ] {
                                                                 if ui.selectable_value(&mut table.value_type, vt, label).changed() {
                                                                     tables_changed = true;
