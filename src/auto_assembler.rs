@@ -30,6 +30,11 @@ enum AsmStatement {
         cond_byte: u8,
     },
     Nop(usize),
+    AobScanModule {
+        symbol: String,
+        module: String,
+        pattern: String,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -72,9 +77,17 @@ pub fn execute_auto_assembler_script(
         }
     }
 
-    // Process alloc and dealloc directives first
+    // Process aobscan, alloc and dealloc directives first
     for stmt in &statements {
         match stmt {
+            AsmStatement::AobScanModule {
+                symbol,
+                module,
+                pattern,
+            } => {
+                let found_addr = scan_aob_for_script(pid, module, pattern)?;
+                symbols.insert(symbol.to_ascii_lowercase(), found_addr);
+            }
             AsmStatement::Alloc {
                 name,
                 size,
@@ -104,7 +117,10 @@ pub fn execute_auto_assembler_script(
 
     for stmt in statements {
         match stmt {
-            AsmStatement::Alloc { .. } | AsmStatement::Dealloc { .. } | AsmStatement::LabelDecl(_) => {
+            AsmStatement::Alloc { .. }
+            | AsmStatement::Dealloc { .. }
+            | AsmStatement::LabelDecl(_)
+            | AsmStatement::AobScanModule { .. } => {
                 // Already handled or pre-declared
             }
             AsmStatement::TargetAddress(target_expr) => {
@@ -278,6 +294,63 @@ pub fn restore_hook_session(pid: u32, session: &ActiveHookSession) {
     }
 }
 
+fn scan_aob_for_script(pid: u32, module: &str, pattern: &str) -> Result<usize, String> {
+    #[cfg(windows)]
+    {
+        let total = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let options = crate::process_memory::MemoryScanOptions::default();
+        if !module.is_empty() {
+            let modules = crate::memory_debugger::debugger::process_modules(pid)
+                .map_err(|e| format!("Could not read modules for AOB scan: {e}"))?;
+            let mut mod_base = 0;
+            let mut mod_size = 0;
+            for (mname, base, size) in modules {
+                if mname.eq_ignore_ascii_case(module) {
+                    mod_base = base;
+                    mod_size = size;
+                    break;
+                }
+            }
+            if mod_base == 0 {
+                return Err(format!("Module '{module}' not found for aobscanmodule"));
+            }
+            let matches = crate::process_memory::scan_aob_memory_range_with_progress(
+                pid,
+                pattern,
+                mod_base,
+                mod_size,
+                1,
+                options,
+                total,
+            )
+            .map_err(|e| format!("AOB scan failed: {e}"))?;
+
+            if let Some(first) = matches.first() {
+                Ok(first.address)
+            } else {
+                Err(format!("AOB pattern '{pattern}' not found in module '{module}'"))
+            }
+        } else {
+            let matches = crate::process_memory::scan_aob_memory_addresses(
+                pid,
+                pattern,
+                1,
+                options,
+                total,
+            )
+            .map_err(|e| format!("AOB scan failed: {e}"))?;
+
+            if let Some(&first) = matches.first() {
+                Ok(first)
+            } else {
+                Err(format!("AOB pattern '{pattern}' not found in process"))
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    Err("AOB scan not supported on this platform".to_string())
+}
+
 const MNEMONICS: &[&str] = &[
     "movups", "movaps", "movss", "movsd", "mov",
     "cvtsi2sd", "cvtsi2ss", "cvttsd2si", "cvttss2si",
@@ -289,6 +362,7 @@ const MNEMONICS: &[&str] = &[
 
 const DIRECTIVE_PREFIXES: &[&str] = &[
     "alloc(", "dealloc(", "label(", "registersymbol(", "unregistersymbol(", "assert(",
+    "aobscanmodule(", "aobscan(",
 ];
 
 fn get_section_text(script: &str, is_enable: bool) -> &str {
@@ -541,6 +615,143 @@ pub fn format_ce_script(script: &str) -> String {
     cleaned.trim().to_string()
 }
 
+pub fn generate_code_injection_template(pid: Option<u32>, target_expr: &str) -> String {
+    let addr_str = if target_expr.trim().is_empty() {
+        "neox_engine.dll+50A7E2"
+    } else {
+        target_expr.trim()
+    };
+
+    let mut orig_code = "read original instruction here".to_string();
+    let mut nop_str = "nop\n".to_string();
+
+    #[cfg(windows)]
+    if let Some(pid) = pid {
+        let symbols = HashMap::new();
+        if let Ok(addr) = resolve_address_expr(pid, addr_str, &symbols) {
+            if let Ok(lines) = crate::memory_debugger::debugger::disassemble_from(
+                pid,
+                addr,
+                crate::model::MemoryDebuggerArchitecture::Auto,
+                6,
+            ) {
+                let mut total_len = 0;
+                let mut instrs = Vec::new();
+                for (_inst_addr, bytes, asm) in lines {
+                    let len = bytes.split_whitespace().count();
+                    total_len += len;
+                    instrs.push(asm);
+                    if total_len >= 5 {
+                        break;
+                    }
+                }
+                if total_len >= 5 {
+                    orig_code = instrs.join("\n");
+                    let nops = total_len - 5;
+                    nop_str = if nops > 1 {
+                        format!("nop {nops}\n")
+                    } else if nops == 1 {
+                        "nop\n".to_string()
+                    } else {
+                        String::new()
+                    };
+                }
+            }
+        }
+    }
+
+    format!(
+r#"[ENABLE]
+// Code from here to '[DISABLE]' will be used to enable the cheat
+alloc(newmem,2048,{addr_str})
+label(returnhere)
+label(originalcode)
+label(exit)
+
+newmem:
+// Place your custom assembly code here
+
+originalcode:
+{orig_code}
+
+exit:
+jmp returnhere
+
+{addr_str}:
+jmp newmem
+{nop_str}returnhere:
+
+[DISABLE]
+// Code from here till the end will be used to disable the cheat
+dealloc(newmem)
+{addr_str}:
+{orig_code}
+"#)
+}
+
+pub fn generate_framework_template() -> String {
+    r#"[ENABLE]
+// Code from here to '[DISABLE]' will be used to enable the cheat
+
+[DISABLE]
+// Code from here till the end will be used to disable the cheat
+"#.to_string()
+}
+
+pub fn generate_aob_injection_template(target_expr: &str) -> String {
+    let (mod_name, aob) = if target_expr.contains('+') {
+        let parts: Vec<&str> = target_expr.split('+').collect();
+        (parts[0].trim(), "48 89 5C 24 ??")
+    } else {
+        ("game.exe", "48 89 5C 24 ??")
+    };
+
+    format!(
+r#"[ENABLE]
+aobscanmodule(INJECT,{mod_name},{aob})
+alloc(newmem,2048,INJECT)
+label(returnhere)
+label(originalcode)
+label(exit)
+
+newmem:
+// Place your custom assembly code here
+
+originalcode:
+// read original instruction here
+
+exit:
+jmp returnhere
+
+INJECT:
+jmp newmem
+returnhere:
+
+[DISABLE]
+dealloc(newmem)
+INJECT:
+// restore original instruction here
+"#)
+}
+
+pub fn generate_nop_patch_template(target_expr: &str) -> String {
+    let addr_str = if target_expr.trim().is_empty() {
+        "neox_engine.dll+50A7E2"
+    } else {
+        target_expr.trim()
+    };
+
+    format!(
+r#"[ENABLE]
+{addr_str}:
+nop 2
+
+[DISABLE]
+{addr_str}:
+// restore original instruction here
+"#)
+}
+
 fn strip_comments(line: &str) -> String {
     let mut out = line.to_string();
     if let Some(idx) = out.find("//") {
@@ -560,6 +771,35 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
 
     // Check directives: alloc(name, size [, near_addr])
     let lower = line.to_ascii_lowercase();
+
+    // aobscanmodule(name, module, pattern)
+    if lower.starts_with("aobscanmodule(") && lower.ends_with(')') {
+        let inner = &line[14..line.len() - 1];
+        let parts: Vec<&str> = inner.splitn(3, ',').map(|s| s.trim()).collect();
+        if parts.len() == 3 {
+            return Ok(Some(AsmStatement::AobScanModule {
+                symbol: parts[0].to_string(),
+                module: parts[1].to_string(),
+                pattern: parts[2].to_string(),
+            }));
+        }
+        return Err(format!("Invalid aobscanmodule syntax (expected name, module, pattern): {line}"));
+    }
+
+    // aobscan(name, pattern)
+    if lower.starts_with("aobscan(") && lower.ends_with(')') {
+        let inner = &line[8..line.len() - 1];
+        let parts: Vec<&str> = inner.splitn(2, ',').map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Some(AsmStatement::AobScanModule {
+                symbol: parts[0].to_string(),
+                module: String::new(),
+                pattern: parts[1].to_string(),
+            }));
+        }
+        return Err(format!("Invalid aobscan syntax (expected name, pattern): {line}"));
+    }
+
     if lower.starts_with("alloc(") && lower.ends_with(')') {
         let inner = &line[6..line.len() - 1];
         let parts: Vec<&str> = inner.split(',').map(|s| s.trim()).collect();

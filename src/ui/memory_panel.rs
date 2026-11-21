@@ -1254,6 +1254,8 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     disassembler_dialog: Option<DisassemblerDialog>,
     #[cfg(windows)]
+    pub(super) auto_assemble_dialog: Option<(String, Option<(bool, String)>)>,
+    #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
     #[cfg(windows)]
     code_access_last_pos: Option<egui::Pos2>,
@@ -1408,6 +1410,8 @@ impl Default for MemoryPanelState {
             instruction_watch_dialog: None,
             #[cfg(windows)]
             disassembler_dialog: None,
+            #[cfg(windows)]
+            auto_assemble_dialog: None,
             #[cfg(windows)]
             code_access_dialog: None,
             #[cfg(windows)]
@@ -2055,6 +2059,8 @@ impl CrosshairApp {
         #[cfg(windows)]
         self.render_disassembler_dialog(ui.ctx());
         #[cfg(windows)]
+        self.render_auto_assemble_dialog(ui.ctx());
+        #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_code_relocate_choice_dialog(ui.ctx());
@@ -2340,6 +2346,8 @@ impl CrosshairApp {
         self.render_instruction_watch_dialog(ctx);
         #[cfg(windows)]
         self.render_disassembler_dialog(ctx);
+        #[cfg(windows)]
+        self.render_auto_assemble_dialog(ctx);
         #[cfg(windows)]
         self.render_code_access_dialog(ctx);
         #[cfg(windows)]
@@ -15456,6 +15464,99 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     }
 
     #[cfg(windows)]
+    fn render_auto_assemble_dialog(&mut self, ctx: &egui::Context) {
+        if self.memory_panel.auto_assemble_dialog.is_none() {
+            return;
+        }
+
+        let mut close_dialog = false;
+        let pid = self.memory_panel.process_pid;
+
+        egui::Window::new("Auto Assemble")
+            .id(egui::Id::new("memory_viewer_auto_assemble_window"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .default_size(egui::vec2(600.0, 440.0))
+            .resizable(true)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                if let Some((ref mut script, ref mut status)) = self.memory_panel.auto_assemble_dialog {
+                    ui.horizontal(|ui| {
+                        if ui.button("Clear").clicked() {
+                            script.clear();
+                        }
+                        if ui.button("Format").clicked() {
+                            *script = crate::auto_assembler::format_ce_script(script);
+                        }
+                        egui::ComboBox::from_id_salt(ui.id().with("disasm_aa_template_combo"))
+                            .selected_text("Template")
+                            .show_ui(ui, |ui| {
+                                if ui.button("Code Injection").clicked() {
+                                    *script = crate::auto_assembler::generate_code_injection_template(pid, "");
+                                }
+                                if ui.button("Cheat Table Framework").clicked() {
+                                    *script = crate::auto_assembler::generate_framework_template();
+                                }
+                                if ui.button("AOB Injection").clicked() {
+                                    *script = crate::auto_assembler::generate_aob_injection_template("");
+                                }
+                                if ui.button("NOP Patch").clicked() {
+                                    *script = crate::auto_assembler::generate_nop_patch_template("");
+                                }
+                            });
+                        if ui.button("Execute").clicked() {
+                            if let Some(target_pid) = pid {
+                                match crate::auto_assembler::execute_auto_assembler_script(target_pid, script, true) {
+                                    Ok(_) => {
+                                        *status = Some((true, format!("Injected successfully into PID {target_pid}!")));
+                                    }
+                                    Err(e) => {
+                                        let hint = if e.contains("5") || e.to_ascii_lowercase().contains("access") {
+                                            " (Access Denied - Run as Administrator!)"
+                                        } else {
+                                            ""
+                                        };
+                                        *status = Some((false, format!("Failed: {e}{hint}")));
+                                    }
+                                }
+                            } else {
+                                *status = Some((false, "No target process selected".to_string()));
+                            }
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Done").clicked() {
+                                close_dialog = true;
+                            }
+                        });
+                    });
+
+                    if let Some((success, ref msg)) = *status {
+                        let color = if success {
+                            egui::Color32::from_rgb(0, 230, 100)
+                        } else {
+                            egui::Color32::from_rgb(255, 90, 90)
+                        };
+                        ui.colored_label(color, msg);
+                    }
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .max_height(340.0)
+                        .show(ui, |ui| {
+                            let text_edit = egui::TextEdit::multiline(script)
+                                .desired_width(f32::INFINITY)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_rows(16);
+                            ui.add(text_edit);
+                        });
+                }
+            });
+
+        if close_dialog {
+            self.memory_panel.auto_assemble_dialog = None;
+        }
+    }
+
+    #[cfg(windows)]
     fn render_disassembler_body(&mut self, ui: &mut egui::Ui) {
         let Some(dialog) = self.memory_panel.disassembler_dialog.as_ref() else {
             return;
@@ -15505,6 +15606,17 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             } else if let Some((_, bytes, _)) = dialog.lines.first() {
                                 ui.ctx().copy_text(bytes.clone());
                             }
+                        }
+                        if ui.button("Auto Assemble").on_hover_text("Open Cheat Engine Auto Assemble window for this address (Code Injection)").clicked() {
+                            let addr_str = if let Ok((mod_name, off)) = crate::memory_debugger::debugger::module_offset_for_address(pid.unwrap_or(0), dialog.address) {
+                                format!("{mod_name}+{off:X}")
+                            } else {
+                                format!("0x{:X}", dialog.address)
+                            };
+                            self.memory_panel.auto_assemble_dialog = Some((
+                                crate::auto_assembler::generate_code_injection_template(pid, &addr_str),
+                                None,
+                            ));
                         }
                         if ui.button("Copy Address").clicked() {
                             ui.ctx()
@@ -15599,6 +15711,18 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             response.context_menu(|ui| {
                                 if ui.button(format!("Copy Bytes (AOB): {bytes}")).clicked() {
                                     ui.ctx().copy_text(bytes.clone());
+                                    ui.close();
+                                }
+                                if ui.button("Auto Assemble").on_hover_text("Open Cheat Engine Auto Assemble window for this address (Code Injection)").clicked() {
+                                    let addr_str = if let Ok((mod_name, off)) = crate::memory_debugger::debugger::module_offset_for_address(pid.unwrap_or(0), *address) {
+                                        format!("{mod_name}+{off:X}")
+                                    } else {
+                                        format!("0x{:X}", *address)
+                                    };
+                                    self.memory_panel.auto_assemble_dialog = Some((
+                                        crate::auto_assembler::generate_code_injection_template(pid, &addr_str),
+                                        None,
+                                    ));
                                     ui.close();
                                 }
                                 if ui.button("Copy Address").clicked() {

@@ -435,6 +435,29 @@ impl CrosshairApp {
                                         crate::auto_assembler::format_ce_script(&step.memory_write_value);
                                     changed = true;
                                 }
+                                egui::ComboBox::from_id_salt(ui.id().with("ce_template_select"))
+                                    .selected_text(Self::tr_lang(language, "Template", "Mẫu"))
+                                    .show_ui(ui, |ui| {
+                                        let target_sel = step.memory_target_window.as_deref();
+                                        let pid = crate::overlay::macro_memory_target_pid(target_sel)
+                                            .or_else(|| crate::overlay::find_process_fallback(target_sel.unwrap_or("dwrg")));
+                                        if ui.button(Self::tr_lang(language, "Code Injection", "Tiêm Code (Hook)")).clicked() {
+                                            step.memory_write_value = crate::auto_assembler::generate_code_injection_template(pid, &step.key);
+                                            changed = true;
+                                        }
+                                        if ui.button(Self::tr_lang(language, "Cheat Table Framework", "Khung [ENABLE]/[DISABLE]")).clicked() {
+                                            step.memory_write_value = crate::auto_assembler::generate_framework_template();
+                                            changed = true;
+                                        }
+                                        if ui.button(Self::tr_lang(language, "AOB Injection", "Tiêm AOB (Quét mẫu byte)")).clicked() {
+                                            step.memory_write_value = crate::auto_assembler::generate_aob_injection_template(&step.key);
+                                            changed = true;
+                                        }
+                                        if ui.button(Self::tr_lang(language, "NOP Patch", "Vá NOP")).clicked() {
+                                            step.memory_write_value = crate::auto_assembler::generate_nop_patch_template(&step.key);
+                                            changed = true;
+                                        }
+                                    });
                                 if ui.button(Self::tr_lang(language, "Execute", "Chạy")).clicked() {
                                     let target_sel = step.memory_target_window.as_deref();
                                     let pid = crate::overlay::macro_memory_target_pid(target_sel)
