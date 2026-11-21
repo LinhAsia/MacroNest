@@ -85,7 +85,7 @@ impl CrosshairApp {
                 &mut step.memory_target_window,
                 &mut duplicate_mode,
                 open_windows,
-                145.0,
+                125.0,
                 true,
             );
 
@@ -265,15 +265,15 @@ impl CrosshairApp {
             }
 
             egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
-                .width(105.0)
+                .width(92.0)
                 .selected_text(match step.memory_value_type {
-                    MemoryValueType::I8 => "1 Byte (integer)",
-                    MemoryValueType::I16 => "2 Bytes (integer)",
-                    MemoryValueType::I32 => "4 Bytes (integer)",
-                    MemoryValueType::F32 => "Float (4 Bytes)",
-                    MemoryValueType::I64 => "8 Bytes (integer)",
-                    MemoryValueType::F64 => "Double (8 Bytes)",
-                    MemoryValueType::Bytes => "Hex Bytes (Patch / NOP)",
+                    MemoryValueType::I8 => "1 Byte",
+                    MemoryValueType::I16 => "2 Bytes",
+                    MemoryValueType::I32 => "4 Bytes",
+                    MemoryValueType::F32 => "Float",
+                    MemoryValueType::I64 => "8 Bytes",
+                    MemoryValueType::F64 => "Double",
+                    MemoryValueType::Bytes => "Hex Bytes",
                 })
                 .show_ui(ui, |ui| {
                     changed |= ui.selectable_value(&mut step.memory_value_type, MemoryValueType::I8, "1 Byte (integer)").changed();
@@ -387,12 +387,14 @@ impl CrosshairApp {
                 return;
             }
 
+            let addr_len = step.key.chars().count();
+            let normal_addr_w = (addr_len as f32 * 7.5 + 16.0).clamp(115.0, 260.0);
             let address_response = Self::render_variable_text_edit(
                     ui,
                     &mut step.key,
                     ui.id().with("memory-address"),
-                    150.0,
-                    360.0,
+                    normal_addr_w,
+                    320.0,
                     21.0,
                     21.0,
                     "address / module+offset [offsets] / @name",
@@ -465,7 +467,7 @@ impl CrosshairApp {
                 changed |= ui
                     .checkbox(
                         &mut step.memory_restore_on_exit,
-                        Self::tr_lang(language, "Restore on stop", "Khôi phục khi dừng"),
+                        Self::tr_lang(language, "Restore", "Khôi phục"),
                     )
                     .on_hover_text(Self::tr_lang(
                         language,
@@ -2173,7 +2175,7 @@ impl CrosshairApp {
             ui.add_space(4.0);
             let resp = ui.checkbox(
                 &mut step.vision_move_cursor_on_match,
-                Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+                Self::tr_lang(language, "Move Mouse", "Di chuyển chuột"),
             );
             *live_sync |= resp.changed();
             step.vision_move_cursor_on_match
@@ -2182,10 +2184,6 @@ impl CrosshairApp {
         };
         if !show_move_fields && !show_detection_tuning {
             return;
-        }
-        if show_move_fields {
-            Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
-            Self::render_vision_move_mode_controls(ui, step, language, live_sync);
         }
         Self::render_vision_runtime_tuning_dropdown(
             ui,
@@ -2209,10 +2207,6 @@ impl CrosshairApp {
     ) {
         if is_manual || (!show_move_fields && !show_detection_tuning) {
             return;
-        }
-        if show_move_fields {
-            Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
-            Self::render_vision_move_mode_controls(ui, step, language, live_sync);
         }
         Self::render_vision_runtime_tuning_dropdown(
             ui,
@@ -2671,7 +2665,8 @@ impl CrosshairApp {
                         language,
                     );
                     egui::ComboBox::from_id_salt((group_id, preset_id, step_id.to_string(), "vision-step-preset-combo"))
-                        .width(146.0)
+                        .width(130.0)
+                        .truncate()
                         .selected_text(selected_label)
                         .show_ui(ui, |ui| {
                             let (image_presets, color_presets, pixel_presets): (Vec<_>, Vec<_>, Vec<_>) = vision_presets.iter().fold(
@@ -2877,18 +2872,81 @@ impl CrosshairApp {
         live_sync: &mut bool,
     ) {
         ui.add_space(2.0);
-        let selected_text = Self::tr_lang(language, "Setting", "Setting").to_owned();
-        egui::ComboBox::from_id_salt(ui.id().with("vision-runtime-tuning"))
+        let selected_text = Self::tr_lang(language, "Setting", "Cài đặt").to_owned();
+        let resp = egui::ComboBox::from_id_salt(ui.id().with("vision-runtime-tuning"))
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .selected_text(selected_text)
-            .width(84.0)
+            .width(76.0)
             .show_ui(ui, |ui| {
-                ui.set_min_width(152.0);
+                ui.set_min_width(200.0);
                 if show_move_fields {
                     egui::Grid::new(ui.id().with("vision-runtime-move-grid"))
                         .num_columns(2)
-                        .spacing([6.0, 6.0])
+                        .spacing([8.0, 6.0])
                         .show(ui, |ui| {
+                            ui.label(Self::tr_lang(language, "Mode", "Chế độ"));
+                            egui::ComboBox::from_id_salt(ui.id().with("vision-move-mode-inner"))
+                                .width(108.0)
+                                .selected_text(if step.vision_move_relative {
+                                    Self::tr_lang(language, "Relative", "Tương đối")
+                                } else {
+                                    Self::tr_lang(language, "Absolute", "Tuyệt đối")
+                                })
+                                .show_ui(ui, |ui| {
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_relative,
+                                            false,
+                                            Self::tr_lang(language, "Absolute", "Tuyệt đối"),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_relative,
+                                            true,
+                                            Self::tr_lang(language, "Relative", "Tương đối"),
+                                        )
+                                        .changed();
+                                });
+                            ui.end_row();
+
+                            ui.label(Self::tr_lang(language, "Axis Lock", "Khóa trục"));
+                            egui::ComboBox::from_id_salt(ui.id().with("vision-move-axis-inner"))
+                                .width(108.0)
+                                .selected_text(match step.vision_move_axis_lock {
+                                    VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Tự do"),
+                                    VisionMoveAxisLock::HorizontalOnly => {
+                                        Self::tr_lang(language, "Horizontal only", "Chỉ ngang")
+                                    }
+                                    VisionMoveAxisLock::VerticalOnly => {
+                                        Self::tr_lang(language, "Vertical only", "Chỉ dọc")
+                                    }
+                                })
+                                .show_ui(ui, |ui| {
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_axis_lock,
+                                            VisionMoveAxisLock::None,
+                                            Self::tr_lang(language, "Free", "Tự do"),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_axis_lock,
+                                            VisionMoveAxisLock::HorizontalOnly,
+                                            Self::tr_lang(language, "Horizontal only", "Chỉ ngang"),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_axis_lock,
+                                            VisionMoveAxisLock::VerticalOnly,
+                                            Self::tr_lang(language, "Vertical only", "Chỉ dọc"),
+                                        )
+                                        .changed();
+                                });
+                            ui.end_row();
+
                             ui.label(Self::tr_lang(language, "Offset X", "Offset X"));
                             *live_sync |= Self::render_temp_i32_input(
                                 ui,
@@ -2909,7 +2967,7 @@ impl CrosshairApp {
                             );
                             ui.end_row();
 
-                            ui.label(Self::tr_lang(language, "Passes", "Passes"));
+                            ui.label(Self::tr_lang(language, "Passes", "Số lần"));
                             *live_sync |= Self::render_temp_u8_input(
                                 ui,
                                 ui.id().with("vision-move-passes"),
@@ -2923,7 +2981,7 @@ impl CrosshairApp {
                                 step.action,
                                 MacroAction::MouseMoveAbsolute | MacroAction::MouseMoveRelative
                             ) {
-                                ui.label(Self::tr_lang(language, "Delay", "Delay"));
+                                ui.label(Self::tr_lang(language, "Delay", "Độ trễ"));
                                 *live_sync |= Self::render_temp_u64_input(
                                     ui,
                                     ui.id().with("vision-move-delay"),
@@ -2943,9 +3001,9 @@ impl CrosshairApp {
                 if show_detection_tuning {
                     egui::Grid::new(ui.id().with("vision-runtime-detect-grid"))
                         .num_columns(2)
-                        .spacing([6.0, 6.0])
+                        .spacing([8.0, 6.0])
                         .show(ui, |ui| {
-                            ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
+                            ui.label(Self::tr_lang(language, "Tolerance", "Độ sai lệch"));
                             *live_sync |= Self::render_temp_u8_input(
                                 ui,
                                 ui.id().with("vision-tolerance"),
@@ -2956,7 +3014,7 @@ impl CrosshairApp {
                             ui.end_row();
 
                             if show_detection_rate {
-                                ui.label(Self::tr_lang(language, "Rate", "Rate"));
+                                ui.label(Self::tr_lang(language, "Rate", "Tần số"));
                                 *live_sync |= Self::render_temp_u32_input(
                                     ui,
                                     ui.id().with("vision-rate"),
@@ -2969,6 +3027,34 @@ impl CrosshairApp {
                         });
                 }
             });
+
+        if show_move_fields {
+            let axis_str = match step.vision_move_axis_lock {
+                VisionMoveAxisLock::None => "Free",
+                VisionMoveAxisLock::HorizontalOnly => "H-Only",
+                VisionMoveAxisLock::VerticalOnly => "V-Only",
+            };
+            let mode_str = if step.vision_move_relative { "Rel" } else { "Abs" };
+            resp.response.on_hover_text(format!(
+                "{}: {}, {}\n{}: ({}, {})\n{}: {}, {}: {}ms",
+                Self::tr_lang(language, "Move", "Di chuyển"),
+                mode_str,
+                axis_str,
+                Self::tr_lang(language, "Offset", "Bù toạ độ"),
+                step.vision_move_offset_x,
+                step.vision_move_offset_y,
+                Self::tr_lang(language, "Passes", "Số lần"),
+                step.vision_move_passes,
+                Self::tr_lang(language, "Delay", "Độ trễ"),
+                step.vision_move_delay_ms,
+            ));
+        } else if show_detection_tuning {
+            resp.response.on_hover_text(Self::tr_lang(
+                language,
+                "Detection tuning settings",
+                "Cài đặt tinh chỉnh nhận diện",
+            ));
+        }
     }
 
     fn sync_step_vision_runtime_from_preset(step: &mut MacroStep, preset: &VisionPreset) {
@@ -2986,77 +3072,7 @@ impl CrosshairApp {
         *live_sync = true;
     }
 
-    fn render_vision_axis_lock_controls(
-        ui: &mut egui::Ui,
-        step: &mut MacroStep,
-        language: UiLanguage,
-        live_sync: &mut bool,
-    ) {
-        egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
-            .width(118.0)
-            .selected_text(match step.vision_move_axis_lock {
-                VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Free"),
-                VisionMoveAxisLock::HorizontalOnly => {
-                    Self::tr_lang(language, "Horizontal only", "Horizontal only")
-                }
-                VisionMoveAxisLock::VerticalOnly => {
-                    Self::tr_lang(language, "Vertical only", "Vertical only")
-                }
-            })
-            .show_ui(ui, |ui| {
-                let free = ui.selectable_value(
-                    &mut step.vision_move_axis_lock,
-                    VisionMoveAxisLock::None,
-                    Self::tr_lang(language, "Free", "Free"),
-                );
-                *live_sync |= free.changed();
 
-                let horizontal = ui.selectable_value(
-                    &mut step.vision_move_axis_lock,
-                    VisionMoveAxisLock::HorizontalOnly,
-                    Self::tr_lang(language, "Horizontal only", "Horizontal only"),
-                );
-                *live_sync |= horizontal.changed();
-
-                let vertical = ui.selectable_value(
-                    &mut step.vision_move_axis_lock,
-                    VisionMoveAxisLock::VerticalOnly,
-                    Self::tr_lang(language, "Vertical only", "Vertical only"),
-                );
-                *live_sync |= vertical.changed();
-            });
-    }
-
-    fn render_vision_move_mode_controls(
-        ui: &mut egui::Ui,
-        step: &mut MacroStep,
-        language: UiLanguage,
-        live_sync: &mut bool,
-    ) {
-        egui::ComboBox::from_id_salt(ui.id().with("vision-move-mode"))
-            .width(88.0)
-            .selected_text(if step.vision_move_relative {
-                Self::tr_lang(language, "Relative", "Tương đối")
-            } else {
-                Self::tr_lang(language, "Absolute", "Tuyệt đối")
-            })
-            .show_ui(ui, |ui| {
-                *live_sync |= ui
-                    .selectable_value(
-                        &mut step.vision_move_relative,
-                        false,
-                        Self::tr_lang(language, "Absolute", "Tuyệt đối"),
-                    )
-                    .changed();
-                *live_sync |= ui
-                    .selectable_value(
-                        &mut step.vision_move_relative,
-                        true,
-                        Self::tr_lang(language, "Relative", "Tương đối"),
-                    )
-                    .changed();
-            });
-    }
 
     fn handle_duration_permanent_toggle(step: &mut MacroStep, is_permanent: bool) {
         step.set_duration_permanent(is_permanent);
@@ -5927,7 +5943,8 @@ impl CrosshairApp {
                             extra_idx,
                             "hold-extra-ocr-preset-cb",
                         ))
-                        .width(146.0)
+                        .width(130.0)
+                        .truncate()
                         .selected_text(selected_label)
                         .show_ui(ui, |ui| {
                             for (preset_option_id, preset_option_label) in ocr_preset_options {
@@ -6035,7 +6052,8 @@ impl CrosshairApp {
                             extra_idx,
                             "hold-extra-vision-preset-cb",
                         ))
-                        .width(146.0)
+                        .width(130.0)
+                        .truncate()
                         .selected_text(selected_label)
                         .show_ui(ui, |ui| {
                             for (pid, pname) in image_search_preset_options {
@@ -9885,14 +9903,14 @@ impl CrosshairApp {
                                                       let none_label = if is_manual {
                                                           Self::tr_lang(
                                                               language,
-                                                              "Entire Screen (Default)",
-                                                              "Toàn màn hình (Mặc định)",
+                                                              "Entire Screen",
+                                                              "Toàn màn hình",
                                                           )
                                                       } else {
                                                           Self::tr_lang(
                                                               language,
-                                                              "Preset / Screen (Default)",
-                                                              "Preset / Toàn màn hình (Mặc định)",
+                                                              "Preset / Screen",
+                                                              "Preset / Màn hình",
                                                           )
                                                       };
                                                       live_sync |= Self::render_window_target_combo_with_duplicate_mode(
@@ -12187,14 +12205,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                       let none_label = if is_manual {
                                                           Self::tr_lang(
                                                               language,
-                                                              "Entire Screen (Default)",
-                                                              "Toàn màn hình (Mặc định)",
+                                                              "Entire Screen",
+                                                              "Toàn màn hình",
                                                           )
                                                       } else {
                                                           Self::tr_lang(
                                                               language,
-                                                              "Preset / Screen (Default)",
-                                                              "Preset / Toàn màn hình (Mặc định)",
+                                                              "Preset / Screen",
+                                                              "Preset / Màn hình",
                                                           )
                                                       };
                                                       live_sync |= Self::render_window_target_combo_with_duplicate_mode(
@@ -15555,14 +15573,14 @@ if supports_move_mouse || show_detection_tuning {
                                                           let none_label = if is_manual {
                                                               Self::tr_lang(
                                                                   language,
-                                                                  "Entire Screen (Default)",
-                                                                  "Toàn màn hình (Mặc định)",
+                                                                  "Entire Screen",
+                                                                  "Toàn màn hình",
                                                               )
                                                           } else {
                                                               Self::tr_lang(
                                                                   language,
-                                                                  "Preset / Screen (Default)",
-                                                                  "Preset / Toàn màn hình (Mặc định)",
+                                                                  "Preset / Screen",
+                                                                  "Preset / Màn hình",
                                                               )
                                                           };
                                                           live_sync |= Self::render_window_target_combo_with_duplicate_mode(
@@ -15672,14 +15690,14 @@ if supports_move_mouse || show_detection_tuning {
                                                     let none_label = if is_custom {
                                                         Self::tr_lang(
                                                             language,
-                                                            "Entire Screen (Default)",
-                                                            "Toàn màn hình (Mặc định)",
+                                                            "Entire Screen",
+                                                            "Toàn màn hình",
                                                         )
                                                     } else {
                                                         Self::tr_lang(
                                                             language,
-                                                            "Preset / Screen (Default)",
-                                                            "Preset / Toàn màn hình (Mặc định)",
+                                                            "Preset / Screen",
+                                                            "Preset / Màn hình",
                                                         )
                                                     };
                                                     live_sync |= Self::render_window_target_combo_with_duplicate_mode(
@@ -17110,14 +17128,14 @@ if supports_move_mouse || show_detection_tuning {
                                                           let none_label = if is_manual {
                                                               Self::tr_lang(
                                                                   language,
-                                                                  "Entire Screen (Default)",
-                                                                  "Toàn màn hình (Mặc định)",
+                                                                  "Entire Screen",
+                                                                  "Toàn màn hình",
                                                               )
                                                           } else {
                                                               Self::tr_lang(
                                                                   language,
-                                                                  "Preset / Screen (Default)",
-                                                                  "Preset / Toàn màn hình (Mặc định)",
+                                                                  "Preset / Screen",
+                                                                  "Preset / Màn hình",
                                                               )
                                                           };
                                                           live_sync |= Self::render_window_target_combo_with_duplicate_mode(
@@ -17128,7 +17146,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               &mut step.vision_target_window,
                                                               &mut step.vision_match_duplicate_window_titles,
                                                               &self.open_window_infos,
-                                                              135.0,
+                                                              115.0,
                                                               true,
                                                           );
                                                           if is_single_pixel {
@@ -17348,18 +17366,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         )
                                                         .changed();
                                                     if step.advance_settings {
-                                                        Self::render_vision_axis_lock_controls(
-                                                            ui,
-                                                            step,
-                                                            language,
-                                                            &mut live_sync,
-                                                        );
-                                                        Self::render_vision_move_mode_controls(
-                                                            ui,
-                                                            step,
-                                                            language,
-                                                            &mut live_sync,
-                                                        );
                                                         Self::render_vision_runtime_tuning_dropdown(
                                                             ui,
                                                             step,
