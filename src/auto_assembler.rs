@@ -624,6 +624,7 @@ pub fn generate_code_injection_template(pid: Option<u32>, target_expr: &str) -> 
 
     let mut orig_code = "read original instruction here".to_string();
     let mut nop_str = "nop\n".to_string();
+    let mut alt_bytes = String::new();
 
     #[cfg(windows)]
     if let Some(pid) = pid {
@@ -637,9 +638,11 @@ pub fn generate_code_injection_template(pid: Option<u32>, target_expr: &str) -> 
             ) {
                 let mut total_len = 0;
                 let mut instrs = Vec::new();
+                let mut hex_bytes: Vec<String> = Vec::new();
                 for (_inst_addr, bytes, asm) in lines {
-                    let len = bytes.split_whitespace().count();
-                    total_len += len;
+                    let parts: Vec<&str> = bytes.split_whitespace().collect();
+                    total_len += parts.len();
+                    hex_bytes.extend(parts.into_iter().map(ToString::to_string));
                     instrs.push(asm);
                     if total_len >= 5 {
                         break;
@@ -647,6 +650,9 @@ pub fn generate_code_injection_template(pid: Option<u32>, target_expr: &str) -> 
                 }
                 if total_len >= 5 {
                     orig_code = instrs.join("\n");
+                    if !hex_bytes.is_empty() {
+                        alt_bytes = format!("//alt: db {}\n", hex_bytes.join(" "));
+                    }
                     let nops = total_len - 5;
                     nop_str = if nops > 1 {
                         format!("nop {nops}\n")
@@ -662,14 +668,14 @@ pub fn generate_code_injection_template(pid: Option<u32>, target_expr: &str) -> 
 
     format!(
 r#"[ENABLE]
-// Code from here to '[DISABLE]' will be used to enable the cheat
+//code from here to '[DISABLE]' will be used to enable the cheat
 alloc(newmem,2048,{addr_str})
 label(returnhere)
 label(originalcode)
 label(exit)
 
-newmem:
-// Place your custom assembly code here
+newmem: //this is allocated memory, you have read,write,execute access
+//place your code here
 
 originalcode:
 {orig_code}
@@ -682,19 +688,21 @@ jmp newmem
 {nop_str}returnhere:
 
 [DISABLE]
-// Code from here till the end will be used to disable the cheat
+//code from here till the end of the code will be used to disable the cheat
 dealloc(newmem)
 {addr_str}:
 {orig_code}
-"#)
+{alt_bytes}"#)
 }
 
 pub fn generate_framework_template() -> String {
     r#"[ENABLE]
-// Code from here to '[DISABLE]' will be used to enable the cheat
+//code from here to '[DISABLE]' will be used to enable the cheat
+
+
 
 [DISABLE]
-// Code from here till the end will be used to disable the cheat
+//code from here till the end of the code will be used to disable the cheat
 "#.to_string()
 }
 
@@ -714,11 +722,11 @@ label(returnhere)
 label(originalcode)
 label(exit)
 
-newmem:
-// Place your custom assembly code here
+newmem: //this is allocated memory, you have read,write,execute access
+//place your code here
 
 originalcode:
-// read original instruction here
+//read original instruction here
 
 exit:
 jmp returnhere
@@ -728,9 +736,10 @@ jmp newmem
 returnhere:
 
 [DISABLE]
+//code from here till the end of the code will be used to disable the cheat
 dealloc(newmem)
 INJECT:
-// restore original instruction here
+//read original instruction here
 "#)
 }
 

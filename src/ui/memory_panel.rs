@@ -15469,15 +15469,16 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             return;
         }
 
-        let mut close_dialog = false;
+        let mut is_open = true;
         let pid = self.memory_panel.process_pid;
 
         egui::Window::new("Auto Assemble")
             .id(egui::Id::new("memory_viewer_auto_assemble_window"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .default_size(egui::vec2(600.0, 440.0))
+            .min_size(egui::vec2(360.0, 240.0))
             .resizable(true)
             .collapsible(false)
+            .open(&mut is_open)
             .show(ctx, |ui| {
                 if let Some((ref mut script, ref mut status)) = self.memory_panel.auto_assemble_dialog {
                     ui.horizontal(|ui| {
@@ -15522,11 +15523,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 *status = Some((false, "No target process selected".to_string()));
                             }
                         }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Done").clicked() {
-                                close_dialog = true;
-                            }
-                        });
                     });
 
                     if let Some((success, ref msg)) = *status {
@@ -15551,7 +15547,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
             });
 
-        if close_dialog {
+        if !is_open {
             self.memory_panel.auto_assemble_dialog = None;
         }
     }

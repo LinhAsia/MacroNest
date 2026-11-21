@@ -417,13 +417,14 @@ impl CrosshairApp {
                 }
 
                 if is_modal_open {
-                    let mut close_modal = false;
+                    let mut open = true;
                     egui::Window::new(Self::tr_lang(language, "Auto Assembler Script", "Script Auto Assembler"))
                         .id(ui.id().with("ce_script_window"))
-                        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                         .default_size(egui::vec2(600.0, 440.0))
+                        .min_size(egui::vec2(360.0, 240.0))
                         .resizable(true)
                         .collapsible(false)
+                        .open(&mut open)
                         .show(ui.ctx(), |ui| {
                             ui.horizontal(|ui| {
                                 if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
@@ -493,11 +494,6 @@ impl CrosshairApp {
                                         });
                                     }
                                 }
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(Self::tr_lang(language, "Done", "Xong")).clicked() {
-                                        close_modal = true;
-                                    }
-                                });
                             });
                             let status: Option<(bool, String)> = ui.ctx().data(|d| d.get_temp(status_id));
                             if let Some((success, ref msg)) = status {
@@ -521,7 +517,7 @@ impl CrosshairApp {
                                     }
                                 });
                         });
-                    if close_modal {
+                    if !open {
                         ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
                     }
                 }
