@@ -767,6 +767,8 @@ pub struct MemoryCodeEntry {
     #[serde(default)]
     pub original_bytes: Option<Vec<u8>>,
     #[serde(default)]
+    pub patch_bytes: Option<Vec<u8>>,
+    #[serde(default)]
     pub replaced: bool,
     #[serde(default)]
     pub highlighted: bool,

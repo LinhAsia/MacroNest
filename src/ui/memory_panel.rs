@@ -8994,15 +8994,19 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         };
 
         let len = original_bytes.len();
-        let nop_bytes = vec![0x90u8; len];
+        let bytes_to_write = match &entry.patch_bytes {
+            Some(custom) if !custom.is_empty() => custom.clone(),
+            _ => vec![0x90u8; len],
+        };
 
-        match write_code_bytes(pid, address, &nop_bytes) {
+        match write_code_bytes(pid, address, &bytes_to_write) {
             Ok(()) => {
                 let entry = &mut self.state.memory_code_list[code_index];
                 entry.original_bytes = Some(original_bytes);
                 entry.replaced = true;
+                let label = if entry.patch_bytes.is_some() { "custom patch" } else { "code that does nothing (NOP)" };
                 self.memory_panel.status = format!(
-                    "Replaced '{}' with code that does nothing (NOP)",
+                    "Replaced '{}' with {label}",
                     entry.name
                 );
                 self.persist();
@@ -9128,6 +9132,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             aob_target_offset,
             writes,
             original_bytes: None,
+            patch_bytes: None,
             replaced: false,
             highlighted: false,
         });

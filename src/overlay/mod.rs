@@ -269,6 +269,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(Vec::new()));
     static MEMORY_CODE_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryCodeEntry>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
+    static ACTIVE_MEMORY_PATCHES: Lazy<Mutex<HashMap<u32, Vec<(u32, usize, Vec<u8>)>>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
     // One debugger attachment per process. Concurrent rebinds can stall or crash the target.
     static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<u32, Instant>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
@@ -1676,6 +1678,15 @@ mod windows_overlay {
         preset_id: u32,
     }
 
+    fn restore_memory_patches_for_preset(preset_id: u32) {
+        let patches = ACTIVE_MEMORY_PATCHES.lock().remove(&preset_id);
+        if let Some(patches) = patches {
+            for (pid, address, orig_bytes) in patches {
+                let _ = crate::process_memory::write_code_bytes(pid, address, &orig_bytes);
+            }
+        }
+    }
+
     impl ActivePresetGuard {
         pub fn new(preset_id: u32) -> Self {
             add_active_preset(preset_id);
@@ -1686,6 +1697,7 @@ mod windows_overlay {
     impl Drop for ActivePresetGuard {
         fn drop(&mut self) {
             remove_active_preset(self.preset_id);
+            restore_memory_patches_for_preset(self.preset_id);
         }
     }
 
@@ -26835,12 +26847,13 @@ mod windows_overlay {
             crate::model::MemoryValueType::F32 => 3,
             crate::model::MemoryValueType::I64 => 4,
             crate::model::MemoryValueType::F64 => 5,
+            crate::model::MemoryValueType::Bytes => 6,
         }
     }
 
     fn esp_value_width(value_type: crate::model::MemoryValueType) -> usize {
         match value_type {
-            crate::model::MemoryValueType::I8 => 1,
+            crate::model::MemoryValueType::I8 | crate::model::MemoryValueType::Bytes => 1,
             crate::model::MemoryValueType::I16 => 2,
             crate::model::MemoryValueType::I32 | crate::model::MemoryValueType::F32 => 4,
             crate::model::MemoryValueType::I64 | crate::model::MemoryValueType::F64 => 8,
@@ -26858,6 +26871,7 @@ mod windows_overlay {
             crate::model::MemoryValueType::F32 => f32::from_le_bytes(bytes.try_into().ok()?),
             crate::model::MemoryValueType::I64 => i64::from_le_bytes(bytes.try_into().ok()?) as f32,
             crate::model::MemoryValueType::F64 => f64::from_le_bytes(bytes.try_into().ok()?) as f32,
+            crate::model::MemoryValueType::Bytes => bytes.first().map(|&b| b as f32)?,
         })
     }
 
@@ -29715,6 +29729,7 @@ mod windows_overlay {
 
     fn stop_macro_preset_by_id(preset_id: u32) {
         FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+        restore_memory_patches_for_preset(preset_id);
         let is_active_hold = {
             let hook_state = HOOK_STATE.lock();
             hook_state.active_hold_macros.contains_key(&preset_id)
@@ -30181,7 +30196,7 @@ mod windows_overlay {
             }
 
             MacroAction::WriteMemory => {
-                execute_write_memory_action_step(step);
+                execute_write_memory_action_step(step, Some(preset_id));
             }
 
             MacroAction::ScanAob => {
@@ -30597,7 +30612,7 @@ mod windows_overlay {
                 MacroAction::SetDataTable => execute_set_data_table_step(step),
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
-                MacroAction::WriteMemory => execute_write_memory_action_step(step),
+                MacroAction::WriteMemory => execute_write_memory_action_step(step, Some(preset_id)),
                 MacroAction::ScanAob => execute_scan_aob_action_step(step),
                 MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
                 MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
@@ -31494,7 +31509,7 @@ mod windows_overlay {
                 MacroAction::SetDataTable => execute_set_data_table_step(step),
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
-                MacroAction::WriteMemory => execute_write_memory_action_step(step),
+                MacroAction::WriteMemory => execute_write_memory_action_step(step, Some(preset_id)),
                 MacroAction::ScanAob => execute_scan_aob_action_step(step),
                 MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
                 MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
@@ -33672,7 +33687,44 @@ mod windows_overlay {
         }
     }
 
-    fn execute_write_memory_action_step(step: &MacroStep) {
+    fn parse_memory_patch_bytes(raw: &str) -> Option<Vec<u8>> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Some(rest) = trimmed.strip_prefix("nop").or_else(|| trimmed.strip_prefix("NOP")) {
+            let count = rest.trim().parse::<usize>().unwrap_or(1);
+            return Some(vec![0x90; count.max(1)]);
+        }
+        let clean = trimmed.replace("0x", "").replace("0X", "");
+        let mut bytes = Vec::new();
+        for part in clean.split(|c: char| c.is_whitespace() || c == ',' || c == ';') {
+            let p = part.trim();
+            if p.is_empty() {
+                continue;
+            }
+            if p.len() <= 2 {
+                let b = u8::from_str_radix(p, 16).ok()?;
+                bytes.push(b);
+            } else {
+                let chars: Vec<char> = p.chars().collect();
+                for chunk in chars.chunks(2) {
+                    if chunk.len() == 2 {
+                        let s: String = chunk.iter().collect();
+                        let b = u8::from_str_radix(&s, 16).ok()?;
+                        bytes.push(b);
+                    }
+                }
+            }
+        }
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(bytes)
+        }
+    }
+
+    fn execute_write_memory_action_step(step: &MacroStep, preset_id: Option<u32>) {
         let raw_key = interpolate_variables(&step.key);
         let Some((pid, address)) = resolve_memory_action_target(
             macro_memory_target_pid(step.memory_target_window.as_deref()),
@@ -33682,6 +33734,25 @@ mod windows_overlay {
             return;
         };
         let raw_value = interpolate_variables(&step.memory_write_value);
+
+        if step.memory_value_type == crate::model::MemoryValueType::Bytes {
+            let Some(bytes) = parse_memory_patch_bytes(&raw_value) else {
+                return;
+            };
+            if step.memory_restore_on_exit {
+                let id = preset_id.unwrap_or(0);
+                let mut patches = ACTIVE_MEMORY_PATCHES.lock();
+                let list = patches.entry(id).or_default();
+                if !list.iter().any(|(p, a, _)| *p == pid && *a == address) {
+                    if let Ok(orig) = crate::process_memory::read_memory_bytes(pid, address, bytes.len()) {
+                        list.push((pid, address, orig));
+                    }
+                }
+            }
+            let _ = crate::process_memory::write_code_bytes(pid, address, &bytes);
+            return;
+        }
+
         let value = match step.memory_value_type {
             crate::model::MemoryValueType::I8 if raw_value.trim().parse::<i8>().is_ok() => {
                 raw_value
@@ -33743,6 +33814,7 @@ mod windows_overlay {
                 }
                 value.to_string()
             }
+            crate::model::MemoryValueType::Bytes => return,
         };
         let value = match step.memory_value_type {
             crate::model::MemoryValueType::I8 => match value.trim().parse() {
@@ -33769,8 +33841,25 @@ mod windows_overlay {
                 Ok(value) => crate::process_memory::ScanValue::F64(value),
                 Err(_) => return,
             },
+            crate::model::MemoryValueType::Bytes => return,
         };
-        let _ = crate::process_memory::write_scan_value(pid, address, value);
+
+        if step.memory_restore_on_exit {
+            let width = value.value_type().width();
+            let id = preset_id.unwrap_or(0);
+            let mut patches = ACTIVE_MEMORY_PATCHES.lock();
+            let list = patches.entry(id).or_default();
+            if !list.iter().any(|(p, a, _)| *p == pid && *a == address) {
+                if let Ok(orig) = crate::process_memory::read_memory_bytes(pid, address, width) {
+                    list.push((pid, address, orig));
+                }
+            }
+        }
+
+        let width = value.value_type().width();
+        if crate::process_memory::write_scan_value(pid, address, value).is_err() {
+            let _ = crate::process_memory::write_code_bytes(pid, address, &value.bytes()[..width]);
+        }
     }
 
     fn execute_scan_aob_action_step(step: &MacroStep) {
@@ -34390,6 +34479,18 @@ mod windows_overlay {
     pub(crate) mod tests {
         use super::*;
         pub(crate) static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+        #[test]
+        fn test_parse_memory_patch_bytes() {
+            assert_eq!(parse_memory_patch_bytes("90 90"), Some(vec![0x90, 0x90]));
+            assert_eq!(parse_memory_patch_bytes("B8 01 00 00 00"), Some(vec![0xB8, 0x01, 0x00, 0x00, 0x00]));
+            assert_eq!(parse_memory_patch_bytes("0x90, 0x90"), Some(vec![0x90, 0x90]));
+            assert_eq!(parse_memory_patch_bytes("9090"), Some(vec![0x90, 0x90]));
+            assert_eq!(parse_memory_patch_bytes("nop 3"), Some(vec![0x90, 0x90, 0x90]));
+            assert_eq!(parse_memory_patch_bytes("NOP 1"), Some(vec![0x90]));
+            assert_eq!(parse_memory_patch_bytes(""), None);
+            assert_eq!(parse_memory_patch_bytes("xyz"), None);
+        }
 
         #[test]
         fn esp_worker_generation_never_uses_stopped_generation_zero() {
@@ -39354,6 +39455,12 @@ mod windows_overlay {
         let active_ids: Vec<u32> = ACTIVE_MACRO_PRESETS.lock().iter().copied().collect();
         for id in active_ids {
             stop_macro_preset_by_id(id);
+        }
+        let remaining_patches = std::mem::take(&mut *ACTIVE_MEMORY_PATCHES.lock());
+        for (_preset_id, patches) in remaining_patches {
+            for (pid, address, orig_bytes) in patches {
+                let _ = crate::process_memory::write_code_bytes(pid, address, &orig_bytes);
+            }
         }
 
         let hold_ids: Vec<u32> = {

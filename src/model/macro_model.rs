@@ -150,6 +150,8 @@ pub enum MemoryValueType {
     F32,
     I64,
     F64,
+    #[serde(alias = "HexBytes", alias = "Hex")]
+    Bytes,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -451,6 +453,8 @@ pub struct MacroStep {
     #[serde(default)]
     pub memory_write_value: String,
     #[serde(default)]
+    pub memory_restore_on_exit: bool,
+    #[serde(default)]
     pub aob_filter_operator: String,
     #[serde(default)]
     pub aob_filter_value: String,
@@ -703,6 +707,7 @@ impl Default for MacroStep {
             memory_target_window: None,
             memory_value_type: MemoryValueType::default(),
             memory_write_value: String::new(),
+            memory_restore_on_exit: false,
             aob_filter_operator: String::new(),
             aob_filter_value: String::new(),
             ai_response_provider: AiResponseProvider::Groq,
@@ -1529,6 +1534,24 @@ mod tests {
         assert_eq!(restored_aob.memory_value_type, MemoryValueType::F32);
         assert_eq!(restored_aob.aob_filter_operator, "!=");
         assert_eq!(restored_aob.aob_filter_value, "0");
+    }
+
+    #[test]
+    fn test_write_memory_patch_bytes_serialization() {
+        let step = MacroStep {
+            action: MacroAction::WriteMemory,
+            key: "neox_engine.dll+50A7E2".to_string(),
+            memory_value_type: MemoryValueType::Bytes,
+            memory_write_value: "90 90".to_string(),
+            memory_restore_on_exit: true,
+            ..MacroStep::default()
+        };
+        let json = serde_json::to_string(&step).expect("serialize write memory patch");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize write memory patch");
+        assert_eq!(restored.action, MacroAction::WriteMemory);
+        assert_eq!(restored.memory_value_type, MemoryValueType::Bytes);
+        assert_eq!(restored.memory_write_value, "90 90");
+        assert!(restored.memory_restore_on_exit);
     }
 
     #[test]

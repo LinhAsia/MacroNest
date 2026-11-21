@@ -273,6 +273,7 @@ impl CrosshairApp {
                     MemoryValueType::F32 => "Float (4 Bytes)",
                     MemoryValueType::I64 => "8 Bytes (integer)",
                     MemoryValueType::F64 => "Double (8 Bytes)",
+                    MemoryValueType::Bytes => "Hex Bytes (Patch / NOP)",
                 })
                 .show_ui(ui, |ui| {
                     changed |= ui.selectable_value(&mut step.memory_value_type, MemoryValueType::I8, "1 Byte (integer)").changed();
@@ -288,6 +289,9 @@ impl CrosshairApp {
                         .changed();
                     changed |= ui
                         .selectable_value(&mut step.memory_value_type, MemoryValueType::F64, "Double (8 Bytes)")
+                        .changed();
+                    changed |= ui
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::Bytes, "Hex Bytes (Patch / NOP)")
                         .changed();
                 });
 
@@ -426,23 +430,28 @@ impl CrosshairApp {
                 let normal_w = if val_len == 0 {
                     24.0
                 } else {
-                    (val_len as f32 * 7.5 + 14.0).clamp(24.0, 95.0)
+                    (val_len as f32 * 7.5 + 14.0).clamp(24.0, 115.0)
+                };
+                let hint = if step.memory_value_type == MemoryValueType::Bytes {
+                    "e.g. 90 90"
+                } else {
+                    "val"
                 };
                 let response = Self::render_variable_text_edit(
                     ui,
                     &mut step.memory_write_value,
                     ui.id().with("writemem-val"),
                     normal_w,
-                    130.0,
+                    140.0,
                     21.0,
                     21.0,
-                    "val",
+                    hint,
                     false,
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
-                    "Value or expression to write",
-                    "Giá trị hoặc biểu thức cần ghi",
+                    "Value or expression to write (or hex bytes like '90 90' if Hex Bytes selected)",
+                    "Giá trị hoặc biểu thức cần ghi (hoặc chuỗi hex byte như '90 90' nếu chọn Hex Bytes)",
                 ));
                 changed |= response.changed();
                 Self::render_variable_suggestions_braced(
@@ -452,6 +461,18 @@ impl CrosshairApp {
                     &[],
                     language,
                 );
+
+                changed |= ui
+                    .checkbox(
+                        &mut step.memory_restore_on_exit,
+                        Self::tr_lang(language, "Restore on stop", "Khôi phục khi dừng"),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Backup original memory bytes before write, and automatically restore them when this macro stops or is toggled off",
+                        "Sao lưu byte bộ nhớ gốc trước khi ghi, và tự động khôi phục lại khi macro này dừng hoặc tắt",
+                    ))
+                    .changed();
             } else {
                 ui.label("→");
                 let var_len = step.if_variable_name.chars().count();
@@ -20331,6 +20352,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         crate::model::MemoryValueType::I64 => "8 Bytes",
                                                         crate::model::MemoryValueType::I16 => "2 Bytes",
                                                         crate::model::MemoryValueType::I8 => "Byte",
+                                                        crate::model::MemoryValueType::Bytes => "Hex Bytes",
                                                     };
                                                     egui::ComboBox::from_id_salt(ui.make_persistent_id(("table_val_type", table_id)))
                                                         .selected_text(val_type_label)
@@ -20343,6 +20365,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 (crate::model::MemoryValueType::I64, "8 Bytes"),
                                                                 (crate::model::MemoryValueType::I16, "2 Bytes"),
                                                                 (crate::model::MemoryValueType::I8, "Byte"),
+                                                                (crate::model::MemoryValueType::Bytes, "Hex Bytes"),
                                                             ] {
                                                                 if ui.selectable_value(&mut table.value_type, vt, label).changed() {
                                                                     tables_changed = true;

@@ -196,7 +196,7 @@ impl ScanValue {
         }
     }
 
-    fn bytes(self) -> [u8; 8] {
+    pub fn bytes(self) -> [u8; 8] {
         let mut bytes = [0; 8];
         match self {
             Self::I8(value) => bytes[..1].copy_from_slice(&value.to_le_bytes()),
@@ -5696,7 +5696,7 @@ fn claim_result_slots(total: &AtomicUsize, requested: usize, limit: usize) -> us
 pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::Result<String> {
     let mut bytes = [0u8; 8];
     let width = match value_type {
-        MemoryValueType::I8 => 1,
+        MemoryValueType::I8 | MemoryValueType::Bytes => 1,
         MemoryValueType::I16 => 2,
         MemoryValueType::I32 | MemoryValueType::F32 => 4,
         MemoryValueType::I64 | MemoryValueType::F64 => 8,
@@ -5711,6 +5711,7 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
 
     Ok(match value_type {
         MemoryValueType::I8 => i8::from_le_bytes(bytes[..1].try_into().unwrap()).to_string(),
+        MemoryValueType::Bytes => format!("{:02X}", bytes[0]),
         MemoryValueType::I16 => i16::from_le_bytes(bytes[..2].try_into().unwrap()).to_string(),
         MemoryValueType::I32 => i32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
         MemoryValueType::F32 => f32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
