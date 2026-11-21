@@ -26477,7 +26477,8 @@ mod windows_overlay {
     struct EspReadFrame {
         pids: HashMap<String, (Instant, Option<u32>)>,
         values: HashMap<(u32, usize, u8), f32>,
-        memory_blocks: HashMap<(u32, usize), Option<Vec<u8>>>,
+        memory_blocks: HashMap<(u32, usize), Option<[u8; 64]>>,
+        view_inputs: HashMap<u32, (u32, [f32; 3], f32, f32, Option<[f32; 2]>)>,
         failed_addresses: HashMap<usize, Instant>,
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
         aabb_bounds: HashMap<(u32, usize), ([f32; 3], [f32; 3])>,
@@ -26488,6 +26489,7 @@ mod windows_overlay {
         fn begin_sample(&mut self) {
             self.values.clear();
             self.memory_blocks.clear();
+            self.view_inputs.clear();
             self.aabb_bounds.clear();
             self.entity_pointer_exprs.clear();
             if self.failed_addresses.len() > 1024 {
@@ -26693,25 +26695,27 @@ mod windows_overlay {
                     "invalid memory address",
                 ));
             }
-            // Nearby fields such as X/Y/Z normally live in one object. Reading one small block
-            // turns three or more cross-process syscalls into one without caching stale values.
-            const ALIGNMENT: usize = 16;
-            const BLOCK_SIZE: usize = 32;
+            // Nearby fields such as X/Y/Z normally live in one object. Reading a 64-byte block
+            // turns multiple cross-process syscalls into one without heap allocation or stale values.
+            const ALIGNMENT: usize = 64;
+            const BLOCK_SIZE: usize = 64;
             let block_address = address & !(ALIGNMENT - 1);
             let offset = address - block_address;
             let width = esp_value_width(value_type);
             let key = (pid, block_address);
             if !self.memory_blocks.contains_key(&key) {
-                let block = match crate::process_memory::read_memory_bytes(pid, block_address, BLOCK_SIZE) {
-                    Ok(bytes) if bytes.len() == BLOCK_SIZE => Some(bytes),
-                    _ => None,
-                };
+                let block = crate::process_memory::read_memory_fixed::<BLOCK_SIZE>(pid, block_address).ok();
                 self.memory_blocks.insert(key, block);
             }
             if let Some(Some(bytes)) = self.memory_blocks.get(&key)
-                && let Some(value) = bytes
-                    .get(offset..offset + width)
-                    .and_then(|bytes| decode_esp_numeric_bytes(bytes, value_type))
+                && offset + width <= BLOCK_SIZE
+                && let Some(value) = decode_esp_numeric_bytes(&bytes[offset..offset + width], value_type)
+            {
+                return Ok(value);
+            }
+            // Fallback for fields straddling block boundaries:
+            if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, address, width)
+                && let Some(value) = decode_esp_numeric_bytes(&bytes, value_type)
             {
                 return Ok(value);
             }
@@ -26861,6 +26865,9 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
     ) -> Result<(u32, [f32; 3], f32, f32, Option<[f32; 2]>), String> {
+        if let Some(cached) = frame.view_inputs.get(&preset.id) {
+            return Ok(*cached);
+        }
         if preset.target_window.trim().is_empty() {
             return Err("select a running target window first".to_owned());
         }
@@ -26896,7 +26903,9 @@ mod windows_overlay {
                 (yaw, pitch, Some(direction))
             }
         };
-        Ok((pid, camera, yaw, pitch, raw_direction))
+        let result = (pid, camera, yaw, pitch, raw_direction);
+        frame.view_inputs.insert(preset.id, result);
+        Ok(result)
     }
 
     fn read_esp_targets(

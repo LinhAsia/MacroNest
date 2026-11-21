@@ -1478,6 +1478,19 @@ pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<
     Ok(bytes)
 }
 
+pub fn read_memory_fixed<const N: usize>(pid: u32, address: usize) -> io::Result<[u8; N]> {
+    let mut bytes = [0u8; N];
+    let read = with_cached_read_process(pid, |process| process.read(address, &mut bytes))?;
+    if read == N {
+        Ok(bytes)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "partial memory read",
+        ))
+    }
+}
+
 pub fn read_text_memory(
     pid: u32,
     address: usize,
