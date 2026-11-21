@@ -391,6 +391,104 @@ impl CrosshairApp {
                 return;
             }
 
+            let is_auto_assembler = step.memory_value_type == MemoryValueType::AutoAssembler
+                || step.action == MacroAction::AutoAssembler;
+
+            if is_auto_assembler {
+                let popup_id = ui.id().with("ce_script_modal_open");
+                let mut is_modal_open: bool = ui
+                    .ctx()
+                    .data(|d| d.get_temp(popup_id))
+                    .unwrap_or(false);
+
+                let line_count = step.memory_write_value.lines().count();
+                let btn_text = if line_count <= 1 && step.memory_write_value.trim().is_empty() {
+                    Self::tr_lang(language, "📝 Paste CE Script", "📝 Dán Script CE").to_string()
+                } else {
+                    format!("📝 Script ({} {})", line_count, Self::tr_lang(language, "lines", "dòng"))
+                };
+
+                if ui.button(btn_text).on_hover_text(Self::tr_lang(
+                    language,
+                    "Open multi-line Cheat Engine script editor ([ENABLE] / [DISABLE])",
+                    "Mở bảng soạn thảo script Cheat Engine nhiều dòng ([ENABLE] / [DISABLE])",
+                )).clicked() {
+                    is_modal_open = true;
+                    ui.ctx().data_mut(|d| d.insert_temp(popup_id, true));
+                }
+
+                let val_len = step.memory_write_value.chars().count();
+                let normal_w = (val_len as f32 * 7.5 + 14.0).clamp(160.0, 320.0);
+                let response = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.memory_write_value,
+                    ui.id().with("writemem-val"),
+                    normal_w,
+                    360.0,
+                    21.0,
+                    21.0,
+                    "[ENABLE] alloc(newmem,2048)...",
+                    false,
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Paste or edit Cheat Engine Auto Assembler script here, or click the Script button to open editor.",
+                    "Dán hoặc sửa script Cheat Engine tại đây, hoặc bấm nút Script để mở bảng soạn thảo.",
+                ));
+                changed |= response.changed();
+
+                if is_modal_open {
+                    let mut close_modal = false;
+                    egui::Window::new(Self::tr_lang(language, "Cheat Engine Auto Assembler Script", "Soạn thảo Script Cheat Engine"))
+                        .id(ui.id().with("ce_script_window"))
+                        .default_size(egui::vec2(540.0, 380.0))
+                        .resizable(true)
+                        .collapsible(false)
+                        .show(ui.ctx(), |ui| {
+                            ui.horizontal(|ui| {
+                                if ui.button(Self::tr_lang(language, "🗑 Clear", "🗑 Xóa hết")).clicked() {
+                                    step.memory_write_value.clear();
+                                    changed = true;
+                                }
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button(Self::tr_lang(language, "Done / Close", "Xong / Đóng")).clicked() {
+                                        close_modal = true;
+                                    }
+                                });
+                            });
+                            ui.separator();
+                            egui::ScrollArea::vertical()
+                                .max_height(300.0)
+                                .show(ui, |ui| {
+                                    let text_edit = egui::TextEdit::multiline(&mut step.memory_write_value)
+                                        .desired_width(f32::INFINITY)
+                                        .font(egui::TextStyle::Monospace)
+                                        .desired_rows(15);
+                                    if ui.add(text_edit).changed() {
+                                        changed = true;
+                                    }
+                                });
+                        });
+                    if close_modal {
+                        ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                    }
+                }
+
+                changed |= ui
+                    .checkbox(
+                        &mut step.memory_restore_on_exit,
+                        Self::tr_lang(language, "Restore", "Khôi phục"),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Backup original memory bytes before write, and automatically restore them when this macro stops or is toggled off",
+                        "Sao lưu byte bộ nhớ gốc trước khi ghi, và tự động khôi phục lại khi macro này dừng hoặc tắt",
+                    ))
+                    .changed();
+
+                return;
+            }
+
             let addr_len = step.key.chars().count();
             let normal_addr_w = (addr_len as f32 * 7.5 + 16.0).clamp(115.0, 260.0);
             let address_response = Self::render_variable_text_edit(
