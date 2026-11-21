@@ -98,7 +98,6 @@ pub fn execute_auto_assembler_script(
 
     // Group items into target blocks
     let mut blocks: Vec<BlockBuffer> = Vec::new();
-    let mut current_target: Option<String> = None;
 
     for stmt in statements {
         match stmt {
@@ -106,7 +105,6 @@ pub fn execute_auto_assembler_script(
                 // Already handled or pre-declared
             }
             AsmStatement::TargetAddress(target_expr) => {
-                current_target = Some(target_expr.clone());
                 blocks.push(BlockBuffer {
                     target: target_expr,
                     base_address: 0,
@@ -115,9 +113,12 @@ pub fn execute_auto_assembler_script(
             }
             AsmStatement::LabelDef(label_name) => {
                 let label_lower = label_name.to_ascii_lowercase();
-                if symbols.contains_key(&label_lower) && current_target.is_none() {
+                let is_alloc_block = allocated_blocks
+                    .iter()
+                    .any(|(n, _, _)| n.eq_ignore_ascii_case(&label_name));
+
+                if is_alloc_block && symbols.contains_key(&label_lower) {
                     // This label was an allocated block name (e.g. `newmem:`)
-                    current_target = Some(label_name.clone());
                     let base = *symbols.get(&label_lower).unwrap();
                     blocks.push(BlockBuffer {
                         target: label_name,
@@ -274,46 +275,267 @@ pub fn restore_hook_session(pid: u32, session: &ActiveHookSession) {
     }
 }
 
-fn extract_script_section(script: &str, is_enable: bool) -> Vec<String> {
-    let has_any_section = script.lines().any(|l| {
-        let t = strip_comments(l).trim().to_ascii_uppercase();
-        t == "[ENABLE]" || t == "[DISABLE]"
-    });
+const MNEMONICS: &[&str] = &[
+    "movups", "movaps", "movss", "movsd", "mov",
+    "cvtsi2sd", "cvtsi2ss", "cvttsd2si", "cvttss2si",
+    "jmp", "call", "ret", "nop", "db",
+    "xorps", "xorpd", "xor", "push", "pop",
+    "sub", "add", "lea", "cmp", "test", "and", "or", "inc", "dec",
+    "je", "jz", "jne", "jnz", "ja", "jae", "jb", "jbe", "jg", "jge", "jl", "jle", "js", "jns",
+];
 
-    let mut in_enable = false;
-    let mut in_disable = false;
-    let mut result = Vec::new();
+const DIRECTIVE_PREFIXES: &[&str] = &[
+    "alloc(", "dealloc(", "label(", "registersymbol(", "unregistersymbol(", "assert(",
+];
 
-    for line in script.lines() {
-        let stripped = strip_comments(line);
-        let trimmed = stripped.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
+fn get_section_text(script: &str, is_enable: bool) -> &str {
+    let upper = script.to_ascii_uppercase();
+    let enable_pos = upper.find("[ENABLE]");
+    let disable_pos = upper.find("[DISABLE]");
 
-        let upper = trimmed.to_ascii_uppercase();
-        if upper == "[ENABLE]" {
-            in_enable = true;
-            in_disable = false;
-            continue;
-        } else if upper == "[DISABLE]" {
-            in_enable = false;
-            in_disable = true;
-            continue;
-        }
-
-        if has_any_section {
-            if is_enable && in_enable {
-                result.push(line.to_string());
-            } else if !is_enable && in_disable {
-                result.push(line.to_string());
+    match (enable_pos, disable_pos) {
+        (Some(e), Some(d)) => {
+            if is_enable {
+                if e < d {
+                    &script[e + 8..d]
+                } else {
+                    &script[e + 8..]
+                }
+            } else if d < e {
+                &script[d + 9..e]
+            } else {
+                &script[d + 9..]
             }
-        } else if is_enable {
-            result.push(line.to_string());
+        }
+        (Some(e), None) => {
+            if is_enable {
+                &script[e + 8..]
+            } else {
+                ""
+            }
+        }
+        (None, Some(d)) => {
+            if is_enable {
+                &script[..d]
+            } else {
+                &script[d + 9..]
+            }
+        }
+        (None, None) => {
+            if is_enable {
+                script
+            } else {
+                ""
+            }
+        }
+    }
+}
+
+pub fn split_statements(text: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let is_mnemonic = |word: &str| -> bool {
+        let w = word.to_ascii_lowercase();
+        MNEMONICS.contains(&w.as_str())
+    };
+
+    let is_directive_start = |s: &str| -> bool {
+        let s_lower = s.to_ascii_lowercase();
+        DIRECTIVE_PREFIXES.iter().any(|d| s_lower.starts_with(d))
+    };
+
+    let mut cleaned = String::with_capacity(text.len());
+    for line in text.lines() {
+        let stripped = strip_comments(line);
+        cleaned.push_str(&stripped);
+        cleaned.push('\n');
+    }
+
+    let bytes = cleaned.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut current = String::new();
+    let mut paren_depth: usize = 0;
+    let mut bracket_depth: usize = 0;
+
+    while i < len {
+        if current.trim().is_empty() {
+            current.clear();
+            while i < len && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\r' || bytes[i] == b'\n') {
+                i += 1;
+            }
+            if i >= len {
+                break;
+            }
+        }
+
+        let slice = &cleaned[i..];
+
+        if current.is_empty() && is_directive_start(slice) {
+            let mut end = i;
+            let mut p_depth = 0;
+            while end < len {
+                if bytes[end] == b'(' {
+                    p_depth += 1;
+                } else if bytes[end] == b')' {
+                    p_depth -= 1;
+                    if p_depth == 0 {
+                        end += 1;
+                        break;
+                    }
+                }
+                end += 1;
+            }
+            statements.push(cleaned[i..end].trim().to_string());
+            i = end;
+            current.clear();
+            continue;
+        }
+
+        if current.is_empty() {
+            let mut end = i;
+            while end < len && bytes[end] != b' ' && bytes[end] != b'\t' && bytes[end] != b'\r' && bytes[end] != b'\n' {
+                if bytes[end] == b':' {
+                    end += 1;
+                    break;
+                }
+                end += 1;
+            }
+            if end <= len && cleaned[i..end].ends_with(':') {
+                statements.push(cleaned[i..end].trim().to_string());
+                i = end;
+                current.clear();
+                continue;
+            }
+        }
+
+        let ch = cleaned[i..].chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+
+        if ch == '(' {
+            paren_depth += 1;
+        } else if ch == ')' {
+            paren_depth = paren_depth.saturating_sub(1);
+        } else if ch == '[' {
+            bracket_depth += 1;
+        } else if ch == ']' {
+            bracket_depth = bracket_depth.saturating_sub(1);
+        }
+
+        if paren_depth == 0 && bracket_depth == 0 {
+            if ch == '\n' || ch == '\r' {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    statements.push(trimmed.to_string());
+                    current.clear();
+                }
+                i += ch_len;
+                continue;
+            }
+
+            let trimmed = current.trim();
+            if !trimmed.is_empty() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                let mut peek = i;
+                while peek < len && (bytes[peek] == b' ' || bytes[peek] == b'\t') {
+                    peek += 1;
+                }
+                if peek < len {
+                    let peek_slice = &cleaned[peek..];
+                    let is_next_dir = is_directive_start(peek_slice);
+                    let is_next_label = {
+                        let word = peek_slice.split_whitespace().next().unwrap_or("");
+                        word.ends_with(':')
+                    };
+                    let is_next_mnemonic = {
+                        let word = peek_slice.split_whitespace().next().unwrap_or("");
+                        let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric());
+                        is_mnemonic(clean_word)
+                    };
+
+                    if is_next_dir || is_next_label || is_next_mnemonic {
+                        statements.push(trimmed.to_string());
+                        current.clear();
+                        i = peek;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        current.push(ch);
+        i += ch_len;
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        statements.push(trimmed.to_string());
+    }
+
+    statements
+}
+
+pub fn extract_script_section(script: &str, is_enable: bool) -> Vec<String> {
+    let section = get_section_text(script, is_enable);
+    split_statements(section)
+}
+
+pub fn format_ce_script(script: &str) -> String {
+    let enable_stmts = extract_script_section(script, true);
+    let disable_stmts = extract_script_section(script, false);
+    if enable_stmts.is_empty() && disable_stmts.is_empty() {
+        return script.to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str("[ENABLE]\n");
+    for s in &enable_stmts {
+        if s.ends_with(':') {
+            out.push('\n');
+            out.push_str(s);
+            out.push('\n');
+        } else if s.starts_with("alloc(") || s.starts_with("label(") || s.starts_with("registersymbol(") {
+            out.push_str(s);
+            out.push('\n');
+        } else {
+            out.push_str("  ");
+            out.push_str(s);
+            out.push('\n');
         }
     }
 
-    result
+    if !disable_stmts.is_empty() {
+        out.push_str("\n[DISABLE]\n");
+        for s in &disable_stmts {
+            if s.ends_with(':') {
+                out.push('\n');
+                out.push_str(s);
+                out.push('\n');
+            } else if s.starts_with("dealloc(") || s.starts_with("unregistersymbol(") {
+                out.push_str(s);
+                out.push('\n');
+            } else {
+                out.push_str("  ");
+                out.push_str(s);
+                out.push('\n');
+            }
+        }
+    }
+
+    let mut cleaned = String::new();
+    let mut prev_empty = false;
+    for line in out.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !prev_empty {
+                cleaned.push('\n');
+                prev_empty = true;
+            }
+        } else {
+            cleaned.push_str(line);
+            cleaned.push('\n');
+            prev_empty = false;
+        }
+    }
+    cleaned.trim().to_string()
 }
 
 fn strip_comments(line: &str) -> String {
@@ -375,9 +597,9 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
     }
 
     // Label or Target Address definition: `<name>:`
-    if line.ends_with(':') && !line.contains(' ') {
+    if line.ends_with(':') {
         let target = line[..line.len() - 1].trim();
-        if target.contains('+') || target.contains('.') || target.starts_with("0x") {
+        if target.contains('+') || target.contains('.') || target.starts_with("0x") || target.starts_with("0X") {
             return Ok(Some(AsmStatement::TargetAddress(target.to_string())));
         } else {
             return Ok(Some(AsmStatement::LabelDef(target.to_string())));
@@ -486,6 +708,12 @@ fn parse_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn parse_address_offset(text: &str) -> Option<usize> {
+    let t = text.trim();
+    let hex_clean = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
+    usize::from_str_radix(hex_clean, 16).ok().or_else(|| t.parse::<usize>().ok())
+}
+
 fn resolve_address_expr(
     pid: u32,
     expr: &str,
@@ -502,13 +730,13 @@ fn resolve_address_expr(
     // Check if expression is `<base> + <offset>` or `<base> - <offset>`
     if let Some((base_str, off_str)) = expr.split_once('+') {
         let base = resolve_address_expr(pid, base_str.trim(), symbols)?;
-        let off = parse_number(off_str.trim())
+        let off = parse_address_offset(off_str.trim())
             .ok_or_else(|| format!("Invalid offset '{}' in '{expr}'", off_str.trim()))?;
         return Ok(base + off);
     }
     if let Some((base_str, off_str)) = expr.split_once('-') {
         let base = resolve_address_expr(pid, base_str.trim(), symbols)?;
-        let off = parse_number(off_str.trim())
+        let off = parse_address_offset(off_str.trim())
             .ok_or_else(|| format!("Invalid offset '{}' in '{expr}'", off_str.trim()))?;
         return Ok(base.saturating_sub(off));
     }
@@ -1030,5 +1258,44 @@ movups [rcx+00000088],xmm0
         assert!(!enable_lines.is_empty());
         let disable_lines = extract_script_section(script, false);
         assert_eq!(disable_lines.len(), 3);
+    }
+
+    #[test]
+    fn test_flattened_user_script_parsing_and_formatting() {
+        let flattened = "[ENABLE] alloc(newmem,2048,neox_engine.dll+50A7E2) label(returnhere) label(originalcode) label(exit) newmem: mov eax,1 cvtsi2sd xmm0,eax originalcode: movups [rcx+00000088],xmm0 exit: jmp returnhere neox_engine.dll+50A7E2: jmp newmem nop 2 returnhere: [DISABLE] dealloc(newmem) neox_engine.dll+50A7E2: movups [rcx+00000088],xmm0";
+
+        let enable_stmts = extract_script_section(flattened, true);
+        assert_eq!(enable_stmts.len(), 15, "Expected 15 statements in ENABLE, got {:?}", enable_stmts);
+        assert_eq!(enable_stmts[0], "alloc(newmem,2048,neox_engine.dll+50A7E2)");
+        assert_eq!(enable_stmts[4], "newmem:");
+        assert_eq!(enable_stmts[5], "mov eax,1");
+        assert_eq!(enable_stmts[6], "cvtsi2sd xmm0,eax");
+        assert_eq!(enable_stmts[8], "movups [rcx+00000088],xmm0");
+        assert_eq!(enable_stmts[11], "neox_engine.dll+50A7E2:");
+        assert_eq!(enable_stmts[12], "jmp newmem");
+        assert_eq!(enable_stmts[13], "nop 2");
+        assert_eq!(enable_stmts[14], "returnhere:");
+
+        let disable_stmts = extract_script_section(flattened, false);
+        assert_eq!(disable_stmts.len(), 3, "Expected 3 statements in DISABLE, got {:?}", disable_stmts);
+        assert_eq!(disable_stmts[0], "dealloc(newmem)");
+        assert_eq!(disable_stmts[1], "neox_engine.dll+50A7E2:");
+        assert_eq!(disable_stmts[2], "movups [rcx+00000088],xmm0");
+
+        // Verify statements parse into AsmStatement without errors
+        for stmt_str in &enable_stmts {
+            let parsed = parse_statement(stmt_str).unwrap();
+            assert!(parsed.is_some(), "Failed parsing statement: {stmt_str}");
+        }
+        for stmt_str in &disable_stmts {
+            let parsed = parse_statement(stmt_str).unwrap();
+            assert!(parsed.is_some(), "Failed parsing statement: {stmt_str}");
+        }
+
+        // Verify format_ce_script produces multi-line formatted text
+        let formatted = format_ce_script(flattened);
+        assert!(formatted.lines().count() >= 15);
+        assert!(formatted.contains("[ENABLE]"));
+        assert!(formatted.contains("[DISABLE]"));
     }
 }

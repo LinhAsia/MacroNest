@@ -401,69 +401,53 @@ impl CrosshairApp {
                     .data(|d| d.get_temp(popup_id))
                     .unwrap_or(false);
 
-                let line_count = step.memory_write_value.lines().count();
-                let btn_text = if line_count <= 1 && step.memory_write_value.trim().is_empty() {
-                    Self::tr_lang(language, "📝 Paste CE Script", "📝 Dán Script CE").to_string()
-                } else {
-                    format!("📝 Script ({} {})", line_count, Self::tr_lang(language, "lines", "dòng"))
-                };
+                let btn_text = Self::tr_lang(language, "Edit Script", "Soạn Script");
 
-                if ui.button(btn_text).on_hover_text(Self::tr_lang(
-                    language,
-                    "Open multi-line Cheat Engine script editor ([ENABLE] / [DISABLE])",
-                    "Mở bảng soạn thảo script Cheat Engine nhiều dòng ([ENABLE] / [DISABLE])",
-                )).clicked() {
+                if ui.button(btn_text).clicked() {
                     is_modal_open = true;
+                    if step.memory_write_value.lines().count() <= 1
+                        && step.memory_write_value.to_ascii_uppercase().contains("[ENABLE]")
+                    {
+                        step.memory_write_value =
+                            crate::auto_assembler::format_ce_script(&step.memory_write_value);
+                        changed = true;
+                    }
                     ui.ctx().data_mut(|d| d.insert_temp(popup_id, true));
                 }
 
-                let val_len = step.memory_write_value.chars().count();
-                let normal_w = (val_len as f32 * 7.5 + 14.0).clamp(160.0, 320.0);
-                let response = Self::render_variable_text_edit(
-                    ui,
-                    &mut step.memory_write_value,
-                    ui.id().with("writemem-val"),
-                    normal_w,
-                    360.0,
-                    21.0,
-                    21.0,
-                    "[ENABLE] alloc(newmem,2048)...",
-                    false,
-                )
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Paste or edit Cheat Engine Auto Assembler script here, or click the Script button to open editor.",
-                    "Dán hoặc sửa script Cheat Engine tại đây, hoặc bấm nút Script để mở bảng soạn thảo.",
-                ));
-                changed |= response.changed();
-
                 if is_modal_open {
                     let mut close_modal = false;
-                    egui::Window::new(Self::tr_lang(language, "Cheat Engine Auto Assembler Script", "Soạn thảo Script Cheat Engine"))
+                    egui::Window::new(Self::tr_lang(language, "Auto Assembler Script", "Script Auto Assembler"))
                         .id(ui.id().with("ce_script_window"))
-                        .default_size(egui::vec2(540.0, 380.0))
+                        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                        .default_size(egui::vec2(600.0, 420.0))
                         .resizable(true)
                         .collapsible(false)
                         .show(ui.ctx(), |ui| {
                             ui.horizontal(|ui| {
-                                if ui.button(Self::tr_lang(language, "🗑 Clear", "🗑 Xóa hết")).clicked() {
+                                if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
                                     step.memory_write_value.clear();
                                     changed = true;
                                 }
+                                if ui.button(Self::tr_lang(language, "Format", "Định dạng")).clicked() {
+                                    step.memory_write_value =
+                                        crate::auto_assembler::format_ce_script(&step.memory_write_value);
+                                    changed = true;
+                                }
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(Self::tr_lang(language, "Done / Close", "Xong / Đóng")).clicked() {
+                                    if ui.button(Self::tr_lang(language, "Done", "Xong")).clicked() {
                                         close_modal = true;
                                     }
                                 });
                             });
                             ui.separator();
                             egui::ScrollArea::vertical()
-                                .max_height(300.0)
+                                .max_height(340.0)
                                 .show(ui, |ui| {
                                     let text_edit = egui::TextEdit::multiline(&mut step.memory_write_value)
                                         .desired_width(f32::INFINITY)
                                         .font(egui::TextStyle::Monospace)
-                                        .desired_rows(15);
+                                        .desired_rows(16);
                                     if ui.add(text_edit).changed() {
                                         changed = true;
                                     }
@@ -528,7 +512,7 @@ impl CrosshairApp {
                 &[],
                 language,
             );
-            if step.action == MacroAction::WriteMemory || step.action == MacroAction::AutoAssembler {
+            if step.action == MacroAction::WriteMemory {
                 ui.label("=");
                 let val_len = step.memory_write_value.chars().count();
                 let normal_w = if val_len == 0 {
@@ -536,9 +520,7 @@ impl CrosshairApp {
                 } else {
                     (val_len as f32 * 7.5 + 14.0).clamp(24.0, 180.0)
                 };
-                let hint = if step.memory_value_type == MemoryValueType::AutoAssembler || step.action == MacroAction::AutoAssembler {
-                    "[ENABLE] alloc(newmem,2048)..."
-                } else if step.memory_value_type == MemoryValueType::Bytes {
+                let hint = if step.memory_value_type == MemoryValueType::Bytes {
                     "e.g. 90 90"
                 } else {
                     "val"

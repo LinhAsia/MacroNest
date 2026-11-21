@@ -33745,17 +33745,26 @@ mod windows_overlay {
                 let raw_key = interpolate_variables(&step.key);
                 resolve_memory_action_target(None, &raw_key, true).map(|(p, _)| p)
             });
-            let Some(pid) = pid else { return; };
+            let Some(pid) = pid else {
+                eprintln!("[AutoAssembler] Target process not found or game is not running.");
+                return;
+            };
             let raw_value = interpolate_variables(&step.memory_write_value);
             let script = if !raw_value.trim().is_empty() {
                 raw_value
             } else {
                 interpolate_variables(&step.key)
             };
-            if let Ok(session) = crate::auto_assembler::execute_auto_assembler_script(pid, &script, true) {
-                if step.memory_restore_on_exit {
-                    let id = preset_id.unwrap_or(0);
-                    ACTIVE_AA_SESSIONS.lock().entry(id).or_default().push(session);
+            match crate::auto_assembler::execute_auto_assembler_script(pid, &script, true) {
+                Ok(session) => {
+                    eprintln!("[AutoAssembler] Script applied successfully in PID {pid}");
+                    if step.memory_restore_on_exit {
+                        let id = preset_id.unwrap_or(0);
+                        ACTIVE_AA_SESSIONS.lock().entry(id).or_default().push(session);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("[AutoAssembler] Execution failed: {err}");
                 }
             }
             return;
