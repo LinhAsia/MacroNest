@@ -19207,9 +19207,17 @@ if supports_move_mouse || show_detection_tuning {
         if step.action == MacroAction::WriteMemory {
             Self::extract_braced_vars(&step.key, vars);
             Self::extract_braced_vars(&step.memory_write_value, vars);
-            if crate::overlay::looks_like_math_expression_text(&step.memory_write_value) {
+            if !matches!(
+                step.memory_value_type,
+                MemoryValueType::Bytes | MemoryValueType::AutoAssembler
+            ) && crate::overlay::looks_like_math_expression_text(&step.memory_write_value)
+            {
                 Self::extract_vars_from_expression(&step.memory_write_value, vars);
             }
+        }
+        if step.action == MacroAction::AutoAssembler {
+            Self::extract_braced_vars(&step.key, vars);
+            Self::extract_braced_vars(&step.memory_write_value, vars);
         }
         if step.action == MacroAction::IfStart
             && matches!(step.if_condition_type, IfConditionType::Variable)
@@ -26564,6 +26572,7 @@ if supports_move_mouse || show_detection_tuning {
 #[cfg(test)]
 mod tests {
     use super::CrosshairApp;
+    use crate::model::{MacroAction, MacroStep, MemoryValueType};
 
     #[test]
     fn delay_drag_persists_only_after_release() {
@@ -26702,6 +26711,51 @@ mod tests {
         );
         assert!(vars2.contains("win_name"), "interpolated var in window title should be extracted");
         assert!(vars2.contains("delta_x"), "expression variable should be extracted");
+    }
+
+    #[test]
+    fn collect_vars_from_step_ignores_auto_assembler_script_tokens() {
+        let mut step = MacroStep::default();
+        step.action = MacroAction::WriteMemory;
+        step.memory_value_type = MemoryValueType::AutoAssembler;
+        step.key = "neox_engine.dll+50A7E2".to_string();
+        step.memory_write_value = r#"[ENABLE]
+alloc(newmem,2048,neox_engine.dll+50A7E2)
+label(returnhere)
+label(originalcode)
+label(exit)
+
+newmem:
+mov eax,1
+cvtsi2sd xmm0,eax
+
+originalcode:
+movups [rcx+00000088],xmm0
+
+exit:
+jmp returnhere
+
+neox_engine.dll+50A7E2:
+jmp newmem
+nop 2
+returnhere:
+
+[DISABLE]
+dealloc(newmem)
+neox_engine.dll+50A7E2:
+movups [rcx+00000088],xmm0
+"#.to_string();
+
+        let mut vars = std::collections::HashSet::new();
+        CrosshairApp::collect_vars_from_step(&step, &mut vars);
+        assert!(vars.is_empty(), "expected no active variables extracted from pure CE script, got: {:?}", vars);
+
+        // Braced variables inside script should still be extracted if present
+        step.memory_write_value = "mov eax, {custom_val}".to_string();
+        let mut vars2 = std::collections::HashSet::new();
+        CrosshairApp::collect_vars_from_step(&step, &mut vars2);
+        assert_eq!(vars2.len(), 1);
+        assert!(vars2.contains("custom_val"));
     }
 }
 
