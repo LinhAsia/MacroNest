@@ -271,7 +271,7 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(Vec::new()));
     static ACTIVE_MEMORY_PATCHES: Lazy<Mutex<HashMap<u32, Vec<(u32, usize, Vec<u8>)>>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
-    static ACTIVE_AA_SESSIONS: Lazy<Mutex<HashMap<u32, Vec<crate::auto_assembler::ActiveHookSession>>>> =
+    pub(crate) static ACTIVE_AA_SESSIONS: Lazy<Mutex<HashMap<u32, Vec<crate::auto_assembler::ActiveHookSession>>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     // One debugger attachment per process. Concurrent rebinds can stall or crash the target.
     static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<u32, Instant>>> =
@@ -32963,7 +32963,28 @@ mod windows_overlay {
         })
     }
 
-    fn macro_memory_target_pid(selector: Option<&str>) -> Option<u32> {
+    pub(crate) fn find_process_fallback(selector: &str) -> Option<u32> {
+        let clean = selector.trim().to_ascii_lowercase();
+        #[cfg(windows)]
+        {
+            if let Ok(list) = crate::memory_debugger::debugger::list_processes() {
+                for (pid, exe) in list {
+                    let exe_lower = exe.to_ascii_lowercase();
+                    if exe_lower == clean
+                        || exe_lower == format!("{clean}.exe")
+                        || (clean.contains("identity") && exe_lower.contains("dwrg"))
+                        || (clean == "identityv" && exe_lower == "dwrg.exe")
+                        || (clean == "identity v" && exe_lower == "dwrg.exe")
+                    {
+                        return Some(pid);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn macro_memory_target_pid(selector: Option<&str>) -> Option<u32> {
         let Some(selector) = selector else {
             return window_list::process_id_for_window(None);
         };
@@ -32986,7 +33007,8 @@ mod windows_overlay {
                     }
                 }
             }
-            let pid = window_list::process_id_for_window(Some(selector));
+            let pid = window_list::process_id_for_window(Some(selector))
+                .or_else(|| find_process_fallback(selector));
             *cached = Some((selector.to_owned(), Instant::now(), pid));
             pid
         })

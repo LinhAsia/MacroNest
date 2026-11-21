@@ -51,6 +51,9 @@ pub fn execute_auto_assembler_script(
     script: &str,
     is_enable: bool,
 ) -> Result<ActiveHookSession, String> {
+    #[cfg(windows)]
+    let _ = crate::memory_debugger::debugger::enable_debug_privilege();
+
     let lines = extract_script_section(script, is_enable);
     let mut symbols: HashMap<String, usize> = HashMap::new();
     let mut allocated_blocks: Vec<(String, usize, usize)> = Vec::new();

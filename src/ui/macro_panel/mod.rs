@@ -396,6 +396,7 @@ impl CrosshairApp {
 
             if is_auto_assembler {
                 let popup_id = ui.id().with("ce_script_modal_open");
+                let status_id = ui.id().with("ce_script_status_msg");
                 let mut is_modal_open: bool = ui
                     .ctx()
                     .data(|d| d.get_temp(popup_id))
@@ -420,7 +421,7 @@ impl CrosshairApp {
                     egui::Window::new(Self::tr_lang(language, "Auto Assembler Script", "Script Auto Assembler"))
                         .id(ui.id().with("ce_script_window"))
                         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                        .default_size(egui::vec2(600.0, 420.0))
+                        .default_size(egui::vec2(600.0, 440.0))
                         .resizable(true)
                         .collapsible(false)
                         .show(ui.ctx(), |ui| {
@@ -434,12 +435,56 @@ impl CrosshairApp {
                                         crate::auto_assembler::format_ce_script(&step.memory_write_value);
                                     changed = true;
                                 }
+                                if ui.button(Self::tr_lang(language, "Execute", "Chạy")).clicked() {
+                                    let target_sel = step.memory_target_window.as_deref();
+                                    let pid = crate::overlay::macro_memory_target_pid(target_sel)
+                                        .or_else(|| crate::overlay::find_process_fallback(target_sel.unwrap_or("dwrg")));
+                                    if let Some(pid) = pid {
+                                        match crate::auto_assembler::execute_auto_assembler_script(pid, &step.memory_write_value, true) {
+                                            Ok(session) => {
+                                                if step.memory_restore_on_exit {
+                                                    crate::overlay::ACTIVE_AA_SESSIONS
+                                                        .lock()
+                                                        .entry(0)
+                                                        .or_default()
+                                                        .push(session);
+                                                }
+                                                ui.ctx().data_mut(|d| {
+                                                    d.insert_temp(status_id, Some((true, format!("Injected successfully into PID {pid}!"))));
+                                                });
+                                            }
+                                            Err(err) => {
+                                                let hint = if err.contains("5") || err.to_ascii_lowercase().contains("access") {
+                                                    " (Access Denied - Run MacroNest as Administrator!)"
+                                                } else {
+                                                    ""
+                                                };
+                                                ui.ctx().data_mut(|d| {
+                                                    d.insert_temp(status_id, Some((false, format!("Failed: {err}{hint}"))));
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        ui.ctx().data_mut(|d| {
+                                            d.insert_temp(status_id, Some((false, "Target process not found (is the game running?)".to_string())));
+                                        });
+                                    }
+                                }
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if ui.button(Self::tr_lang(language, "Done", "Xong")).clicked() {
                                         close_modal = true;
                                     }
                                 });
                             });
+                            let status: Option<(bool, String)> = ui.ctx().data(|d| d.get_temp(status_id));
+                            if let Some((success, ref msg)) = status {
+                                let color = if success {
+                                    egui::Color32::from_rgb(0, 230, 100)
+                                } else {
+                                    egui::Color32::from_rgb(255, 90, 90)
+                                };
+                                ui.colored_label(color, msg);
+                            }
                             ui.separator();
                             egui::ScrollArea::vertical()
                                 .max_height(340.0)
