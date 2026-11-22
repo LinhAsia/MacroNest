@@ -365,10 +365,28 @@ const DIRECTIVE_PREFIXES: &[&str] = &[
     "aobscanmodule(", "aobscan(",
 ];
 
+fn find_section_header(script: &str, tag: &str) -> Option<usize> {
+    let mut offset = 0;
+    for line in script.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("//") && !trimmed.starts_with(';') {
+            let upper = trimmed.to_ascii_uppercase();
+            if let Some(idx) = upper.find(tag) {
+                let before = &trimmed[..idx];
+                if !before.contains("//") && !before.contains(';') {
+                    let line_start = offset + (line.len() - trimmed.len());
+                    return Some(line_start + idx);
+                }
+            }
+        }
+        offset += line.len();
+    }
+    None
+}
+
 fn get_section_text(script: &str, is_enable: bool) -> &str {
-    let upper = script.to_ascii_uppercase();
-    let enable_pos = upper.find("[ENABLE]");
-    let disable_pos = upper.find("[DISABLE]");
+    let enable_pos = find_section_header(script, "[ENABLE]");
+    let disable_pos = find_section_header(script, "[DISABLE]");
 
     match (enable_pos, disable_pos) {
         (Some(e), Some(d)) => {
@@ -1549,5 +1567,53 @@ movups [rcx+00000088],xmm0
         assert!(formatted.lines().count() >= 15);
         assert!(formatted.contains("[ENABLE]"));
         assert!(formatted.contains("[DISABLE]"));
+    }
+
+    #[test]
+    fn test_script_with_comments_containing_section_names() {
+        let script = r#"
+[ENABLE]
+//code from here to '[DISABLE]' will be used to enable the cheat
+alloc(newmem,2048,neox_engine.dll+50A7E2)
+label(returnhere)
+label(originalcode)
+label(exit)
+
+newmem:
+mov eax,1
+cvtsi2sd xmm0,eax
+
+originalcode:
+movups [rcx+88h],xmm0
+
+exit:
+jmp returnhere
+
+neox_engine.dll+50A7E2:
+jmp newmem
+nop 2
+returnhere:
+
+[DISABLE]
+//code from here till the end of the code will be used to disable the cheat
+dealloc(newmem)
+neox_engine.dll+50A7E2:
+movups [rcx+88h],xmm0
+//alt: db 0F 11 81 88 00 00 00
+"#;
+        let enable_stmts = extract_script_section(script, true);
+        assert_eq!(enable_stmts.len(), 15, "Got: {:?}", enable_stmts);
+        assert_eq!(enable_stmts[0], "alloc(newmem,2048,neox_engine.dll+50A7E2)");
+        assert_eq!(enable_stmts[8], "movups [rcx+88h],xmm0");
+
+        let disable_stmts = extract_script_section(script, false);
+        assert_eq!(disable_stmts.len(), 3, "Got: {:?}", disable_stmts);
+        assert_eq!(disable_stmts[0], "dealloc(newmem)");
+        assert_eq!(disable_stmts[2], "movups [rcx+88h],xmm0");
+
+        // Verify assembling movups [rcx+88h], xmm0 produces same bytes as [rcx+00000088]
+        let b1 = assemble_x64_instruction("movups [rcx+88h], xmm0").unwrap().unwrap();
+        let b2 = assemble_x64_instruction("movups [rcx+00000088], xmm0").unwrap().unwrap();
+        assert_eq!(b1, b2);
     }
 }
