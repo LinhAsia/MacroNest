@@ -47,6 +47,12 @@ enum AsmStatement {
         target: String,
         cond_byte: u8,
     },
+    RipRelMov {
+        is_write: bool,
+        is_64: bool,
+        reg: u8,
+        label: String,
+    },
     RipRelMovss {
         is_write: bool,
         xmm: u8,
@@ -74,6 +80,12 @@ enum BlockItem {
     Raw(Vec<u8>),
     Rel32Jump { target: String, is_call: bool },
     CondRel32Jump { target: String, cond_byte: u8 },
+    RipRelMov {
+        is_write: bool,
+        is_64: bool,
+        reg: u8,
+        label: String,
+    },
     RipRelMovss {
         is_write: bool,
         xmm: u8,
@@ -163,6 +175,11 @@ pub fn execute_auto_assembler_script(
             AsmStatement::UnregisterSymbol(name) => {
                 unregister_symbol(&name);
             }
+            AsmStatement::RipRelMov { is_write, is_64, reg, label } => {
+                if let Some(b) = blocks.last_mut() {
+                    b.items.push(BlockItem::RipRelMov { is_write, is_64, reg, label });
+                }
+            }
             AsmStatement::RipRelMovss { is_write, xmm, label } => {
                 if let Some(b) = blocks.last_mut() {
                     b.items.push(BlockItem::RipRelMovss { is_write, xmm, label });
@@ -200,6 +217,7 @@ pub fn execute_auto_assembler_script(
                                     BlockItem::Raw(bytes) => bytes.len(),
                                     BlockItem::Rel32Jump { .. } => 5,
                                     BlockItem::CondRel32Jump { .. } => 6,
+                                    BlockItem::RipRelMov { is_64, reg, .. } => if *is_64 || *reg >= 8 { 7 } else { 6 },
                                     BlockItem::RipRelMovss { xmm, .. } => if *xmm >= 8 { 9 } else { 8 },
                                 })
                                 .sum()
@@ -258,6 +276,7 @@ pub fn execute_auto_assembler_script(
                 BlockItem::Raw(bytes) => cur += bytes.len(),
                 BlockItem::Rel32Jump { .. } => cur += 5,
                 BlockItem::CondRel32Jump { .. } => cur += 6,
+                BlockItem::RipRelMov { is_64, reg, .. } => cur += if *is_64 || *reg >= 8 { 7 } else { 6 },
                 BlockItem::RipRelMovss { xmm, .. } => cur += if *xmm >= 8 { 9 } else { 8 },
             }
         }
@@ -303,6 +322,29 @@ pub fn execute_auto_assembler_script(
                     }
                     block_bytes.push(0x0F);
                     block_bytes.push(*cond_byte);
+                    block_bytes.extend_from_slice(&(rel32 as i32).to_le_bytes());
+                    current_ip = next_ip;
+                }
+                BlockItem::RipRelMov { is_write, is_64, reg, label } => {
+                    let target_addr = resolve_address_expr(pid, label, &symbols)
+                        .map_err(|e| format!("Cannot resolve symbol '{label}': {e}"))?;
+                    let len = if *is_64 || *reg >= 8 { 7 } else { 6 };
+                    let next_ip = current_ip + len;
+                    let rel32 = (target_addr as i64) - (next_ip as i64);
+                    if rel32 < i32::MIN as i64 || rel32 > i32::MAX as i64 {
+                        return Err(format!(
+                            "Symbol '{label}' is out of 32-bit relative range (delta {rel32})"
+                        ));
+                    }
+                    if *is_64 {
+                        let rex = 0x48 | if *reg >= 8 { 4 } else { 0 };
+                        block_bytes.push(rex);
+                    } else if *reg >= 8 {
+                        block_bytes.push(0x44);
+                    }
+                    block_bytes.push(if *is_write { 0x89 } else { 0x8B });
+                    let modrm = 0x05 | ((*reg & 7) << 3);
+                    block_bytes.push(modrm);
                     block_bytes.extend_from_slice(&(rel32 as i32).to_le_bytes());
                     current_ip = next_ip;
                 }
@@ -1030,10 +1072,24 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
         return Ok(Some(AsmStatement::Bytes(bytes)));
     }
 
+    // dw <value> (e.g. `dw 100`)
+    if lower.starts_with("dw ") {
+        let val_str = line[3..].trim();
+        let bytes = parse_data_word(val_str)?;
+        return Ok(Some(AsmStatement::Bytes(bytes)));
+    }
+
     // dd <value> (e.g. `dd (float)100.0` or `dd 100` or `dd 0x42C80000`)
     if lower.starts_with("dd ") {
         let val_str = line[3..].trim();
         let bytes = parse_data_dword(val_str)?;
+        return Ok(Some(AsmStatement::Bytes(bytes)));
+    }
+
+    // dq <value> (e.g. `dq 100` or `dq (double)100.0`)
+    if lower.starts_with("dq ") {
+        let val_str = line[3..].trim();
+        let bytes = parse_data_qword(val_str)?;
         return Ok(Some(AsmStatement::Bytes(bytes)));
     }
 
@@ -1042,10 +1098,12 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
         let rest = line[6..].trim();
         if let Some((d, s)) = rest.split_once(',') {
             let (d, s) = (d.trim(), s.trim());
+            let d_clean = strip_ptr_prefix(d);
+            let s_clean = strip_ptr_prefix(s);
             if let Some(xmm) = parse_xmm(d) {
-                if s.starts_with('[') && s.ends_with(']') {
-                    let inner = s[1..s.len() - 1].trim();
-                    if parse_memory_operand(s).is_none() && !inner.is_empty() {
+                if s_clean.starts_with('[') && s_clean.ends_with(']') {
+                    let inner = s_clean[1..s_clean.len() - 1].trim();
+                    if parse_memory_operand(s_clean).is_none() && !inner.is_empty() {
                         return Ok(Some(AsmStatement::RipRelMovss {
                             is_write: false,
                             xmm,
@@ -1054,12 +1112,71 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
                     }
                 }
             } else if let Some(xmm) = parse_xmm(s) {
-                if d.starts_with('[') && d.ends_with(']') {
-                    let inner = d[1..d.len() - 1].trim();
-                    if parse_memory_operand(d).is_none() && !inner.is_empty() {
+                if d_clean.starts_with('[') && d_clean.ends_with(']') {
+                    let inner = d_clean[1..d_clean.len() - 1].trim();
+                    if parse_memory_operand(d_clean).is_none() && !inner.is_empty() {
                         return Ok(Some(AsmStatement::RipRelMovss {
                             is_write: true,
                             xmm,
+                            label: inner.to_string(),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    // mov r32/r64, [label] or mov [label], r32/r64 (RIP-relative addressing in x64)
+    if lower.starts_with("mov ") {
+        let rest = line[4..].trim();
+        if let Some((d, s)) = rest.split_once(',') {
+            let (d, s) = (d.trim(), s.trim());
+            let d_clean = strip_ptr_prefix(d);
+            let s_clean = strip_ptr_prefix(s);
+            if let Some(r32) = parse_reg32(d) {
+                if s_clean.starts_with('[') && s_clean.ends_with(']') {
+                    let inner = s_clean[1..s_clean.len() - 1].trim();
+                    if parse_memory_operand(s_clean).is_none() && !inner.is_empty() {
+                        return Ok(Some(AsmStatement::RipRelMov {
+                            is_write: false,
+                            is_64: false,
+                            reg: r32,
+                            label: inner.to_string(),
+                        }));
+                    }
+                }
+            } else if let Some(r32) = parse_reg32(s) {
+                if d_clean.starts_with('[') && d_clean.ends_with(']') {
+                    let inner = d_clean[1..d_clean.len() - 1].trim();
+                    if parse_memory_operand(d_clean).is_none() && !inner.is_empty() {
+                        return Ok(Some(AsmStatement::RipRelMov {
+                            is_write: true,
+                            is_64: false,
+                            reg: r32,
+                            label: inner.to_string(),
+                        }));
+                    }
+                }
+            } else if let Some(r64) = parse_reg64(d) {
+                if s_clean.starts_with('[') && s_clean.ends_with(']') {
+                    let inner = s_clean[1..s_clean.len() - 1].trim();
+                    if parse_memory_operand(s_clean).is_none() && !inner.is_empty() {
+                        return Ok(Some(AsmStatement::RipRelMov {
+                            is_write: false,
+                            is_64: true,
+                            reg: r64,
+                            label: inner.to_string(),
+                        }));
+                    }
+                }
+            } else if let Some(r64) = parse_reg64(s) {
+                if d_clean.starts_with('[') && d_clean.ends_with(']') {
+                    let inner = d_clean[1..d_clean.len() - 1].trim();
+                    if parse_memory_operand(d_clean).is_none() && !inner.is_empty() {
+                        return Ok(Some(AsmStatement::RipRelMov {
+                            is_write: true,
+                            is_64: true,
+                            reg: r64,
                             label: inner.to_string(),
                         }));
                     }
@@ -1083,6 +1200,33 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
     Err(format!("Unrecognized instruction or directive: '{line}'"))
 }
 
+fn strip_ptr_prefix(text: &str) -> &str {
+    let mut s = text.trim();
+    for prefix in ["byte ptr", "word ptr", "dword ptr", "qword ptr", "xmmword ptr"] {
+        if s.to_ascii_lowercase().starts_with(prefix) {
+            s = s[prefix.len()..].trim();
+        }
+    }
+    s
+}
+
+fn parse_data_word(val_str: &str) -> Result<Vec<u8>, String> {
+    let lower = val_str.to_ascii_lowercase();
+    let num_str = lower.strip_prefix("(short)")
+        .or_else(|| lower.strip_prefix("(word)"))
+        .unwrap_or(&lower)
+        .trim();
+    if let Some(num) = parse_number(num_str) {
+        return Ok((num as u16).to_le_bytes().to_vec());
+    }
+    if let Ok(bytes) = parse_hex_bytes(num_str) {
+        if bytes.len() == 2 {
+            return Ok(bytes);
+        }
+    }
+    Err(format!("Could not parse word in dw: '{val_str}'"))
+}
+
 fn parse_data_dword(val_str: &str) -> Result<Vec<u8>, String> {
     let lower = val_str.to_ascii_lowercase();
     if let Some(float_str) = lower.strip_prefix("(float)") {
@@ -1090,15 +1234,52 @@ fn parse_data_dword(val_str: &str) -> Result<Vec<u8>, String> {
             .map_err(|e| format!("Invalid float value '{float_str}' in dd: {e}"))?;
         return Ok(val.to_le_bytes().to_vec());
     }
-    if let Some(num) = parse_number(val_str) {
+    let num_str = lower.strip_prefix("(int)")
+        .or_else(|| lower.strip_prefix("(dword)"))
+        .or_else(|| lower.strip_prefix("(uint)"))
+        .unwrap_or(&lower)
+        .trim();
+    if let Some(num) = parse_number(num_str) {
         return Ok((num as u32).to_le_bytes().to_vec());
     }
-    if let Ok(bytes) = parse_hex_bytes(val_str) {
+    if num_str.contains('.') {
+        if let Ok(val) = num_str.parse::<f32>() {
+            return Ok(val.to_le_bytes().to_vec());
+        }
+    }
+    if let Ok(bytes) = parse_hex_bytes(num_str) {
         if bytes.len() == 4 {
             return Ok(bytes);
         }
     }
     Err(format!("Could not parse dword in dd: '{val_str}'"))
+}
+
+fn parse_data_qword(val_str: &str) -> Result<Vec<u8>, String> {
+    let lower = val_str.to_ascii_lowercase();
+    if let Some(double_str) = lower.strip_prefix("(double)") {
+        let val: f64 = double_str.trim().parse()
+            .map_err(|e| format!("Invalid double value '{double_str}' in dq: {e}"))?;
+        return Ok(val.to_le_bytes().to_vec());
+    }
+    let num_str = lower.strip_prefix("(qword)")
+        .or_else(|| lower.strip_prefix("(int64)"))
+        .unwrap_or(&lower)
+        .trim();
+    if let Some(num) = parse_number(num_str) {
+        return Ok((num as u64).to_le_bytes().to_vec());
+    }
+    if num_str.contains('.') {
+        if let Ok(val) = num_str.parse::<f64>() {
+            return Ok(val.to_le_bytes().to_vec());
+        }
+    }
+    if let Ok(bytes) = parse_hex_bytes(num_str) {
+        if bytes.len() == 8 {
+            return Ok(bytes);
+        }
+    }
+    Err(format!("Could not parse qword in dq: '{val_str}'"))
 }
 
 fn clean_address_target(expr: &str) -> &str {
@@ -1794,12 +1975,7 @@ fn parse_imm64(text: &str) -> Option<i64> {
 
 // Parses `[rcx+0x88]` or `[rcx+00000088]` or `[rdx+4]` or `dword ptr [rcx+88h]`
 fn parse_memory_operand(text: &str) -> Option<(u8, i64)> {
-    let mut s = text.trim();
-    for prefix in ["byte ptr", "word ptr", "dword ptr", "qword ptr", "xmmword ptr"] {
-        if s.to_ascii_lowercase().starts_with(prefix) {
-            s = s[prefix.len()..].trim();
-        }
-    }
+    let s = strip_ptr_prefix(text);
     if !s.starts_with('[') || !s.ends_with(']') {
         return None;
     }
@@ -2104,6 +2280,66 @@ movups [rcx+88h],xmm0
                 label: "fov_val".to_string(),
             }
         );
+
+        let parsed_mov = parse_statement("mov eax, [fov_val]").unwrap().unwrap();
+        assert_eq!(
+            parsed_mov,
+            AsmStatement::RipRelMov {
+                is_write: false,
+                is_64: false,
+                reg: 0,
+                label: "fov_val".to_string(),
+            }
+        );
+
+        let parsed_mov_ptr = parse_statement("mov eax, dword ptr [fov_val]").unwrap().unwrap();
+        assert_eq!(parsed_mov_ptr, parsed_mov);
+
+        let parsed_mov_write = parse_statement("mov [fov_val], eax").unwrap().unwrap();
+        assert_eq!(
+            parsed_mov_write,
+            AsmStatement::RipRelMov {
+                is_write: true,
+                is_64: false,
+                reg: 0,
+                label: "fov_val".to_string(),
+            }
+        );
+
+        let parsed_mov64 = parse_statement("mov rax, [fov_val]").unwrap().unwrap();
+        assert_eq!(
+            parsed_mov64,
+            AsmStatement::RipRelMov {
+                is_write: false,
+                is_64: true,
+                reg: 0,
+                label: "fov_val".to_string(),
+            }
+        );
+
+        let parsed_dw = parse_statement("dw 100").unwrap().unwrap();
+        assert_eq!(parsed_dw, AsmStatement::Bytes(100u16.to_le_bytes().to_vec()));
+
+        let parsed_dd_int = parse_statement("dd 100").unwrap().unwrap();
+        assert_eq!(parsed_dd_int, AsmStatement::Bytes(100u32.to_le_bytes().to_vec()));
+
+        let parsed_dq = parse_statement("dq 100").unwrap().unwrap();
+        assert_eq!(parsed_dq, AsmStatement::Bytes(100u64.to_le_bytes().to_vec()));
+
+        let parsed_cvtsi2ss = parse_statement("cvtsi2ss xmm6, eax").unwrap().unwrap();
+        assert_eq!(parsed_cvtsi2ss, AsmStatement::Bytes(vec![0xF3, 0x0F, 0x2A, 0xF0]));
+
+        // Test user's exact snippet:
+        // fov_val:
+        // dd 100
+        // fov:
+        // mov eax, [fov_val]
+        // cvtsi2ss xmm6, eax
+        let snippet = ["fov_val:", "dd 100", "fov:", "mov eax, [fov_val]", "cvtsi2ss xmm6, eax"];
+        for line in snippet {
+            let res = parse_statement(line).unwrap();
+            assert!(res.is_some(), "Failed parsing user snippet line: {line}");
+        }
 
         register_symbol("fov_val", 1234, 0x7FF812340000);
         assert_eq!(get_registered_symbol("fov_val"), Some((1234, 0x7FF812340000)));

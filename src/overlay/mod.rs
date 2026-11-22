@@ -33581,10 +33581,13 @@ mod windows_overlay {
         allow_tracked_rebind: bool,
     ) -> Option<(u32, usize)> {
         let text = interpolate_variables(text);
-        let text = text.trim();
+        let mut clean = text.trim();
+        if clean.starts_with('[') && clean.ends_with(']') {
+            clean = clean[1..clean.len() - 1].trim();
+        }
 
-        // Check globally registered symbols from Auto Assembler (e.g. `@fov_val` or `fov_val` or `@fov_val + 4`)
-        let raw_symbol = text.strip_prefix('@').unwrap_or(text).trim();
+        // Check globally registered symbols from Auto Assembler (e.g. `@fov_val`, `fov_val`, `[fov_val]`, `[@fov_val]`, `[@fov_val + 4]`)
+        let raw_symbol = clean.strip_prefix('@').unwrap_or(clean).trim();
         let (base_sym, sym_offset) = if let Some((base, off_str)) = raw_symbol.split_once('+') {
             let off = usize::from_str_radix(off_str.trim().strip_prefix("0x").or_else(|| off_str.trim().strip_prefix("0X")).unwrap_or(off_str.trim()), 16).unwrap_or(0);
             (base.trim(), off as i64)
@@ -33599,7 +33602,7 @@ mod windows_overlay {
             let final_addr = (sym_addr as i64 + sym_offset) as usize;
             return Some((target_pid, final_addr));
         }
-        if let Some(alias) = text.strip_prefix('@') {
+        if let Some(alias) = clean.strip_prefix('@') {
             let entry = MEMORY_POINTER_ENTRIES
                 .lock()
                 .iter()
@@ -33712,7 +33715,7 @@ mod windows_overlay {
                 return Some((pid, address));
             }
         }
-        parse_memory_address(text).map(|address| (pid, address))
+        parse_memory_address(&text).map(|address| (pid, address))
     }
 
     fn execute_read_memory_action_step(step: &MacroStep) {
@@ -42712,6 +42715,15 @@ mod tests {
 
         let res2 = resolve_memory_action_target(None, "fov_val", false);
         assert_eq!(res2, Some((9999, 0x140001000)));
+
+        let res_bracket1 = resolve_memory_action_target(None, "[fov_val]", false);
+        assert_eq!(res_bracket1, Some((9999, 0x140001000)));
+
+        let res_bracket2 = resolve_memory_action_target(None, "[@fov_val]", false);
+        assert_eq!(res_bracket2, Some((9999, 0x140001000)));
+
+        let res_bracket3 = resolve_memory_action_target(None, "[fov_val + 4]", false);
+        assert_eq!(res_bracket3, Some((9999, 0x140001004)));
 
         let res3 = resolve_memory_action_target(Some(8888), "@fov_val + 4", false);
         assert_eq!(res3, Some((8888, 0x140001004)));
