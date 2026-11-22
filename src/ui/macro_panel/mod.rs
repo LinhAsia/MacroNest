@@ -588,7 +588,10 @@ impl CrosshairApp {
                     }
 
                     if !open {
-                        ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(popup_id, false);
+                            d.insert_temp(pinned_key, false);
+                        });
                     }
                 }
 

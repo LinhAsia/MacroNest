@@ -816,6 +816,7 @@ struct InstructionHit {
 struct InstructionWatchDialog {
     address: usize,
     addresses: Vec<usize>,
+    source_saved_index: Option<usize>,
     writes_only: bool,
     status: String,
     hits: Vec<InstructionHit>,
@@ -2077,6 +2078,7 @@ impl CrosshairApp {
         render: fn(&mut Self, &mut egui::Ui),
     ) -> bool {
         if !active {
+            self.memory_panel.unpinned_memory_popups.remove(id);
             return true;
         }
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(id);
@@ -2233,6 +2235,9 @@ impl CrosshairApp {
                     ui.separator();
                     render(self, ui);
                 });
+        }
+        if !open {
+            self.memory_panel.unpinned_memory_popups.remove(id);
         }
         open
     }
@@ -4124,9 +4129,22 @@ impl CrosshairApp {
             if !pinned
                 && !self.memory_panel.saved_list_active
                 && !has_kb_focus
-                && ui.input(|input| (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(egui::Key::A))
             {
-                self.memory_panel.selected_results = (0..visible_count).collect();
+                let arrow_up = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
+                let arrow_down = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+                if arrow_up || arrow_down {
+                    let delta = if arrow_up { -1 } else { 1 };
+                    if let Some(mut view) = self.memory_panel.memory_view_dialog.take() {
+                        Self::navigate_memory_view_relative_in_list_state(&mut self.memory_panel, delta, &mut view);
+                        self.memory_panel.memory_view_dialog = Some(view);
+                    } else if let Some(mut watch) = self.memory_panel.instruction_watch_dialog.take() {
+                        self.navigate_instruction_watch_relative_in_list(delta, &mut watch);
+                        self.memory_panel.instruction_watch_dialog = Some(watch);
+                    }
+                }
+                if ui.input(|input| (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(egui::Key::A)) {
+                    self.memory_panel.selected_results = (0..visible_count).collect();
+                }
             }
             if self.memory_panel.raw_snapshot.is_some() && self.memory_panel.candidates.is_empty() {
                 ui.centered_and_justified(|ui| {
@@ -4521,6 +4539,9 @@ impl CrosshairApp {
                         if let Some(mut view) = self.memory_panel.memory_view_dialog.take() {
                             Self::navigate_memory_view_relative_in_list_state(&mut self.memory_panel, delta, &mut view);
                             self.memory_panel.memory_view_dialog = Some(view);
+                        } else if let Some(mut watch) = self.memory_panel.instruction_watch_dialog.take() {
+                            self.navigate_instruction_watch_relative_in_list(delta, &mut watch);
+                            self.memory_panel.instruction_watch_dialog = Some(watch);
                         } else if !self.memory_panel.saved.is_empty() {
                             let cur = if arrow_up {
                                 self.memory_panel.selected_saved.iter().copied().min().unwrap_or(0)
@@ -5405,6 +5426,7 @@ impl CrosshairApp {
                                         })
                                     });
                                     if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                        view.pinned = true;
                                         view.source_saved_index = Some(index);
                                         view.source_pointer = source_pointer;
                                         view.display_type = memory_display_type_for_saved(&saved);
@@ -13658,10 +13680,13 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             self.persist();
         }
         if clear {
+            self.memory_panel.unpinned_memory_popups.remove(popup_id);
             self.memory_panel.status = "Pointer map A cleared".to_owned();
         } else if open {
             ctx.request_repaint_after(Duration::from_millis(50));
             self.memory_panel.deep_pointer_dialog = Some(dialog);
+        } else {
+            self.memory_panel.unpinned_memory_popups.remove(popup_id);
         }
     }
 
@@ -14836,9 +14861,18 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         } else {
             address
         };
+        let source_saved_index = if addresses.len() == 1 {
+            self.memory_panel
+                .saved
+                .iter()
+                .position(|item| item.address == display_address)
+        } else {
+            None
+        };
         self.memory_panel.instruction_watch_dialog = Some(InstructionWatchDialog {
             address: display_address,
             addresses,
+            source_saved_index,
             writes_only: !reads_and_writes,
             status,
             hits: Vec::new(),
@@ -14942,6 +14976,15 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             }
         }
         let mut open = true;
+        let mut nav_delta = 0isize;
+        let mem_has_kb = ctx.wants_keyboard_input() || ctx.memory(|m| m.focused().is_some());
+        if !mem_has_kb {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                nav_delta = -1;
+            } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                nav_delta = 1;
+            }
+        }
         let title = format!(
             "Find instructions {} — {}",
             if dialog.writes_only {
@@ -14969,9 +15012,17 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 .with_always_on_top();
             let mut unpin = false;
             ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of(("memory-instruction-watch", dialog.address)),
+                egui::ViewportId::from_hash_of("memory-instruction-watch"),
                 builder,
                 |ctx, _| {
+                    let mem_has_kb = ctx.wants_keyboard_input() || ctx.memory(|m| m.focused().is_some());
+                    if !mem_has_kb {
+                        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                            nav_delta = -1;
+                        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                            nav_delta = 1;
+                        }
+                    }
                     Self::sync_pinned_viewport_scale(ctx, "memory-instruction-watch", scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
@@ -15005,11 +15056,23 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
+                    let mem_has_kb = ui.ctx().wants_keyboard_input() || ui.ctx().memory(|m| m.focused().is_some());
+                    if !mem_has_kb {
+                        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                            nav_delta = -1;
+                        } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                            nav_delta = 1;
+                        }
+                    }
                     if ui.button("Pin").clicked() {
                         dialog.pinned = true;
                     }
                     start_requested |= Self::render_instruction_watch_body(ui, &mut dialog);
                 });
+        }
+        if nav_delta != 0 {
+            self.navigate_instruction_watch_relative_in_list(nav_delta, &mut dialog);
+            ctx.request_repaint();
         }
         if start_requested {
             self.restart_instruction_watch(&mut dialog);
@@ -15080,6 +15143,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
     #[cfg(windows)]
     fn restart_instruction_watch(&mut self, dialog: &mut InstructionWatchDialog) {
+        if let Some(mut prev) = dialog.active.take() {
+            prev.stop();
+        }
         let Some(pid) = self.memory_panel.process_pid else {
             dialog.status = "Select a process".to_owned();
             return;
@@ -15150,6 +15216,95 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 dialog.status = format!("Unable to start debugger: {error}");
             }
         }
+    }
+
+    #[cfg(windows)]
+    fn navigate_instruction_watch_relative_in_list(
+        &mut self,
+        delta: isize,
+        dialog: &mut InstructionWatchDialog,
+    ) -> bool {
+        let current_address = dialog.address;
+        let in_saved = dialog
+            .source_saved_index
+            .filter(|&idx| idx < self.memory_panel.saved.len())
+            .or_else(|| {
+                self.memory_panel
+                    .saved
+                    .iter()
+                    .position(|item| item.address == current_address)
+            });
+
+        if !self.memory_panel.saved.is_empty()
+            && (dialog.source_saved_index.is_some()
+                || self.memory_panel.saved_list_active
+                || in_saved.is_some()
+                || self.memory_panel.candidates.is_empty())
+        {
+            let cur = in_saved
+                .or_else(|| self.memory_panel.selected_saved.iter().copied().min())
+                .unwrap_or(0);
+            let next = if delta < 0 {
+                cur.saturating_sub(1)
+            } else {
+                (cur + 1).min(self.memory_panel.saved.len().saturating_sub(1))
+            };
+            if cur == next && in_saved.is_some() {
+                return false;
+            }
+            dialog.source_saved_index = Some(next);
+            self.memory_panel.selected_saved.clear();
+            self.memory_panel.selected_saved.insert(next);
+            self.memory_panel.saved_selection_anchor = Some(next);
+            self.memory_panel.saved_list_active = true;
+            let new_address = self.memory_panel.saved[next].address;
+            self.switch_instruction_watch_address(dialog, new_address);
+            return true;
+        } else if !self.memory_panel.candidates.is_empty() {
+            let in_candidates = self
+                .memory_panel
+                .candidates
+                .iter()
+                .position(|item| item.address == current_address);
+            let cur = in_candidates
+                .or_else(|| self.memory_panel.selected_results.iter().copied().min())
+                .unwrap_or(0);
+            let next = if delta < 0 {
+                cur.saturating_sub(1)
+            } else {
+                (cur + 1).min(self.memory_panel.candidates.len().saturating_sub(1))
+            };
+            if cur == next && in_candidates.is_some() {
+                return false;
+            }
+            self.memory_panel.selected_results.clear();
+            self.memory_panel.selected_results.insert(next);
+            self.memory_panel.saved_list_active = false;
+            let new_address = self.memory_panel.candidates[next].address;
+            self.switch_instruction_watch_address(dialog, new_address);
+            return true;
+        }
+        false
+    }
+
+    #[cfg(windows)]
+    fn switch_instruction_watch_address(
+        &mut self,
+        dialog: &mut InstructionWatchDialog,
+        new_address: usize,
+    ) {
+        if dialog.address == new_address && dialog.addresses == [new_address] {
+            return;
+        }
+        if let Some(mut active) = dialog.active.take() {
+            active.stop();
+        }
+        dialog.address = new_address;
+        dialog.addresses = vec![new_address];
+        dialog.hits.clear();
+        dialog.selected = None;
+        dialog.status = "Attaching debugger…".to_owned();
+        self.restart_instruction_watch(dialog);
     }
 
     #[cfg(windows)]
@@ -15326,7 +15481,19 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 dialog.instruction_sort = 0;
             }
         });
-        let list_height = (ui.available_height() * 0.45).clamp(140.0, 300.0);
+        let has_selected_details = dialog
+            .selected
+            .and_then(|idx| dialog.hits.get(idx))
+            .is_some_and(|h| !h.details.trim().is_empty());
+
+        let avail_h = ui.available_height();
+        let (list_height, details_max_h) = if has_selected_details {
+            let details_h = (avail_h * 0.38).clamp(120.0, 220.0);
+            let list_h = (avail_h - details_h - 18.0).max(120.0);
+            (list_h, details_h)
+        } else {
+            (avail_h.max(120.0), 0.0)
+        };
         let mut context_code_add = None;
         let mut context_disassembler = None;
         let mut display_hits: Vec<(usize, &InstructionHit)> =
@@ -15345,6 +15512,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         egui::ScrollArea::vertical()
             .id_salt("instruction-watch-hits")
             .max_height(list_height)
+            .auto_shrink([false, false])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(ui, |ui| {
                 for (row_idx, (original_index, hit)) in display_hits.into_iter().enumerate() {
@@ -15435,21 +15603,25 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if context_disassembler.is_some() {
             dialog.pending_disassembler = context_disassembler;
         }
-        ui.separator();
-        if let Some(index) = dialog.selected {
-            if let Some(hit) = dialog.hits.get(index) {
-                let mut details_str = hit.details.clone();
-                egui::ScrollArea::both()
-                    .id_salt("instruction-watch-details")
-                    .max_height(200.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut details_str)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY)
-                                .interactive(true),
-                        );
-                    });
+        if has_selected_details {
+            if let Some(index) = dialog.selected {
+                if let Some(hit) = dialog.hits.get(index) {
+                    ui.separator();
+                    let mut details_str = hit.details.clone();
+                    egui::ScrollArea::both()
+                        .id_salt("instruction-watch-details")
+                        .max_height(details_max_h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut details_str)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(8)
+                                    .interactive(true),
+                            );
+                        });
+                }
             }
         }
         start_requested
