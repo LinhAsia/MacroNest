@@ -345,10 +345,11 @@ pub fn execute_auto_assembler_script(
             .map_err(|e| format!("Failed writing {} bytes at 0x{addr:X}: {e}", bytes.len()))?;
     }
 
-    // Register any symbols whose addresses were populated in Pass 2
+    // Automatically register all allocated blocks and labels so the user never has to write registersymbol manually
     for (name, addr) in &symbols {
-        if registered_symbols.iter().any(|s| s.eq_ignore_ascii_case(name)) {
-            register_symbol(name, pid, *addr);
+        register_symbol(name, pid, *addr);
+        if !registered_symbols.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+            registered_symbols.push(name.clone());
         }
     }
 
