@@ -396,7 +396,7 @@ impl CrosshairApp {
 
             if is_auto_assembler {
                 let popup_id = ui.id().with("ce_script_modal_open");
-                let status_id = ui.id().with("ce_script_status_msg");
+                let status_id = popup_id.with("status_msg");
                 let mut is_modal_open: bool = ui
                     .ctx()
                     .data(|d| d.get_temp(popup_id))
@@ -430,6 +430,9 @@ impl CrosshairApp {
                             if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
                                 step.memory_write_value.clear();
                                 *changed = true;
+                                ui.ctx().data_mut(|d| {
+                                    d.remove_temp::<(bool, String)>(status_id);
+                                });
                             }
                             if ui.button(Self::tr_lang(language, "Format", "Định dạng")).clicked() {
                                 step.memory_write_value =
@@ -474,7 +477,7 @@ impl CrosshairApp {
                                                     .push(session);
                                             }
                                             ui.ctx().data_mut(|d| {
-                                                d.insert_temp(status_id, Some((true, format!("Injected successfully into PID {pid}!"))));
+                                                d.insert_temp(status_id, (true, format!("Injected successfully into PID {pid}!")));
                                             });
                                         }
                                         Err(err) => {
@@ -484,15 +487,16 @@ impl CrosshairApp {
                                                 ""
                                             };
                                             ui.ctx().data_mut(|d| {
-                                                d.insert_temp(status_id, Some((false, format!("Failed: {err}{hint}"))));
+                                                d.insert_temp(status_id, (false, format!("Failed: {err}{hint}")));
                                             });
                                         }
                                     }
                                 } else {
                                     ui.ctx().data_mut(|d| {
-                                        d.insert_temp(status_id, Some((false, "Target process not found (is the game running?)".to_string())));
+                                        d.insert_temp(status_id, (false, "Target process not found (is the game running?)".to_string()));
                                     });
                                 }
+                                ui.ctx().request_repaint();
                             }
                         });
                         let status: Option<(bool, String)> = ui.ctx().data(|d| d.get_temp(status_id));
