@@ -1,10 +1,28 @@
 use std::collections::HashMap;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+
+pub static REGISTERED_SYMBOLS: Lazy<Mutex<HashMap<String, (u32, usize)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub fn get_registered_symbol(name: &str) -> Option<(u32, usize)> {
+    REGISTERED_SYMBOLS.lock().get(&name.to_ascii_lowercase()).copied()
+}
+
+pub fn register_symbol(name: &str, pid: u32, address: usize) {
+    REGISTERED_SYMBOLS.lock().insert(name.to_ascii_lowercase(), (pid, address));
+}
+
+pub fn unregister_symbol(name: &str) {
+    REGISTERED_SYMBOLS.lock().remove(&name.to_ascii_lowercase());
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActiveHookSession {
     pub pid: u32,
     pub allocated_blocks: Vec<(String, usize, usize)>, // (name, address, size)
     pub original_patches: Vec<(usize, Vec<u8>)>,       // (address, original_bytes)
+    pub registered_symbols: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +47,13 @@ enum AsmStatement {
         target: String,
         cond_byte: u8,
     },
+    RipRelMovss {
+        is_write: bool,
+        xmm: u8,
+        label: String,
+    },
+    RegisterSymbol(String),
+    UnregisterSymbol(String),
     Nop(usize),
     AobScanModule {
         symbol: String,
@@ -49,6 +74,11 @@ enum BlockItem {
     Raw(Vec<u8>),
     Rel32Jump { target: String, is_call: bool },
     CondRel32Jump { target: String, cond_byte: u8 },
+    RipRelMovss {
+        is_write: bool,
+        xmm: u8,
+        label: String,
+    },
 }
 
 pub fn execute_auto_assembler_script(
@@ -114,6 +144,7 @@ pub fn execute_auto_assembler_script(
 
     // Group items into target blocks
     let mut blocks: Vec<BlockBuffer> = Vec::new();
+    let mut registered_symbols = Vec::new();
 
     for stmt in statements {
         match stmt {
@@ -122,6 +153,20 @@ pub fn execute_auto_assembler_script(
             | AsmStatement::LabelDecl(_)
             | AsmStatement::AobScanModule { .. } => {
                 // Already handled or pre-declared
+            }
+            AsmStatement::RegisterSymbol(name) => {
+                if let Some(&addr) = symbols.get(&name.to_ascii_lowercase()) {
+                    register_symbol(&name, pid, addr);
+                    registered_symbols.push(name);
+                }
+            }
+            AsmStatement::UnregisterSymbol(name) => {
+                unregister_symbol(&name);
+            }
+            AsmStatement::RipRelMovss { is_write, xmm, label } => {
+                if let Some(b) = blocks.last_mut() {
+                    b.items.push(BlockItem::RipRelMovss { is_write, xmm, label });
+                }
             }
             AsmStatement::TargetAddress(target_expr) => {
                 blocks.push(BlockBuffer {
@@ -155,6 +200,7 @@ pub fn execute_auto_assembler_script(
                                     BlockItem::Raw(bytes) => bytes.len(),
                                     BlockItem::Rel32Jump { .. } => 5,
                                     BlockItem::CondRel32Jump { .. } => 6,
+                                    BlockItem::RipRelMovss { xmm, .. } => if *xmm >= 8 { 9 } else { 8 },
                                 })
                                 .sum()
                         })
@@ -212,6 +258,7 @@ pub fn execute_auto_assembler_script(
                 BlockItem::Raw(bytes) => cur += bytes.len(),
                 BlockItem::Rel32Jump { .. } => cur += 5,
                 BlockItem::CondRel32Jump { .. } => cur += 6,
+                BlockItem::RipRelMovss { xmm, .. } => cur += if *xmm >= 8 { 9 } else { 8 },
             }
         }
         block_offsets.push(cur);
@@ -259,6 +306,28 @@ pub fn execute_auto_assembler_script(
                     block_bytes.extend_from_slice(&(rel32 as i32).to_le_bytes());
                     current_ip = next_ip;
                 }
+                BlockItem::RipRelMovss { is_write, xmm, label } => {
+                    let target_addr = resolve_address_expr(pid, label, &symbols)
+                        .map_err(|e| format!("Cannot resolve symbol '{label}': {e}"))?;
+                    let len = if *xmm >= 8 { 9 } else { 8 };
+                    let next_ip = current_ip + len;
+                    let rel32 = (target_addr as i64) - (next_ip as i64);
+                    if rel32 < i32::MIN as i64 || rel32 > i32::MAX as i64 {
+                        return Err(format!(
+                            "Symbol '{label}' is out of 32-bit relative range (delta {rel32})"
+                        ));
+                    }
+                    block_bytes.push(0xF3);
+                    if *xmm >= 8 {
+                        block_bytes.push(0x44);
+                    }
+                    block_bytes.push(0x0F);
+                    block_bytes.push(if *is_write { 0x11 } else { 0x10 });
+                    let modrm = 0x05 | ((*xmm & 7) << 3);
+                    block_bytes.push(modrm);
+                    block_bytes.extend_from_slice(&(rel32 as i32).to_le_bytes());
+                    current_ip = next_ip;
+                }
             }
         }
 
@@ -276,19 +345,31 @@ pub fn execute_auto_assembler_script(
             .map_err(|e| format!("Failed writing {} bytes at 0x{addr:X}: {e}", bytes.len()))?;
     }
 
+    // Register any symbols whose addresses were populated in Pass 2
+    for (name, addr) in &symbols {
+        if registered_symbols.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+            register_symbol(name, pid, *addr);
+        }
+    }
+
     Ok(ActiveHookSession {
         pid,
         allocated_blocks,
         original_patches,
+        registered_symbols,
     })
 }
 
 pub fn restore_hook_session(pid: u32, session: &ActiveHookSession) {
-    // 1. Restore original code bytes at hook sites
+    // 1. Unregister all symbols registered in this session
+    for sym in &session.registered_symbols {
+        unregister_symbol(sym);
+    }
+    // 2. Restore original code bytes at hook sites
     for (addr, bytes) in &session.original_patches {
         let _ = crate::process_memory::write_code_bytes(pid, *addr, bytes);
     }
-    // 2. Free all allocated memory blocks
+    // 3. Free all allocated memory blocks
     for (_name, addr, _size) in &session.allocated_blocks {
         let _ = crate::process_memory::free_allocated_memory(pid, *addr);
     }
@@ -865,9 +946,16 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
         return Ok(Some(AsmStatement::LabelDecl(inner.to_string())));
     }
 
-    // registersymbol(name) / unregistersymbol(name)
-    if lower.starts_with("registersymbol(") || lower.starts_with("unregistersymbol(") {
-        return Ok(None);
+    // registersymbol(name)
+    if lower.starts_with("registersymbol(") && lower.ends_with(')') {
+        let inner = line[15..line.len() - 1].trim();
+        return Ok(Some(AsmStatement::RegisterSymbol(inner.to_string())));
+    }
+
+    // unregistersymbol(name)
+    if lower.starts_with("unregistersymbol(") && lower.ends_with(')') {
+        let inner = line[17..line.len() - 1].trim();
+        return Ok(Some(AsmStatement::UnregisterSymbol(inner.to_string())));
     }
 
     // Label or Target Address definition: `<name>:`
@@ -941,6 +1029,44 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
         return Ok(Some(AsmStatement::Bytes(bytes)));
     }
 
+    // dd <value> (e.g. `dd (float)100.0` or `dd 100` or `dd 0x42C80000`)
+    if lower.starts_with("dd ") {
+        let val_str = line[3..].trim();
+        let bytes = parse_data_dword(val_str)?;
+        return Ok(Some(AsmStatement::Bytes(bytes)));
+    }
+
+    // movss xmm, [label] or movss [label], xmm (RIP-relative addressing in x64)
+    if lower.starts_with("movss ") {
+        let rest = line[6..].trim();
+        if let Some((d, s)) = rest.split_once(',') {
+            let (d, s) = (d.trim(), s.trim());
+            if let Some(xmm) = parse_xmm(d) {
+                if s.starts_with('[') && s.ends_with(']') {
+                    let inner = s[1..s.len() - 1].trim();
+                    if parse_memory_operand(s).is_none() && !inner.is_empty() {
+                        return Ok(Some(AsmStatement::RipRelMovss {
+                            is_write: false,
+                            xmm,
+                            label: inner.to_string(),
+                        }));
+                    }
+                }
+            } else if let Some(xmm) = parse_xmm(s) {
+                if d.starts_with('[') && d.ends_with(']') {
+                    let inner = d[1..d.len() - 1].trim();
+                    if parse_memory_operand(d).is_none() && !inner.is_empty() {
+                        return Ok(Some(AsmStatement::RipRelMovss {
+                            is_write: true,
+                            xmm,
+                            label: inner.to_string(),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
     // Try assembling instruction
     if let Some(bytes) = assemble_x64_instruction(line)? {
         return Ok(Some(AsmStatement::Bytes(bytes)));
@@ -954,6 +1080,24 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
     }
 
     Err(format!("Unrecognized instruction or directive: '{line}'"))
+}
+
+fn parse_data_dword(val_str: &str) -> Result<Vec<u8>, String> {
+    let lower = val_str.to_ascii_lowercase();
+    if let Some(float_str) = lower.strip_prefix("(float)") {
+        let val: f32 = float_str.trim().parse()
+            .map_err(|e| format!("Invalid float value '{float_str}' in dd: {e}"))?;
+        return Ok(val.to_le_bytes().to_vec());
+    }
+    if let Some(num) = parse_number(val_str) {
+        return Ok((num as u32).to_le_bytes().to_vec());
+    }
+    if let Ok(bytes) = parse_hex_bytes(val_str) {
+        if bytes.len() == 4 {
+            return Ok(bytes);
+        }
+    }
+    Err(format!("Could not parse dword in dd: '{val_str}'"))
 }
 
 fn clean_address_target(expr: &str) -> &str {
@@ -1014,6 +1158,11 @@ fn resolve_address_expr(
 
     // Check symbol table
     if let Some(&addr) = symbols.get(&lower) {
+        return Ok(addr);
+    }
+
+    // Check globally registered symbols
+    if let Some((_, addr)) = get_registered_symbol(&lower) {
         return Ok(addr);
     }
 
@@ -1932,5 +2081,83 @@ movups [rcx+88h],xmm0
 
         let parsed = parse_statement("je short 00007FF8317CBAC3h").unwrap();
         assert!(matches!(parsed, Some(AsmStatement::CondJmpRel32 { .. })));
+    }
+
+    #[test]
+    fn test_registered_symbols_and_riprel_movss() {
+        let parsed_dd = parse_statement("dd (float)100.0").unwrap().unwrap();
+        assert_eq!(parsed_dd, AsmStatement::Bytes(100.0f32.to_le_bytes().to_vec()));
+
+        let parsed_reg = parse_statement("registersymbol(fov_val)").unwrap().unwrap();
+        assert_eq!(parsed_reg, AsmStatement::RegisterSymbol("fov_val".to_string()));
+
+        let parsed_unreg = parse_statement("unregistersymbol(fov_val)").unwrap().unwrap();
+        assert_eq!(parsed_unreg, AsmStatement::UnregisterSymbol("fov_val".to_string()));
+
+        let parsed_movss = parse_statement("movss xmm6, [fov_val]").unwrap().unwrap();
+        assert_eq!(
+            parsed_movss,
+            AsmStatement::RipRelMovss {
+                is_write: false,
+                xmm: 6,
+                label: "fov_val".to_string(),
+            }
+        );
+
+        register_symbol("fov_val", 1234, 0x7FF812340000);
+        assert_eq!(get_registered_symbol("fov_val"), Some((1234, 0x7FF812340000)));
+        assert_eq!(get_registered_symbol("FOV_VAL"), Some((1234, 0x7FF812340000)));
+
+        let syms = HashMap::new();
+        assert_eq!(resolve_address_expr(1234, "fov_val", &syms).unwrap(), 0x7FF812340000);
+
+        unregister_symbol("fov_val");
+        assert_eq!(get_registered_symbol("fov_val"), None);
+
+        // Test end-to-end script with registered symbol and RIP-rel movss
+        let script = r#"
+[ENABLE]
+alloc(newmem,2048,0x7FF810000000)
+alloc(fov_val,4,0x7FF810000000)
+registersymbol(fov_val)
+label(returnhere)
+label(originalcode)
+label(exit)
+
+newmem:
+movss xmm6,[fov_val]
+
+originalcode:
+movss [rbx+84h],xmm6
+
+exit:
+jmp returnhere
+
+fov_val:
+dd (float)100.0
+
+0x7FF810000000:
+jmp newmem
+nop 3
+returnhere:
+
+[DISABLE]
+dealloc(newmem)
+dealloc(fov_val)
+unregistersymbol(fov_val)
+0x7FF810000000:
+movss [rbx+84h],xmm6
+"#;
+        let enable_stmts = extract_script_section(script, true);
+        for stmt_str in &enable_stmts {
+            let parsed = parse_statement(stmt_str).unwrap();
+            assert!(parsed.is_some(), "Failed parsing statement: {stmt_str}");
+        }
+
+        let disable_stmts = extract_script_section(script, false);
+        for stmt_str in &disable_stmts {
+            let parsed = parse_statement(stmt_str).unwrap();
+            assert!(parsed.is_some(), "Failed parsing statement: {stmt_str}");
+        }
     }
 }

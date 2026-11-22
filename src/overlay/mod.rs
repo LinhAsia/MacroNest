@@ -33582,6 +33582,23 @@ mod windows_overlay {
     ) -> Option<(u32, usize)> {
         let text = interpolate_variables(text);
         let text = text.trim();
+
+        // Check globally registered symbols from Auto Assembler (e.g. `@fov_val` or `fov_val` or `@fov_val + 4`)
+        let raw_symbol = text.strip_prefix('@').unwrap_or(text).trim();
+        let (base_sym, sym_offset) = if let Some((base, off_str)) = raw_symbol.split_once('+') {
+            let off = usize::from_str_radix(off_str.trim().strip_prefix("0x").or_else(|| off_str.trim().strip_prefix("0X")).unwrap_or(off_str.trim()), 16).unwrap_or(0);
+            (base.trim(), off as i64)
+        } else if let Some((base, off_str)) = raw_symbol.split_once('-') {
+            let off = usize::from_str_radix(off_str.trim().strip_prefix("0x").or_else(|| off_str.trim().strip_prefix("0X")).unwrap_or(off_str.trim()), 16).unwrap_or(0);
+            (base.trim(), -(off as i64))
+        } else {
+            (raw_symbol, 0i64)
+        };
+        if let Some((sym_pid, sym_addr)) = crate::auto_assembler::get_registered_symbol(base_sym) {
+            let target_pid = pid.unwrap_or(sym_pid);
+            let final_addr = (sym_addr as i64 + sym_offset) as usize;
+            return Some((target_pid, final_addr));
+        }
         if let Some(alias) = text.strip_prefix('@') {
             let entry = MEMORY_POINTER_ENTRIES
                 .lock()
@@ -42681,6 +42698,27 @@ mod tests {
 
         let res_with_hex = resolve_memory_action_target(Some(pid), "kernel32.dll!GetCurrentProcessId + A758", false);
         assert_eq!(res_with_hex, Some((pid, base_addr + 0xA758)));
+    }
+
+    #[test]
+    fn test_resolve_memory_action_target_registered_symbols() {
+        let _guard = super::windows_overlay::tests::TEST_MUTEX.lock().unwrap();
+        use super::windows_overlay::resolve_memory_action_target;
+
+        crate::auto_assembler::register_symbol("fov_val", 9999, 0x140001000);
+
+        let res1 = resolve_memory_action_target(None, "@fov_val", false);
+        assert_eq!(res1, Some((9999, 0x140001000)));
+
+        let res2 = resolve_memory_action_target(None, "fov_val", false);
+        assert_eq!(res2, Some((9999, 0x140001000)));
+
+        let res3 = resolve_memory_action_target(Some(8888), "@fov_val + 4", false);
+        assert_eq!(res3, Some((8888, 0x140001004)));
+
+        crate::auto_assembler::unregister_symbol("fov_val");
+        let res4 = resolve_memory_action_target(None, "@fov_val", false);
+        assert_eq!(res4, None);
     }
 
     #[test]
