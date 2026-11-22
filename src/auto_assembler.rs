@@ -1099,6 +1099,47 @@ fn assemble_mov(operands: &str) -> Result<Option<Vec<u8>>, String> {
         None => return Ok(None),
     };
 
+    // mov al, 1 / mov <r8>, <imm8>
+    if let Some(r8) = parse_reg8(dst) {
+        if let Some(imm) = parse_imm32(src) {
+            let mut bytes = Vec::new();
+            if r8 >= 8 {
+                bytes.push(0x41);
+            } else if r8 >= 4 {
+                bytes.push(0x40);
+            }
+            bytes.push(0xB0 + (r8 & 7));
+            bytes.push(imm as u8);
+            return Ok(Some(bytes));
+        }
+        if let Some(r8_src) = parse_reg8(src) {
+            let mut bytes = Vec::new();
+            let rex_r = if r8_src >= 8 { 4 } else { 0 };
+            let rex_b = if r8 >= 8 { 1 } else { 0 };
+            let rex_needed = rex_r != 0 || rex_b != 0 || (r8 >= 4 && r8 < 8) || (r8_src >= 4 && r8_src < 8);
+            if rex_needed {
+                bytes.push(0x40 | rex_r | rex_b);
+            }
+            bytes.push(0x88);
+            let modrm = 0xC0 | ((r8_src & 7) << 3) | (r8 & 7);
+            bytes.push(modrm);
+            return Ok(Some(bytes));
+        }
+    }
+
+    // mov ax, 1 / mov <r16>, <imm16>
+    if let Some(r16) = parse_reg16(dst) {
+        if let Some(imm) = parse_imm32(src) {
+            let mut bytes = vec![0x66];
+            if r16 >= 8 {
+                bytes.push(0x41);
+            }
+            bytes.push(0xB8 + (r16 & 7));
+            bytes.extend_from_slice(&(imm as u16).to_le_bytes());
+            return Ok(Some(bytes));
+        }
+    }
+
     // mov eax, 1 / mov <r32>, <imm32>
     if let Some(r32) = parse_reg32(dst) {
         if let Some(imm) = parse_imm32(src) {
@@ -1187,8 +1228,23 @@ fn assemble_cvtsi2ss(operands: &str) -> Result<Option<Vec<u8>>, String> {
     };
     let xmm = parse_xmm(dst).ok_or_else(|| format!("Invalid xmm register '{dst}'"))?;
     if let Some(r32) = parse_reg32(src) {
-        let modrm = 0xC0 | ((xmm & 7) << 3) | (r32 & 7);
-        return Ok(Some(vec![0xF3, 0x0F, 0x2A, modrm]));
+        let rex_r = if xmm >= 8 { 4 } else { 0 };
+        let rex_b = if r32 >= 8 { 1 } else { 0 };
+        let mut bytes = vec![0xF3];
+        if rex_r != 0 || rex_b != 0 {
+            bytes.push(0x40 | rex_r | rex_b);
+        }
+        bytes.push(0x0F);
+        bytes.push(0x2A);
+        bytes.push(0xC0 | ((xmm & 7) << 3) | (r32 & 7));
+        return Ok(Some(bytes));
+    }
+    if let Some(r64) = parse_reg64(src) {
+        let rex_r = if xmm >= 8 { 4 } else { 0 };
+        let rex_b = if r64 >= 8 { 1 } else { 0 };
+        let mut bytes = vec![0xF3, 0x48 | rex_r | rex_b, 0x0F, 0x2A];
+        bytes.push(0xC0 | ((xmm & 7) << 3) | (r64 & 7));
+        return Ok(Some(bytes));
     }
     Ok(None)
 }
@@ -1479,6 +1535,50 @@ fn assemble_int_arithmetic(sub_code: u8, operands: &str) -> Result<Option<Vec<u8
 }
 
 // Helpers for registers and operands
+fn parse_reg8(name: &str) -> Option<u8> {
+    match name.to_ascii_lowercase().as_str() {
+        "al" => Some(0),
+        "cl" => Some(1),
+        "dl" => Some(2),
+        "bl" => Some(3),
+        "spl" | "ah" => Some(4),
+        "bpl" | "ch" => Some(5),
+        "sil" | "dh" => Some(6),
+        "dil" | "bh" => Some(7),
+        "r8b" => Some(8),
+        "r9b" => Some(9),
+        "r10b" => Some(10),
+        "r11b" => Some(11),
+        "r12b" => Some(12),
+        "r13b" => Some(13),
+        "r14b" => Some(14),
+        "r15b" => Some(15),
+        _ => None,
+    }
+}
+
+fn parse_reg16(name: &str) -> Option<u8> {
+    match name.to_ascii_lowercase().as_str() {
+        "ax" => Some(0),
+        "cx" => Some(1),
+        "dx" => Some(2),
+        "bx" => Some(3),
+        "sp" => Some(4),
+        "bp" => Some(5),
+        "si" => Some(6),
+        "di" => Some(7),
+        "r8w" => Some(8),
+        "r9w" => Some(9),
+        "r10w" => Some(10),
+        "r11w" => Some(11),
+        "r12w" => Some(12),
+        "r13w" => Some(13),
+        "r14w" => Some(14),
+        "r15w" => Some(15),
+        _ => None,
+    }
+}
+
 fn parse_reg32(name: &str) -> Option<u8> {
     match name.to_ascii_lowercase().as_str() {
         "eax" => Some(0),
@@ -1631,8 +1731,24 @@ mod tests {
     #[test]
     fn test_assemble_basic_instructions() {
         assert_eq!(
+            assemble_x64_instruction("mov al, 1").unwrap(),
+            Some(vec![0xB0, 0x01])
+        );
+        assert_eq!(
+            assemble_x64_instruction("mov al,1").unwrap(),
+            Some(vec![0xB0, 0x01])
+        );
+        assert_eq!(
             assemble_x64_instruction("mov eax, 1").unwrap(),
             Some(vec![0xB8, 0x01, 0x00, 0x00, 0x00])
+        );
+        assert_eq!(
+            assemble_x64_instruction("cvtsi2ss xmm7, eax").unwrap(),
+            Some(vec![0xF3, 0x0F, 0x2A, 0xF8])
+        );
+        assert_eq!(
+            assemble_x64_instruction("cvtsi2ss xmm6, rdx").unwrap(),
+            Some(vec![0xF3, 0x48, 0x0F, 0x2A, 0xF2])
         );
         assert_eq!(
             assemble_x64_instruction("cvtsi2sd xmm0, eax").unwrap(),
