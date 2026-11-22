@@ -956,10 +956,22 @@ fn parse_statement(line: &str) -> Result<Option<AsmStatement>, String> {
     Err(format!("Unrecognized instruction or directive: '{line}'"))
 }
 
+fn clean_address_target(expr: &str) -> &str {
+    let mut s = expr.trim();
+    for prefix in ["short ", "near ptr ", "near ", "far ptr ", "far "] {
+        if s.to_ascii_lowercase().starts_with(prefix) {
+            s = s[prefix.len()..].trim();
+        }
+    }
+    s
+}
+
 fn parse_number(text: &str) -> Option<usize> {
-    let t = text.trim();
+    let t = clean_address_target(text);
     if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
         usize::from_str_radix(hex, 16).ok()
+    } else if t.ends_with('h') || t.ends_with('H') {
+        usize::from_str_radix(&t[..t.len() - 1], 16).ok()
     } else if t.chars().all(|c| c.is_ascii_digit()) {
         t.parse::<usize>().ok()
     } else {
@@ -983,7 +995,11 @@ fn parse_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn parse_address_offset(text: &str) -> Option<usize> {
-    let t = text.trim();
+    let mut t = text.trim();
+    if t.ends_with('h') || t.ends_with('H') {
+        t = &t[..t.len() - 1];
+        return usize::from_str_radix(t, 16).ok();
+    }
     let hex_clean = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
     usize::from_str_radix(hex_clean, 16).ok().or_else(|| t.parse::<usize>().ok())
 }
@@ -993,7 +1009,7 @@ fn resolve_address_expr(
     expr: &str,
     symbols: &HashMap<String, usize>,
 ) -> Result<usize, String> {
-    let expr = expr.trim();
+    let expr = clean_address_target(expr);
     let lower = expr.to_ascii_lowercase();
 
     // Check symbol table
@@ -1785,5 +1801,20 @@ movups [rcx+88h],xmm0
         let b1 = assemble_x64_instruction("movups [rcx+88h], xmm0").unwrap().unwrap();
         let b2 = assemble_x64_instruction("movups [rcx+00000088], xmm0").unwrap().unwrap();
         assert_eq!(b1, b2);
+    }
+
+    #[test]
+    fn test_jump_target_cleaning_and_resolution() {
+        let syms = HashMap::new();
+        let target = "short 00007FF8317CBAC3h";
+        let resolved = resolve_address_expr(0, target, &syms).unwrap();
+        assert_eq!(resolved, 0x7FF8317CBAC3);
+
+        let target2 = "near ptr 1234H";
+        let resolved2 = resolve_address_expr(0, target2, &syms).unwrap();
+        assert_eq!(resolved2, 0x1234);
+
+        let parsed = parse_statement("je short 00007FF8317CBAC3h").unwrap();
+        assert!(matches!(parsed, Some(AsmStatement::CondJmpRel32 { .. })));
     }
 }
