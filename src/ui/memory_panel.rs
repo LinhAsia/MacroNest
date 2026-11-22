@@ -2106,6 +2106,8 @@ impl CrosshairApp {
                 vec2(600.0, 720.0)
             } else if id == "memory-android-bridge-host" {
                 vec2(600.0, 420.0)
+            } else if id == "memory-auto-assemble-host" {
+                vec2(680.0, 520.0)
             } else {
                 vec2(860.0, 620.0)
             };
@@ -2117,6 +2119,8 @@ impl CrosshairApp {
                 vec2(440.0, 320.0)
             } else if id == "memory-android-bridge-host" {
                 vec2(460.0, 260.0)
+            } else if id == "memory-auto-assemble-host" {
+                vec2(400.0, 260.0)
             } else {
                 vec2(480.0, 280.0)
             };
@@ -2193,6 +2197,8 @@ impl CrosshairApp {
                 (vec2(600.0, 720.0), vec2(440.0, 320.0))
             } else if id == "memory-android-bridge-host" {
                 (vec2(600.0, 420.0), vec2(460.0, 260.0))
+            } else if id == "memory-auto-assemble-host" {
+                (vec2(680.0, 520.0), vec2(400.0, 260.0))
             } else {
                 (vec2(640.0, 440.0), vec2(380.0, 240.0))
             };
@@ -2561,7 +2567,7 @@ impl CrosshairApp {
         }
     }
 
-    fn render_memory_popup_resize_handles(ctx: &egui::Context) {
+    pub(crate) fn render_memory_popup_resize_handles(ctx: &egui::Context) {
         let rect = ctx.content_rect();
         // Keep resize hitboxes clear of egui scrollbars along the viewport edges.
         let edge = 3.0;
@@ -2652,7 +2658,7 @@ impl CrosshairApp {
             );
     }
 
-    fn memory_popup_frame(ctx: &egui::Context, scale: f32) -> Frame {
+    pub(crate) fn memory_popup_frame(ctx: &egui::Context, scale: f32) -> Frame {
         let margin = (7.0 * scale).clamp(2.0, 30.0).round() as i8;
         Frame::new()
             .fill(ctx.style().visuals.panel_fill)
@@ -2705,7 +2711,7 @@ impl CrosshairApp {
         ctx.data_mut(|d| d.insert_temp(prev_scale_id, scale));
     }
 
-    fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
+    pub(crate) fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
         let Some((rect, monitor)) =
             ctx.input(|input| Some((input.viewport().outer_rect?, input.viewport().monitor_size?)))
         else {
@@ -2720,7 +2726,7 @@ impl CrosshairApp {
         }
     }
 
-    fn render_memory_popup_titlebar(
+    pub(crate) fn render_memory_popup_titlebar(
         ctx: &egui::Context,
         language: crate::model::UiLanguage,
         title: &str,
@@ -15465,90 +15471,85 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
     #[cfg(windows)]
     fn render_auto_assemble_dialog(&mut self, ctx: &egui::Context) {
-        if self.memory_panel.auto_assemble_dialog.is_none() {
-            return;
+        let active = self.memory_panel.auto_assemble_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-auto-assemble-host",
+            "Auto Assemble",
+            active,
+            Self::render_auto_assemble_body,
+        ) {
+            self.memory_panel.auto_assemble_dialog = None;
         }
+    }
 
-        let mut is_open = true;
+    #[cfg(windows)]
+    fn render_auto_assemble_body(&mut self, ui: &mut egui::Ui) {
         let pid = self.memory_panel.process_pid;
-
-        egui::Window::new("Auto Assemble")
-            .id(egui::Id::new("memory_viewer_auto_assemble_window"))
-            .default_size(egui::vec2(600.0, 440.0))
-            .min_size(egui::vec2(360.0, 240.0))
-            .resizable(true)
-            .collapsible(false)
-            .open(&mut is_open)
-            .show(ctx, |ui| {
-                if let Some((ref mut script, ref mut status)) = self.memory_panel.auto_assemble_dialog {
-                    ui.horizontal(|ui| {
-                        if ui.button("Clear").clicked() {
-                            script.clear();
+        if let Some((ref mut script, ref mut status)) = self.memory_panel.auto_assemble_dialog {
+            ui.horizontal(|ui| {
+                if ui.button("Clear").clicked() {
+                    script.clear();
+                }
+                if ui.button("Format").clicked() {
+                    *script = crate::auto_assembler::format_ce_script(script);
+                }
+                egui::ComboBox::from_id_salt(ui.id().with("disasm_aa_template_combo"))
+                    .selected_text("Template")
+                    .show_ui(ui, |ui| {
+                        if ui.button("Code Injection").clicked() {
+                            *script = crate::auto_assembler::generate_code_injection_template(pid, "");
                         }
-                        if ui.button("Format").clicked() {
-                            *script = crate::auto_assembler::format_ce_script(script);
+                        if ui.button("Cheat Table Framework").clicked() {
+                            *script = crate::auto_assembler::generate_framework_template();
                         }
-                        egui::ComboBox::from_id_salt(ui.id().with("disasm_aa_template_combo"))
-                            .selected_text("Template")
-                            .show_ui(ui, |ui| {
-                                if ui.button("Code Injection").clicked() {
-                                    *script = crate::auto_assembler::generate_code_injection_template(pid, "");
-                                }
-                                if ui.button("Cheat Table Framework").clicked() {
-                                    *script = crate::auto_assembler::generate_framework_template();
-                                }
-                                if ui.button("AOB Injection").clicked() {
-                                    *script = crate::auto_assembler::generate_aob_injection_template("");
-                                }
-                                if ui.button("NOP Patch").clicked() {
-                                    *script = crate::auto_assembler::generate_nop_patch_template("");
-                                }
-                            });
-                        if ui.button("Execute").clicked() {
-                            if let Some(target_pid) = pid {
-                                match crate::auto_assembler::execute_auto_assembler_script(target_pid, script, true) {
-                                    Ok(_) => {
-                                        *status = Some((true, format!("Injected successfully into PID {target_pid}!")));
-                                    }
-                                    Err(e) => {
-                                        let hint = if e.contains("5") || e.to_ascii_lowercase().contains("access") {
-                                            " (Access Denied - Run as Administrator!)"
-                                        } else {
-                                            ""
-                                        };
-                                        *status = Some((false, format!("Failed: {e}{hint}")));
-                                    }
-                                }
-                            } else {
-                                *status = Some((false, "No target process selected".to_string()));
-                            }
+                        if ui.button("AOB Injection").clicked() {
+                            *script = crate::auto_assembler::generate_aob_injection_template("");
+                        }
+                        if ui.button("NOP Patch").clicked() {
+                            *script = crate::auto_assembler::generate_nop_patch_template("");
                         }
                     });
-
-                    if let Some((success, ref msg)) = *status {
-                        let color = if success {
-                            egui::Color32::from_rgb(0, 230, 100)
-                        } else {
-                            egui::Color32::from_rgb(255, 90, 90)
-                        };
-                        ui.colored_label(color, msg);
+                if ui.button("Execute").clicked() {
+                    if let Some(target_pid) = pid {
+                        match crate::auto_assembler::execute_auto_assembler_script(target_pid, script, true) {
+                            Ok(_) => {
+                                *status = Some((true, format!("Injected successfully into PID {target_pid}!")));
+                            }
+                            Err(e) => {
+                                let hint = if e.contains("5") || e.to_ascii_lowercase().contains("access") {
+                                    " (Access Denied - Run as Administrator!)"
+                                } else {
+                                    ""
+                                };
+                                *status = Some((false, format!("Failed: {e}{hint}")));
+                            }
+                        }
+                    } else {
+                        *status = Some((false, "No target process selected".to_string()));
                     }
-                    ui.separator();
-
-                    egui::ScrollArea::vertical()
-                        .max_height(340.0)
-                        .show(ui, |ui| {
-                            let text_edit = egui::TextEdit::multiline(script)
-                                .desired_width(f32::INFINITY)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_rows(16);
-                            ui.add(text_edit);
-                        });
                 }
             });
 
-        if !is_open {
-            self.memory_panel.auto_assemble_dialog = None;
+            if let Some((success, ref msg)) = *status {
+                let color = if success {
+                    egui::Color32::from_rgb(0, 230, 100)
+                } else {
+                    egui::Color32::from_rgb(255, 90, 90)
+                };
+                ui.colored_label(color, msg);
+            }
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height().max(100.0))
+                .show(ui, |ui| {
+                    let text_edit = egui::TextEdit::multiline(script)
+                        .desired_width(f32::INFINITY)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_rows(18);
+                    ui.add(text_edit);
+                });
         }
     }
 

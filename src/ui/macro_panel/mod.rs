@@ -417,106 +417,172 @@ impl CrosshairApp {
                 }
 
                 if is_modal_open {
+                    let pinned_key = ui.id().with("ce_script_unpinned");
+                    let is_unpinned: bool = ui.ctx().data(|d| d.get_temp(pinned_key)).unwrap_or(false);
+                    let pinned = !is_unpinned;
+                    let mut toggle_pin = false;
                     let mut open = true;
-                    egui::Window::new(Self::tr_lang(language, "Auto Assembler Script", "Script Auto Assembler"))
-                        .id(ui.id().with("ce_script_window"))
-                        .default_size(egui::vec2(600.0, 440.0))
-                        .min_size(egui::vec2(360.0, 240.0))
-                        .resizable(true)
-                        .collapsible(false)
-                        .open(&mut open)
-                        .show(ui.ctx(), |ui| {
-                            ui.horizontal(|ui| {
-                                if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
-                                    step.memory_write_value.clear();
-                                    changed = true;
-                                }
-                                if ui.button(Self::tr_lang(language, "Format", "Định dạng")).clicked() {
-                                    step.memory_write_value =
-                                        crate::auto_assembler::format_ce_script(&step.memory_write_value);
-                                    changed = true;
-                                }
-                                egui::ComboBox::from_id_salt(ui.id().with("ce_template_select"))
-                                    .selected_text(Self::tr_lang(language, "Template", "Mẫu"))
-                                    .show_ui(ui, |ui| {
-                                        let target_sel = step.memory_target_window.as_deref();
-                                        let pid = crate::overlay::macro_memory_target_pid(target_sel)
-                                            .or_else(|| crate::overlay::find_process_fallback(target_sel.unwrap_or("dwrg")));
-                                        if ui.button(Self::tr_lang(language, "Code Injection", "Tiêm Code (Hook)")).clicked() {
-                                            step.memory_write_value = crate::auto_assembler::generate_code_injection_template(pid, &step.key);
-                                            changed = true;
-                                        }
-                                        if ui.button(Self::tr_lang(language, "Cheat Table Framework", "Khung [ENABLE]/[DISABLE]")).clicked() {
-                                            step.memory_write_value = crate::auto_assembler::generate_framework_template();
-                                            changed = true;
-                                        }
-                                        if ui.button(Self::tr_lang(language, "AOB Injection", "Tiêm AOB (Quét mẫu byte)")).clicked() {
-                                            step.memory_write_value = crate::auto_assembler::generate_aob_injection_template(&step.key);
-                                            changed = true;
-                                        }
-                                        if ui.button(Self::tr_lang(language, "NOP Patch", "Vá NOP")).clicked() {
-                                            step.memory_write_value = crate::auto_assembler::generate_nop_patch_template(&step.key);
-                                            changed = true;
-                                        }
-                                    });
-                                if ui.button(Self::tr_lang(language, "Execute", "Chạy")).clicked() {
+                    let scale = 1.0;
+                    let title = Self::tr_lang(language, "Auto Assembler Script", "Script Auto Assembler");
+
+                    let render_editor = |ui: &mut egui::Ui, step: &mut MacroStep, changed: &mut bool| {
+                        ui.horizontal(|ui| {
+                            if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
+                                step.memory_write_value.clear();
+                                *changed = true;
+                            }
+                            if ui.button(Self::tr_lang(language, "Format", "Định dạng")).clicked() {
+                                step.memory_write_value =
+                                    crate::auto_assembler::format_ce_script(&step.memory_write_value);
+                                *changed = true;
+                            }
+                            egui::ComboBox::from_id_salt(ui.id().with("ce_template_select"))
+                                .selected_text(Self::tr_lang(language, "Template", "Mẫu"))
+                                .show_ui(ui, |ui| {
                                     let target_sel = step.memory_target_window.as_deref();
                                     let pid = crate::overlay::macro_memory_target_pid(target_sel)
                                         .or_else(|| crate::overlay::find_process_fallback(target_sel.unwrap_or("dwrg")));
-                                    if let Some(pid) = pid {
-                                        match crate::auto_assembler::execute_auto_assembler_script(pid, &step.memory_write_value, true) {
-                                            Ok(session) => {
-                                                if step.memory_restore_on_exit {
-                                                    crate::overlay::ACTIVE_AA_SESSIONS
-                                                        .lock()
-                                                        .entry(0)
-                                                        .or_default()
-                                                        .push(session);
-                                                }
-                                                ui.ctx().data_mut(|d| {
-                                                    d.insert_temp(status_id, Some((true, format!("Injected successfully into PID {pid}!"))));
-                                                });
-                                            }
-                                            Err(err) => {
-                                                let hint = if err.contains("5") || err.to_ascii_lowercase().contains("access") {
-                                                    " (Access Denied - Run MacroNest as Administrator!)"
-                                                } else {
-                                                    ""
-                                                };
-                                                ui.ctx().data_mut(|d| {
-                                                    d.insert_temp(status_id, Some((false, format!("Failed: {err}{hint}"))));
-                                                });
-                                            }
-                                        }
-                                    } else {
-                                        ui.ctx().data_mut(|d| {
-                                            d.insert_temp(status_id, Some((false, "Target process not found (is the game running?)".to_string())));
-                                        });
+                                    if ui.button(Self::tr_lang(language, "Code Injection", "Tiêm Code (Hook)")).clicked() {
+                                        step.memory_write_value = crate::auto_assembler::generate_code_injection_template(pid, &step.key);
+                                        *changed = true;
                                     }
-                                }
-                            });
-                            let status: Option<(bool, String)> = ui.ctx().data(|d| d.get_temp(status_id));
-                            if let Some((success, ref msg)) = status {
-                                let color = if success {
-                                    egui::Color32::from_rgb(0, 230, 100)
-                                } else {
-                                    egui::Color32::from_rgb(255, 90, 90)
-                                };
-                                ui.colored_label(color, msg);
-                            }
-                            ui.separator();
-                            egui::ScrollArea::vertical()
-                                .max_height(340.0)
-                                .show(ui, |ui| {
-                                    let text_edit = egui::TextEdit::multiline(&mut step.memory_write_value)
-                                        .desired_width(f32::INFINITY)
-                                        .font(egui::TextStyle::Monospace)
-                                        .desired_rows(16);
-                                    if ui.add(text_edit).changed() {
-                                        changed = true;
+                                    if ui.button(Self::tr_lang(language, "Cheat Table Framework", "Khung [ENABLE]/[DISABLE]")).clicked() {
+                                        step.memory_write_value = crate::auto_assembler::generate_framework_template();
+                                        *changed = true;
+                                    }
+                                    if ui.button(Self::tr_lang(language, "AOB Injection", "Tiêm AOB (Quét mẫu byte)")).clicked() {
+                                        step.memory_write_value = crate::auto_assembler::generate_aob_injection_template(&step.key);
+                                        *changed = true;
+                                    }
+                                    if ui.button(Self::tr_lang(language, "NOP Patch", "Vá NOP")).clicked() {
+                                        step.memory_write_value = crate::auto_assembler::generate_nop_patch_template(&step.key);
+                                        *changed = true;
                                     }
                                 });
+                            if ui.button(Self::tr_lang(language, "Execute", "Chạy")).clicked() {
+                                let target_sel = step.memory_target_window.as_deref();
+                                let pid = crate::overlay::macro_memory_target_pid(target_sel)
+                                    .or_else(|| crate::overlay::find_process_fallback(target_sel.unwrap_or("dwrg")));
+                                if let Some(pid) = pid {
+                                    match crate::auto_assembler::execute_auto_assembler_script(pid, &step.memory_write_value, true) {
+                                        Ok(session) => {
+                                            if step.memory_restore_on_exit {
+                                                crate::overlay::ACTIVE_AA_SESSIONS
+                                                    .lock()
+                                                    .entry(0)
+                                                    .or_default()
+                                                    .push(session);
+                                            }
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(status_id, Some((true, format!("Injected successfully into PID {pid}!"))));
+                                            });
+                                        }
+                                        Err(err) => {
+                                            let hint = if err.contains("5") || err.to_ascii_lowercase().contains("access") {
+                                                " (Access Denied - Run MacroNest as Administrator!)"
+                                            } else {
+                                                ""
+                                            };
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(status_id, Some((false, format!("Failed: {err}{hint}"))));
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    ui.ctx().data_mut(|d| {
+                                        d.insert_temp(status_id, Some((false, "Target process not found (is the game running?)".to_string())));
+                                    });
+                                }
+                            }
                         });
+                        let status: Option<(bool, String)> = ui.ctx().data(|d| d.get_temp(status_id));
+                        if let Some((success, ref msg)) = status {
+                            let color = if success {
+                                egui::Color32::from_rgb(0, 230, 100)
+                            } else {
+                                egui::Color32::from_rgb(255, 90, 90)
+                            };
+                            ui.colored_label(color, msg);
+                        }
+                        ui.separator();
+                        egui::ScrollArea::vertical()
+                            .max_height(ui.available_height().max(100.0))
+                            .show(ui, |ui| {
+                                let text_edit = egui::TextEdit::multiline(&mut step.memory_write_value)
+                                    .desired_width(f32::INFINITY)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_rows(18);
+                                if ui.add(text_edit).changed() {
+                                    *changed = true;
+                                }
+                            });
+                    };
+
+                    if pinned {
+                        let builder = egui::ViewportBuilder::default()
+                            .with_title(title)
+                            .with_position(egui::pos2(40.0, 40.0))
+                            .with_inner_size(vec2(680.0, 520.0))
+                            .with_min_inner_size(vec2(400.0, 260.0))
+                            .with_clamp_size_to_monitor_size(true)
+                            .with_decorations(false)
+                            .with_resizable(true)
+                            .with_always_on_top();
+                        ui.ctx().show_viewport_immediate(
+                            egui::ViewportId::from_hash_of(popup_id),
+                            builder,
+                            |ctx, _| {
+                                Self::constrain_memory_popup_to_monitor(ctx);
+                                if ctx.input(|input| input.viewport().close_requested()) {
+                                    open = false;
+                                }
+                                Self::render_memory_popup_titlebar(
+                                    ctx,
+                                    language,
+                                    title,
+                                    true,
+                                    &mut toggle_pin,
+                                    &mut open,
+                                    scale,
+                                );
+                                egui::CentralPanel::default()
+                                    .frame(Self::memory_popup_frame(ctx, scale))
+                                    .show(ctx, |ui| {
+                                        render_editor(ui, step, &mut changed);
+                                    });
+                                Self::render_memory_popup_resize_handles(ctx);
+                            },
+                        );
+                        if toggle_pin {
+                            ui.ctx().data_mut(|d| d.insert_temp(pinned_key, true));
+                        }
+                    } else {
+                        egui::Window::new(title)
+                            .id(ui.id().with("ce_script_window"))
+                            .default_size(vec2(680.0, 520.0))
+                            .min_size(vec2(400.0, 260.0))
+                            .collapsible(false)
+                            .open(&mut open)
+                            .show(ui.ctx(), |ui| {
+                                ui.horizontal(|ui| {
+                                    let pin_label = Self::tr_lang(language, "Pin", "Ghim");
+                                    if ui
+                                        .button(pin_label)
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Detach as a separate floating window",
+                                            "Tách thành cửa sổ nổi riêng biệt",
+                                        ))
+                                        .clicked()
+                                    {
+                                        ui.ctx().data_mut(|d| d.insert_temp(pinned_key, false));
+                                    }
+                                });
+                                ui.separator();
+                                render_editor(ui, step, &mut changed);
+                            });
+                    }
+
                     if !open {
                         ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
                     }
