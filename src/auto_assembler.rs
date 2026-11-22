@@ -354,6 +354,10 @@ fn scan_aob_for_script(pid: u32, module: &str, pattern: &str) -> Result<usize, S
 const MNEMONICS: &[&str] = &[
     "movups", "movaps", "movss", "movsd", "mov",
     "cvtsi2sd", "cvtsi2ss", "cvttsd2si", "cvttss2si",
+    "addss", "subss", "mulss", "divss",
+    "addsd", "subsd", "mulsd", "divsd",
+    "addps", "subps", "mulps", "divps",
+    "addpd", "subpd", "mulpd", "divpd",
     "jmp", "call", "ret", "nop", "db",
     "xorps", "xorpd", "xor", "push", "pop",
     "sub", "add", "lea", "cmp", "test", "and", "or", "inc", "dec",
@@ -1046,11 +1050,29 @@ fn assemble_x64_instruction(line: &str) -> Result<Option<Vec<u8>>, String> {
         "movsd" => assemble_movsd(rest),
         "cvtsi2sd" => assemble_cvtsi2sd(rest),
         "cvtsi2ss" => assemble_cvtsi2ss(rest),
+        "addss" => assemble_sse_binary_op(Some(0xF3), 0x58, rest),
+        "subss" => assemble_sse_binary_op(Some(0xF3), 0x5C, rest),
+        "mulss" => assemble_sse_binary_op(Some(0xF3), 0x59, rest),
+        "divss" => assemble_sse_binary_op(Some(0xF3), 0x5E, rest),
+        "addsd" => assemble_sse_binary_op(Some(0xF2), 0x58, rest),
+        "subsd" => assemble_sse_binary_op(Some(0xF2), 0x5C, rest),
+        "mulsd" => assemble_sse_binary_op(Some(0xF2), 0x59, rest),
+        "divsd" => assemble_sse_binary_op(Some(0xF2), 0x5E, rest),
+        "addps" => assemble_sse_binary_op(None, 0x58, rest),
+        "subps" => assemble_sse_binary_op(None, 0x5C, rest),
+        "mulps" => assemble_sse_binary_op(None, 0x59, rest),
+        "divps" => assemble_sse_binary_op(None, 0x5E, rest),
+        "addpd" => assemble_sse_binary_op(Some(0x66), 0x58, rest),
+        "subpd" => assemble_sse_binary_op(Some(0x66), 0x5C, rest),
+        "mulpd" => assemble_sse_binary_op(Some(0x66), 0x59, rest),
+        "divpd" => assemble_sse_binary_op(Some(0x66), 0x5E, rest),
         "xor" => assemble_xor(rest),
         "xorps" => assemble_xorps(rest),
         "xorpd" => assemble_xorpd(rest),
         "push" => assemble_push(rest),
         "pop" => assemble_pop(rest),
+        "add" => assemble_add(rest),
+        "sub" => assemble_sub(rest),
         _ => Ok(None),
     }
 }
@@ -1308,6 +1330,138 @@ fn assemble_pop(operand: &str) -> Result<Option<Vec<u8>>, String> {
     Ok(None)
 }
 
+fn assemble_sse_binary_op(prefix: Option<u8>, opcode: u8, operands: &str) -> Result<Option<Vec<u8>>, String> {
+    let (dst, src) = match operands.split_once(',') {
+        Some((d, s)) => (d.trim(), s.trim()),
+        None => return Ok(None),
+    };
+    if let (Some(x1), Some(x2)) = (parse_xmm(dst), parse_xmm(src)) {
+        let mut bytes = Vec::new();
+        if let Some(p) = prefix {
+            bytes.push(p);
+        }
+        let rex_r = if x1 >= 8 { 4 } else { 0 };
+        let rex_b = if x2 >= 8 { 1 } else { 0 };
+        if rex_r != 0 || rex_b != 0 {
+            bytes.push(0x40 | rex_r | rex_b);
+        }
+        bytes.push(0x0F);
+        bytes.push(opcode);
+        let modrm = 0xC0 | ((x1 & 7) << 3) | (x2 & 7);
+        bytes.push(modrm);
+        return Ok(Some(bytes));
+    }
+    if let Some(x1) = parse_xmm(dst) {
+        if let Some((base, disp)) = parse_memory_operand(src) {
+            let mut bytes = Vec::new();
+            if let Some(p) = prefix {
+                bytes.push(p);
+            }
+            let rex_r = if x1 >= 8 { 4 } else { 0 };
+            let rex_b = if base >= 8 { 1 } else { 0 };
+            if rex_r != 0 || rex_b != 0 {
+                bytes.push(0x40 | rex_r | rex_b);
+            }
+            bytes.push(0x0F);
+            bytes.push(opcode);
+            let (modrm, sib, disp_bytes) = encode_modrm(x1, base, disp);
+            bytes.push(modrm);
+            if let Some(s) = sib {
+                bytes.push(s);
+            }
+            bytes.extend_from_slice(&disp_bytes);
+            return Ok(Some(bytes));
+        }
+    }
+    Ok(None)
+}
+
+fn assemble_add(operands: &str) -> Result<Option<Vec<u8>>, String> {
+    assemble_int_arithmetic(0, operands)
+}
+
+fn assemble_sub(operands: &str) -> Result<Option<Vec<u8>>, String> {
+    assemble_int_arithmetic(5, operands)
+}
+
+fn assemble_int_arithmetic(sub_code: u8, operands: &str) -> Result<Option<Vec<u8>>, String> {
+    let (dst, src) = match operands.split_once(',') {
+        Some((d, s)) => (d.trim(), s.trim()),
+        None => return Ok(None),
+    };
+    // reg64, imm
+    if let Some(r64) = parse_reg64(dst) {
+        if let Some(imm) = parse_imm32(src) {
+            let rex = 0x48 | if r64 >= 8 { 1 } else { 0 };
+            let r_low = r64 & 7;
+            if (-128..=127).contains(&imm) {
+                return Ok(Some(vec![rex, 0x83, 0xC0 | (sub_code << 3) | r_low, imm as u8]));
+            } else {
+                let mut b = vec![rex, 0x81, 0xC0 | (sub_code << 3) | r_low];
+                b.extend_from_slice(&imm.to_le_bytes());
+                return Ok(Some(b));
+            }
+        }
+        if let Some(src_r64) = parse_reg64(src) {
+            let rex_r = if src_r64 >= 8 { 4 } else { 0 };
+            let rex_b = if r64 >= 8 { 1 } else { 0 };
+            let rex = 0x48 | rex_r | rex_b;
+            let opcode = match sub_code {
+                0 => 0x01, // add
+                _ => 0x29, // sub
+            };
+            let modrm = 0xC0 | ((src_r64 & 7) << 3) | (r64 & 7);
+            return Ok(Some(vec![rex, opcode, modrm]));
+        }
+    }
+    // reg32, imm
+    if let Some(r32) = parse_reg32(dst) {
+        if let Some(imm) = parse_imm32(src) {
+            let rex = if r32 >= 8 { Some(0x41) } else { None };
+            let r_low = r32 & 7;
+            let mut b = Vec::new();
+            if let Some(r) = rex { b.push(r); }
+            if (-128..=127).contains(&imm) {
+                b.push(0x83);
+                b.push(0xC0 | (sub_code << 3) | r_low);
+                b.push(imm as u8);
+            } else {
+                b.push(0x81);
+                b.push(0xC0 | (sub_code << 3) | r_low);
+                b.extend_from_slice(&imm.to_le_bytes());
+            }
+            return Ok(Some(b));
+        }
+    }
+    // [memory], imm (e.g. sub qword ptr [r12], 1)
+    if let Some((base, disp)) = parse_memory_operand(dst) {
+        if let Some(imm) = parse_imm32(src) {
+            let is_qword = dst.to_ascii_lowercase().starts_with("qword ptr");
+            let rex_w = if is_qword { 8 } else { 0 };
+            let rex_b = if base >= 8 { 1 } else { 0 };
+            let rex = if rex_w != 0 || rex_b != 0 { Some(0x40 | rex_w | rex_b) } else { None };
+            let (modrm_byte, sib, disp_bytes) = encode_modrm(sub_code, base, disp);
+            let mut b = Vec::new();
+            if let Some(r) = rex { b.push(r); }
+            if (-128..=127).contains(&imm) {
+                b.push(0x83);
+                b.push(modrm_byte);
+                if let Some(s) = sib { b.push(s); }
+                b.extend_from_slice(&disp_bytes);
+                b.push(imm as u8);
+            } else {
+                b.push(0x81);
+                b.push(modrm_byte);
+                if let Some(s) = sib { b.push(s); }
+                b.extend_from_slice(&disp_bytes);
+                b.extend_from_slice(&imm.to_le_bytes());
+            }
+            return Ok(Some(b));
+        }
+    }
+    Ok(None)
+}
+
 // Helpers for registers and operands
 fn parse_reg32(name: &str) -> Option<u8> {
     match name.to_ascii_lowercase().as_str() {
@@ -1475,6 +1629,22 @@ mod tests {
         assert_eq!(
             assemble_x64_instruction("mov dword ptr [rdx+4], 240").unwrap(),
             Some(vec![0xC7, 0x42, 0x04, 0xF0, 0x00, 0x00, 0x00])
+        );
+        assert_eq!(
+            assemble_x64_instruction("addss xmm0, xmm1").unwrap(),
+            Some(vec![0xF3, 0x0F, 0x58, 0xC1])
+        );
+        assert_eq!(
+            assemble_x64_instruction("subss xmm0, xmm1").unwrap(),
+            Some(vec![0xF3, 0x0F, 0x5C, 0xC1])
+        );
+        assert_eq!(
+            assemble_x64_instruction("mulss xmm0, xmm1").unwrap(),
+            Some(vec![0xF3, 0x0F, 0x59, 0xC1])
+        );
+        assert_eq!(
+            assemble_x64_instruction("sub qword ptr [r12], 1").unwrap(),
+            Some(vec![0x49, 0x83, 0x2C, 0x24, 0x01])
         );
     }
 
