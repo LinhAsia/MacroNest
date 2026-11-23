@@ -1543,7 +1543,11 @@ fn assemble_mov(operands: &str) -> Result<Option<Vec<u8>>, String> {
     // mov eax, 1 / mov <r32>, <imm32>
     if let Some(r32) = parse_reg32(dst) {
         if let Some(imm) = parse_imm32(src) {
-            let mut bytes = vec![0xB8 + (r32 & 7)];
+            let mut bytes = Vec::new();
+            if r32 >= 8 {
+                bytes.push(0x41);
+            }
+            bytes.push(0xB8 + (r32 & 7));
             bytes.extend_from_slice(&(imm as u32).to_le_bytes());
             return Ok(Some(bytes));
         }
@@ -2154,19 +2158,63 @@ fn parse_xmm(name: &str) -> Option<u8> {
 
 fn parse_imm32(text: &str) -> Option<i32> {
     let t = text.trim();
-    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        i32::from_str_radix(hex, 16).ok()
+    let lower = t.to_ascii_lowercase();
+
+    if let Some(float_str) = lower.strip_prefix("(float)") {
+        if let Ok(f) = float_str.trim().parse::<f32>() {
+            return Some(f.to_bits() as i32);
+        }
+    }
+
+    let int_str = lower.strip_prefix("(int)")
+        .or_else(|| lower.strip_prefix("(dword)"))
+        .or_else(|| lower.strip_prefix("(uint)"))
+        .unwrap_or(&lower)
+        .trim();
+
+    if let Some(hex) = int_str.strip_prefix("0x") {
+        i32::from_str_radix(hex, 16).ok().or_else(|| u32::from_str_radix(hex, 16).map(|u| u as i32).ok())
+    } else if let Some(hex) = int_str.strip_suffix('h') {
+        i32::from_str_radix(hex, 16).ok().or_else(|| u32::from_str_radix(hex, 16).map(|u| u as i32).ok())
+    } else if int_str.contains('.') {
+        int_str.parse::<f32>().ok().map(|f| f.to_bits() as i32)
     } else {
-        t.parse::<i32>().ok().or_else(|| i32::from_str_radix(t, 16).ok())
+        int_str.parse::<i32>().ok()
+            .or_else(|| i32::from_str_radix(int_str, 16).ok())
+            .or_else(|| u32::from_str_radix(int_str, 16).map(|u| u as i32).ok())
     }
 }
 
 fn parse_imm64(text: &str) -> Option<i64> {
     let t = text.trim();
-    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        i64::from_str_radix(hex, 16).ok()
+    let lower = t.to_ascii_lowercase();
+
+    if let Some(double_str) = lower.strip_prefix("(double)") {
+        if let Ok(d) = double_str.trim().parse::<f64>() {
+            return Some(d.to_bits() as i64);
+        }
+    }
+    if let Some(float_str) = lower.strip_prefix("(float)") {
+        if let Ok(f) = float_str.trim().parse::<f32>() {
+            return Some(f.to_bits() as i64);
+        }
+    }
+
+    let int_str = lower.strip_prefix("(qword)")
+        .or_else(|| lower.strip_prefix("(int64)"))
+        .unwrap_or(&lower)
+        .trim();
+
+    if let Some(hex) = int_str.strip_prefix("0x") {
+        i64::from_str_radix(hex, 16).ok().or_else(|| u64::from_str_radix(hex, 16).map(|u| u as i64).ok())
+    } else if let Some(hex) = int_str.strip_suffix('h') {
+        i64::from_str_radix(hex, 16).ok().or_else(|| u64::from_str_radix(hex, 16).map(|u| u as i64).ok())
+    } else if int_str.contains('.') {
+        int_str.parse::<f64>().ok().map(|d| d.to_bits() as i64)
     } else {
-        t.parse::<i64>().ok().or_else(|| i64::from_str_radix(t, 16).ok())
+        int_str.parse::<i64>().ok()
+            .or_else(|| i64::from_str_radix(int_str, 16).ok())
+            .or_else(|| u64::from_str_radix(int_str, 16).map(|u| u as i64).ok())
     }
 }
 
@@ -2721,5 +2769,22 @@ movss [rbx+84h],xmm6
         let b = assemble_x64_instruction("vmovdqa [rbp+2D0h], xmm1").unwrap().unwrap();
         // C5 F9 7F 8D D0 02 00 00
         assert_eq!(b, vec![0xC5, 0xF9, 0x7F, 0x8D, 0xD0, 0x02, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_parse_imm_float_and_assemble_mov_float() {
+        assert_eq!(parse_imm32("(float)100.0"), Some(100.0f32.to_bits() as i32));
+        assert_eq!(parse_imm32("(float)100"), Some(100.0f32.to_bits() as i32));
+        assert_eq!(parse_imm32("100.0"), Some(100.0f32.to_bits() as i32));
+        assert_eq!(parse_imm32("(float)-5.5"), Some((-5.5f32).to_bits() as i32));
+        assert_eq!(parse_imm32("0x42C80000"), Some(0x42C80000_u32 as i32));
+
+        let b = assemble_x64_instruction("mov eax, (float)100.0").unwrap().unwrap();
+        // B8 00 00 C8 42
+        assert_eq!(b, vec![0xB8, 0x00, 0x00, 0xC8, 0x42]);
+
+        let b2 = assemble_x64_instruction("mov [r15+2E0h], (float)100.0").unwrap().unwrap();
+        // 41 C7 87 E0 02 00 00 00 00 C8 42
+        assert_eq!(b2, vec![0x41, 0xC7, 0x87, 0xE0, 0x02, 0x00, 0x00, 0x00, 0x00, 0xC8, 0x42]);
     }
 }
