@@ -819,6 +819,9 @@ struct InstructionWatchDialog {
     source_saved_index: Option<usize>,
     writes_only: bool,
     status: String,
+    target_value_summary: Option<String>,
+    target_mutation_count: usize,
+    target_value_details: Option<String>,
     hits: Vec<InstructionHit>,
     selected: Option<usize>,
     rx: Receiver<WatchEvent>,
@@ -827,6 +830,7 @@ struct InstructionWatchDialog {
     pending_code_add: Option<usize>,
     pending_code_add_all: bool,
     pending_address_add: Option<usize>,
+    pending_target_address_add: bool,
     pending_disassembler: Option<usize>,
     auto_stop_on_hit: bool,
     hits_sort: u8,
@@ -5338,7 +5342,7 @@ impl CrosshairApp {
                                     .on_hover_text("Add this instruction address to code list to track dynamic addresses across game restarts")
                                     .clicked()
                                 {
-                                    self.add_instruction_to_code_list(saved.address, "movss [rbx], xmm2", true);
+                                    self.add_instruction_to_code_list(saved.address, "movss [rbx], xmm2", true, Some(saved.address));
                                     ui.close();
                                 }
                                 if ui
@@ -7854,6 +7858,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             ToggleShowAddress,
             RegenerateAob(usize),
             ToggleHighlight(usize),
+            AddTargetToAddressList(usize),
         }
 
         let mut pending_action = None;
@@ -7990,7 +7995,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         && self.memory_panel.android_bridge.selected_pid.is_some();
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
                         let selected = self.memory_panel.selected_code.contains(&index);
-                        let address_str = format!("{}+{:X}", entry.module, entry.offset);
+                        let address_str = if let Some(target) = entry.target_address {
+                            format!("{}+{:X} (🎯 0x{:X})", entry.module, entry.offset, target)
+                        } else {
+                            format!("{}+{:X}", entry.module, entry.offset)
+                        };
                         let instruction_text = if entry.replaced {
                             format!("{} (Replaced: NOP)", entry.name)
                         } else if !entry.name.is_empty() && entry.name != entry.instruction {
@@ -8277,6 +8286,18 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 ui.close_menu();
                             }
 
+                            if let Some(target) = entry.target_address {
+                                let add_target_label = if is_vietnamese {
+                                    format!("Thêm Target Address (0x{:X}) vào Address List", target)
+                                } else {
+                                    format!("Add Target Address (0x{:X}) to Address List", target)
+                                };
+                                if ui.button(add_target_label).clicked() {
+                                    pending_action = Some(CodeAction::AddTargetToAddressList(target));
+                                    ui.close_menu();
+                                }
+                            }
+
                             let highlight_label = if entry.highlighted {
                                 if is_vietnamese {
                                     "Bỏ đánh dấu sao (Unhighlight)"
@@ -8395,6 +8416,10 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
 
         match pending_action {
+            Some(CodeAction::AddTargetToAddressList(target)) => {
+                self.add_code_access_address(target, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
+                self.memory_panel.status = format!("[OK] Added Target Address {} to Address list", format_prefixed_memory_address(target));
+            }
             Some(CodeAction::OpenDisassembler(index)) => {
                 #[cfg(windows)]
                 if let Some(pid) = self.memory_panel.process_pid
@@ -9090,7 +9115,13 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     }
 
     #[cfg(windows)]
-    fn add_instruction_to_code_list(&mut self, address: usize, instruction: &str, writes: bool) {
+    fn add_instruction_to_code_list(
+        &mut self,
+        address: usize,
+        instruction: &str,
+        writes: bool,
+        target_address: Option<usize>,
+    ) {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
@@ -9153,6 +9184,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             entry.aob_target_offset = aob_target_offset;
             entry.instruction = instruction.to_owned();
             entry.writes = writes;
+            if target_address.is_some() {
+                entry.target_address = target_address;
+            }
             crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
             self.memory_panel.code_list_open = true;
             self.memory_panel.status = "AOB saved to the existing code-list entry".to_owned();
@@ -9171,6 +9205,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             patch_bytes: None,
             replaced: false,
             highlighted: false,
+            target_address,
         });
         crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
         self.memory_panel.code_list_open = true;
@@ -9286,6 +9321,21 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         });
     }
 
+    fn is_memory_displacement_match(asm: &str, field_offset: u32) -> bool {
+        let lower = asm.to_ascii_lowercase();
+        let Some(start_bracket) = lower.find('[') else { return false; };
+        let Some(end_bracket) = lower[start_bracket..].find(']') else { return false; };
+        let mem_content = &lower[start_bracket + 1..start_bracket + end_bracket];
+        let off_hex = format!("{:x}", field_offset);
+        let off_hex_h = format!("{:x}h", field_offset);
+        let off_hex_0x = format!("0x{:x}", field_offset);
+        let off_dec = format!("{}", field_offset);
+
+        mem_content.contains(&off_hex_h)
+            || mem_content.contains(&off_hex_0x)
+            || mem_content.split(['+', '-', '*', ' ']).any(|token| token.trim() == off_hex || token.trim() == off_dec)
+    }
+
     #[cfg(windows)]
     fn start_emulator_memory_watch(
         pid: u32,
@@ -9347,11 +9397,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                         3,
                                     ) {
                                         for (inst_addr, _bytes_hex, asm_text) in lines {
-                                            let lower_asm = asm_text.to_lowercase();
-                                            let off_hex = format!("{:x}", field_offset);
-                                            if (lower_asm.contains(&off_hex) || lower_asm.contains(&format!("{:X}", field_offset)))
-                                                && (lower_asm.contains('[') || lower_asm.contains("mov") || lower_asm.contains("ldr"))
-                                            {
+                                            if Self::is_memory_displacement_match(&asm_text, field_offset) {
                                                 let inst_gva = if delta != 0 {
                                                     (inst_addr as isize - delta) as usize
                                                 } else {
@@ -9384,6 +9430,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
         let handle = std::thread::spawn(move || {
             let mut prev_values: HashMap<usize, Vec<u8>> = HashMap::new();
+            let mut mutation_counts: HashMap<usize, usize> = HashMap::new();
             for &(_, hva) in &watch_targets {
                 if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, hva, 8) {
                     prev_values.insert(hva, bytes);
@@ -9454,10 +9501,15 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             "{target_desc}\nModule: {mod_desc}\nOld Value: {prev_u32} (0x{prev_u32:X}, f32: {prev_f32:.2})\nNew Value: {cur_u32} (0x{cur_u32:X}, f32: {cur_f32:.2})\nRaw Bytes: {raw_hex}"
                         );
 
-                        let _ = tx.send(WatchEvent::AddressHit {
-                            instruction_address: hva,
-                            instruction: summary,
+                        let count_entry = mutation_counts.entry(hva).or_insert(0);
+                        *count_entry += 1;
+                        let count = *count_entry;
+
+                        let _ = tx.send(WatchEvent::ValueMutation {
+                            target_address: hva,
+                            summary,
                             details,
+                            count,
                         });
                     }
                 }
@@ -9527,12 +9579,13 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if is_data_watch {
             let (tx, rx) = mpsc::channel();
             let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
-            let hva = if crate::process_memory::read_memory_bytes(pid, instruction_address, 4).is_ok() {
-                instruction_address
+            let watch_addr = entry.target_address.unwrap_or(instruction_address);
+            let hva = if crate::process_memory::read_memory_bytes(pid, watch_addr, 4).is_ok() {
+                watch_addr
             } else if delta != 0 {
-                (instruction_address as isize + delta) as usize
+                (watch_addr as isize + delta) as usize
             } else {
-                instruction_address
+                watch_addr
             };
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
@@ -9540,7 +9593,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
             let session = Self::start_emulator_memory_watch(
                 pid,
-                vec![(instruction_address, hva)],
+                vec![(watch_addr, hva)],
                 tx,
                 modules,
                 all_regions,
@@ -9552,13 +9605,13 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let mut values = HashMap::new();
             if let Some(enc) = text_encoding {
                 if let Ok(text) = read_text_memory(pid, hva, text_byte_len, enc) {
-                    values.insert(instruction_address, text);
+                    values.insert(watch_addr, text);
                 }
             } else if let Ok(val) = read_scan_value(pid, hva, self.memory_panel.value_type) {
-                values.insert(instruction_address, format_scan_value(val, self.memory_panel.hex));
+                values.insert(watch_addr, format_scan_value(val, self.memory_panel.hex));
             } else if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, hva, 4) {
                 let val_u32 = u32::from_le_bytes(bytes[..4].try_into().unwrap_or_default());
-                values.insert(instruction_address, format!("{val_u32}"));
+                values.insert(watch_addr, format!("{val_u32}"));
             }
 
             let status = if is_android {
@@ -9572,9 +9625,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
             self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
                 code_index,
-                instruction_address,
+                instruction_address: watch_addr,
                 status,
-                addresses: vec![(instruction_address, 1)],
+                addresses: vec![(watch_addr, 1)],
                 rx,
                 active: Some(ActiveInstructionWatch::Emulator(session)),
                 pinned: true,
@@ -14976,6 +15029,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             source_saved_index,
             writes_only: !reads_and_writes,
             status,
+            target_value_summary: None,
+            target_mutation_count: 0,
+            target_value_details: None,
             hits: Vec::new(),
             selected: None,
             rx,
@@ -14984,6 +15040,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             pending_code_add: None,
             pending_code_add_all: false,
             pending_address_add: None,
+            pending_target_address_add: false,
             pending_disassembler: None,
             auto_stop_on_hit: false,
             hits_sort: 0,
@@ -15045,6 +15102,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         active.stop();
                         dialog.status = "First hit captured — debugger detached safely".to_owned();
                     }
+                }
+                WatchEvent::ValueMutation { summary, details, count, .. } => {
+                    dialog.target_value_summary = Some(summary);
+                    dialog.target_mutation_count = count;
+                    dialog.target_value_details = Some(details);
                 }
                 WatchEvent::AccessHit { .. } | WatchEvent::BatchProgress { .. } => {}
                 WatchEvent::CaptureLimitReached(limit) => {
@@ -15180,6 +15242,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if start_requested {
             self.restart_instruction_watch(&mut dialog);
         }
+        if dialog.pending_target_address_add {
+            dialog.pending_target_address_add = false;
+            self.add_code_access_address(dialog.address, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
+            self.memory_panel.status = format!("[OK] Added Watched Target Address {} to Address list", format_prefixed_memory_address(dialog.address));
+        }
         if let Some(index) = dialog.pending_address_add.take()
             && let Some(hit) = dialog.hits.get(index)
         {
@@ -15189,7 +15256,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if let Some(index) = dialog.pending_code_add.take()
             && let Some(hit) = dialog.hits.get(index)
         {
-            self.add_instruction_to_code_list(hit.address, &hit.instruction, dialog.writes_only);
+            self.add_instruction_to_code_list(hit.address, &hit.instruction, dialog.writes_only, Some(dialog.address));
         }
         if dialog.pending_code_add_all {
             dialog.pending_code_add_all = false;
@@ -15199,7 +15266,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 .map(|hit| (hit.address, hit.instruction.clone()))
                 .collect();
             for (address, instruction) in hits {
-                self.add_instruction_to_code_list(address, &instruction, dialog.writes_only);
+                self.add_instruction_to_code_list(address, &instruction, dialog.writes_only, Some(dialog.address));
             }
         }
         if let Some(index) = dialog.pending_disassembler.take()
@@ -15459,6 +15526,34 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             );
             ui.add_space(8.0);
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
+        });
+
+        ui.group(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("🎯 Watched Target Address:").strong().color(Color32::from_rgb(250, 204, 21)));
+                ui.label(
+                    RichText::new(format_prefixed_memory_address(dialog.address))
+                        .strong()
+                        .color(Color32::from_rgb(100, 220, 255)),
+                );
+                if let Some(summary) = &dialog.target_value_summary {
+                    ui.label(
+                        RichText::new(format!("— {summary} ({} changes)", dialog.target_mutation_count))
+                            .strong()
+                            .color(Color32::from_rgb(80, 210, 120)),
+                    );
+                }
+                if ui
+                    .button("+ Add Target to Address List")
+                    .on_hover_text("Save this data address to the main Address List to keep track of its value")
+                    .clicked()
+                {
+                    dialog.pending_target_address_add = true;
+                }
+                if ui.button("Copy Address").clicked() {
+                    ui.ctx().copy_text(format_prefixed_memory_address(dialog.address));
+                }
+            });
         });
 
         ui.horizontal_wrapped(|ui| {
@@ -16130,10 +16225,10 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             }
         }
         if let Some((addr, inst, writes)) = add_code {
-            self.add_instruction_to_code_list(addr, &inst, writes);
+            self.add_instruction_to_code_list(addr, &inst, writes, None);
         }
         if let Some((addr, inst, writes)) = open_watch {
-            self.add_instruction_to_code_list(addr, &inst, writes);
+            self.add_instruction_to_code_list(addr, &inst, writes, None);
             if let Some(index) = self.state.memory_code_list.iter().position(|entry| {
                 entry.offset == addr
                     || (pid.is_some()
@@ -16292,7 +16387,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     }
                     dialog.active = None;
                 }
-                WatchEvent::CaptureLimitReached(_) | WatchEvent::AddressHit { .. } => {}
+                WatchEvent::CaptureLimitReached(_)
+                | WatchEvent::AddressHit { .. }
+                | WatchEvent::ValueMutation { .. } => {}
             }
         }
         let title = if dialog.nearby {
@@ -16692,7 +16789,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         dialog.status = "First address captured — debugger detached safely".to_owned();
                     }
                 }
-                WatchEvent::BatchProgress { .. } => {}
+                WatchEvent::BatchProgress { .. }
+                | WatchEvent::ValueMutation { .. } => {}
             }
         }
         let now = Instant::now();
@@ -20345,12 +20443,15 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             && self.memory_panel.android_bridge.scan_game_ram_only
         {
             scan_options.mem_image = false;
-            scan_options.isolate_guest_ram = true;
-            let vm_alloc = self.memory_panel.android_bridge.vm_allocation_base.or_else(|| {
-                self.memory_panel.android_bridge.host_base_address
-                    .and_then(|addr| crate::process_memory::query_allocation_base(pid, addr))
-            });
-            scan_options.vm_allocation_base = vm_alloc;
+            let ranges = self.memory_panel.android_bridge.get_host_scan_ranges(
+                scan_options.writable,
+                scan_options.executable,
+            );
+            if !ranges.is_empty() {
+                scan_options.target_ranges = Some(Arc::new(ranges));
+            }
+            scan_options.isolate_guest_ram = false;
+            scan_options.vm_allocation_base = None;
         }
         let snapshot_for_filter = if action.comparison().is_some() && text_encoding.is_none() && self.memory_panel.candidates.is_empty() {
             self.memory_panel.raw_snapshot.take()

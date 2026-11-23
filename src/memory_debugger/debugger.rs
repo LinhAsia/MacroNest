@@ -467,6 +467,13 @@ pub enum WatchEvent {
         instruction_address: usize,
         data_address: usize,
     },
+    ValueMutation {
+        #[allow(dead_code)]
+        target_address: usize,
+        summary: String,
+        details: String,
+        count: usize,
+    },
     BatchProgress {
         completed_batches: usize,
         total_batches: usize,
@@ -2229,6 +2236,7 @@ mod tests {
                     ..
                 } => break (instruction_address, instruction, details),
                 WatchEvent::AccessHit { .. } => {}
+                WatchEvent::ValueMutation { .. } => {}
                 WatchEvent::BatchProgress { .. } => {}
                 WatchEvent::Error(error) => panic!("watch failed: {error}"),
                 WatchEvent::Stopped => panic!("watch stopped before a write"),

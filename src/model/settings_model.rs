@@ -772,6 +772,8 @@ pub struct MemoryCodeEntry {
     pub replaced: bool,
     #[serde(default)]
     pub highlighted: bool,
+    #[serde(default)]
+    pub target_address: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

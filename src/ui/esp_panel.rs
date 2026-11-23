@@ -671,6 +671,7 @@ impl CrosshairApp {
                 }
                 WatchEvent::Stopped
                 | WatchEvent::AddressHit { .. }
+                | WatchEvent::ValueMutation { .. }
                 | WatchEvent::BatchProgress { .. } => {}
             }
         }

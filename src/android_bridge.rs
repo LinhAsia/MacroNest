@@ -138,7 +138,7 @@ impl AndroidBridgeState {
             custom_target: "127.0.0.1:16416".to_string(),
             status: "Ready".to_string(),
             show_game_modules_only: true,
-            scan_game_ram_only: true,
+            scan_game_ram_only: false,
             ..Default::default()
         }
     }
