@@ -3101,73 +3101,57 @@ impl CrosshairApp {
             .selected_text(selected_text)
             .width(76.0)
             .show_ui(ui, |ui| {
-                ui.set_min_width(200.0);
+                ui.set_min_width(260.0);
                 if show_move_fields {
                     egui::Grid::new(ui.id().with("vision-runtime-move-grid"))
                         .num_columns(2)
                         .spacing([8.0, 6.0])
                         .show(ui, |ui| {
                             ui.label(Self::tr_lang(language, "Mode", "Chế độ"));
-                            egui::ComboBox::from_id_salt(ui.id().with("vision-move-mode-inner"))
-                                .width(108.0)
-                                .selected_text(if step.vision_move_relative {
-                                    Self::tr_lang(language, "Relative", "Tương đối")
-                                } else {
-                                    Self::tr_lang(language, "Absolute", "Tuyệt đối")
-                                })
-                                .show_ui(ui, |ui| {
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_relative,
-                                            false,
-                                            Self::tr_lang(language, "Absolute", "Tuyệt đối"),
-                                        )
-                                        .changed();
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_relative,
-                                            true,
-                                            Self::tr_lang(language, "Relative", "Tương đối"),
-                                        )
-                                        .changed();
-                                });
+                            ui.horizontal(|ui| {
+                                *live_sync |= ui
+                                    .selectable_value(
+                                        &mut step.vision_move_relative,
+                                        false,
+                                        Self::tr_lang(language, "Absolute", "Tuyệt đối"),
+                                    )
+                                    .changed();
+                                *live_sync |= ui
+                                    .selectable_value(
+                                        &mut step.vision_move_relative,
+                                        true,
+                                        Self::tr_lang(language, "Relative", "Tương đối"),
+                                    )
+                                    .changed();
+                            });
                             ui.end_row();
 
                             ui.label(Self::tr_lang(language, "Axis Lock", "Khóa trục"));
-                            egui::ComboBox::from_id_salt(ui.id().with("vision-move-axis-inner"))
-                                .width(108.0)
-                                .selected_text(match step.vision_move_axis_lock {
-                                    VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Tự do"),
-                                    VisionMoveAxisLock::HorizontalOnly => {
-                                        Self::tr_lang(language, "Horizontal only", "Chỉ ngang")
-                                    }
-                                    VisionMoveAxisLock::VerticalOnly => {
-                                        Self::tr_lang(language, "Vertical only", "Chỉ dọc")
-                                    }
-                                })
-                                .show_ui(ui, |ui| {
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_axis_lock,
-                                            VisionMoveAxisLock::None,
-                                            Self::tr_lang(language, "Free", "Tự do"),
-                                        )
-                                        .changed();
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_axis_lock,
-                                            VisionMoveAxisLock::HorizontalOnly,
-                                            Self::tr_lang(language, "Horizontal only", "Chỉ ngang"),
-                                        )
-                                        .changed();
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_axis_lock,
-                                            VisionMoveAxisLock::VerticalOnly,
-                                            Self::tr_lang(language, "Vertical only", "Chỉ dọc"),
-                                        )
-                                        .changed();
-                                });
+                            ui.horizontal(|ui| {
+                                *live_sync |= ui
+                                    .selectable_value(
+                                        &mut step.vision_move_axis_lock,
+                                        VisionMoveAxisLock::None,
+                                        Self::tr_lang(language, "Free", "Tự do"),
+                                    )
+                                    .changed();
+                                *live_sync |= ui
+                                    .selectable_value(
+                                        &mut step.vision_move_axis_lock,
+                                        VisionMoveAxisLock::HorizontalOnly,
+                                        Self::tr_lang(language, "Horizontal", "Chỉ ngang"),
+                                    )
+                                    .on_hover_text(Self::tr_lang(language, "Horizontal only", "Chỉ ngang"))
+                                    .changed();
+                                *live_sync |= ui
+                                    .selectable_value(
+                                        &mut step.vision_move_axis_lock,
+                                        VisionMoveAxisLock::VerticalOnly,
+                                        Self::tr_lang(language, "Vertical", "Chỉ dọc"),
+                                    )
+                                    .on_hover_text(Self::tr_lang(language, "Vertical only", "Chỉ dọc"))
+                                    .changed();
+                            });
                             ui.end_row();
 
                             ui.label(Self::tr_lang(language, "Offset X", "Offset X"));
