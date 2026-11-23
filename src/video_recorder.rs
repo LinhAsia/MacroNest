@@ -761,8 +761,18 @@ fn export_trim(
             &format!("{}k", target_kbps.saturating_mul(2)),
         ]);
     } else {
-        // ponytail: a normal trim is a stream copy; use Compress when re-encoding is required.
-        command.args(["-c", "copy"]);
+        command.args([
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+        ]);
     }
     let mut child = command
         .args([

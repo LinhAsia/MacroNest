@@ -9260,20 +9260,6 @@ impl CrosshairApp {
                                     path == &selected_path && !playback.is_ready()
                                 });
                             let video_buffering = playback_buffering || seek_buffering;
-                            if video_buffering {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Spinner::new().size(13.0));
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "Buffering...",
-                                            "Đang tải...",
-                                        ))
-                                        .size(11.0)
-                                        .weak(),
-                                    );
-                                });
-                            }
                             if let Some(preview) = &self.video_library_preview {
                                 let duration = preview.duration_seconds.max(0.1);
                                 self.video_library_trim_end_seconds = self
@@ -9725,16 +9711,13 @@ impl CrosshairApp {
         *playhead = playhead.clamp(*start, *end);
         let start_x = to_x(*start);
         let end_x = to_x(*end);
-        let playhead_x = to_x(*playhead);
         let trim_span = (end_x - start_x).abs();
-        let handle_hitbox = (trim_span * 0.2).clamp(2.5, 6.0);
+        let handle_hitbox = (trim_span * 0.4).clamp(6.0, 10.0);
         let mut playhead_changed = false;
         if let Some(pointer) = response.hover_pos() {
-            let playhead_dist = (pointer.x - playhead_x).abs();
             let start_dist = (pointer.x - start_x).abs();
             let end_dist = (pointer.x - end_x).abs();
-            let over_playhead = playhead_dist <= 7.0;
-            let over_trim_handle = !over_playhead && (start_dist <= handle_hitbox || end_dist <= handle_hitbox);
+            let over_trim_handle = start_dist <= handle_hitbox || end_dist <= handle_hitbox;
             ui.ctx().set_cursor_icon(if over_trim_handle {
                 egui::CursorIcon::ResizeHorizontal
             } else {
@@ -9754,12 +9737,9 @@ impl CrosshairApp {
                 .input(|input| input.pointer.press_origin())
                 .or_else(|| response.interact_pointer_pos())
             {
-                let playhead_dist = (pointer.x - playhead_x).abs();
                 let start_distance = (pointer.x - start_x).abs();
                 let end_distance = (pointer.x - end_x).abs();
-                let handle = if playhead_dist <= 7.0 {
-                    VideoTrimHandle::Playhead
-                } else if start_distance <= handle_hitbox && start_distance <= end_distance {
+                let handle = if start_distance <= handle_hitbox && start_distance <= end_distance {
                     VideoTrimHandle::Start
                 } else if end_distance <= handle_hitbox {
                     VideoTrimHandle::End
@@ -9777,10 +9757,9 @@ impl CrosshairApp {
         if response.clicked()
             && let Some(pointer) = response.interact_pointer_pos()
         {
-            let playhead_dist = (pointer.x - playhead_x).abs();
             let start_dist = (pointer.x - start_x).abs();
             let end_dist = (pointer.x - end_x).abs();
-            if playhead_dist <= 7.0 || (start_dist > handle_hitbox && end_dist > handle_hitbox) {
+            if start_dist > handle_hitbox && end_dist > handle_hitbox {
                 *playhead = to_seconds(pointer.x).clamp(*start, *end);
                 playhead_changed = true;
             }
