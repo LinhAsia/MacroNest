@@ -2720,20 +2720,7 @@ impl CrosshairApp {
         ctx.data_mut(|d| d.insert_temp(prev_scale_id, scale));
     }
 
-    pub(crate) fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
-        let Some((rect, monitor)) =
-            ctx.input(|input| Some((input.viewport().outer_rect?, input.viewport().monitor_size?)))
-        else {
-            return;
-        };
-        let position = egui::pos2(
-            rect.min.x.clamp(0.0, (monitor.x - rect.width()).max(0.0)),
-            rect.min.y.clamp(0.0, (monitor.y - rect.height()).max(0.0)),
-        );
-        if position != rect.min {
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
-        }
-    }
+    pub(crate) fn constrain_memory_popup_to_monitor(_ctx: &egui::Context) {}
 
     pub(crate) fn render_memory_popup_titlebar(
         ctx: &egui::Context,
@@ -3479,17 +3466,12 @@ impl CrosshairApp {
                     pause_label,
                 );
                 if self.memory_panel.android_bridge.is_connected && self.memory_panel.android_bridge.selected_pid.is_some() {
-                    ui.horizontal(|ui| {
-                        let game_ram_label = self.tr("Android Game RAM only", "Chỉ quét RAM Game Android");
-                        ui.checkbox(&mut self.memory_panel.android_bridge.scan_game_ram_only, game_ram_label)
-                            .on_hover_text(self.tr(
-                                "Restricts scan strictly to the selected Android process. Eliminates emulator host memory, mouse movement, and UI artifacts.",
-                                "Giới hạn quét chỉ trong tiến trình game Android. Loại bỏ hoàn toàn RAM giả lập, chuột và giao diện UI.",
-                            ));
-                        if self.memory_panel.android_bridge.scan_game_ram_only {
-                            ui.label(RichText::new("⚡ Isolated").color(Color32::from_rgb(80, 210, 120)).weak());
-                        }
-                    });
+                    let game_ram_label = self.tr("Android Game RAM only", "Chỉ quét RAM Game Android");
+                    ui.checkbox(&mut self.memory_panel.android_bridge.scan_game_ram_only, game_ram_label)
+                        .on_hover_text(self.tr(
+                            "Restricts scan strictly to the selected Android process. Eliminates emulator host memory, mouse movement, and UI artifacts.",
+                            "Giới hạn quét chỉ trong tiến trình game Android. Loại bỏ hoàn toàn RAM giả lập, chuột và giao diện UI.",
+                        ));
                 }
                 #[cfg(windows)]
                 {
@@ -4523,19 +4505,19 @@ impl CrosshairApp {
                 ui.separator();
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
-                let has_kb_focus = ui.ctx().memory(|memory| memory.focused().is_some())
-                    || ui.ctx().wants_keyboard_input();
-                if has_kb_focus {
+                let is_typing = ui.ctx().wants_keyboard_input() || editing;
+                if is_typing {
                     self.memory_panel.saved_list_active = false;
                 }
-                if self.memory_panel.saved_list_active
-                    && !editing
-                    && !has_kb_focus
+                let has_selection = !self.memory_panel.selected_saved.is_empty();
+                let list_active = self.memory_panel.saved_list_active || has_selection;
+                if list_active
+                    && !is_typing
                     && ui.input(|input| (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(egui::Key::A))
                 {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
-                if self.memory_panel.saved_list_active && !editing && !has_kb_focus {
+                if list_active && !is_typing {
                     let arrow_up = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
                     let arrow_down = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
                     if arrow_up || arrow_down {
@@ -4562,17 +4544,15 @@ impl CrosshairApp {
                             self.memory_panel.saved_selection_anchor = Some(next);
                         }
                     }
-                    let (shift_w, shift_s, delete, shift_delete, edit) = ui.input(|input| {
-                        (
-                            input.modifiers.shift && input.key_pressed(egui::Key::W),
-                            input.modifiers.shift && input.key_pressed(egui::Key::S),
-                            !input.modifiers.shift && input.key_pressed(egui::Key::Delete),
-                            input.modifiers.shift && input.key_pressed(egui::Key::Delete),
-                            !input.modifiers.ctrl
-                                && !input.modifiers.command
-                                && !input.modifiers.alt
-                                && input.key_pressed(egui::Key::C),
-                        )
+                    let shift_delete = ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::Delete));
+                    let delete = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+                    let shift_w = ui.input(|input| input.modifiers.shift && input.key_pressed(egui::Key::W));
+                    let shift_s = ui.input(|input| input.modifiers.shift && input.key_pressed(egui::Key::S));
+                    let edit = ui.input(|input| {
+                        !input.modifiers.ctrl
+                            && !input.modifiers.command
+                            && !input.modifiers.alt
+                            && input.key_pressed(egui::Key::C)
                     });
                     if shift_w && !self.memory_panel.selected_saved.is_empty() {
                         let end = self
@@ -6896,8 +6876,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
             });
             let scan_ram_label = self.tr(
-                "Scan Game RAM only (Isolate from emulator host)",
-                "Chỉ quét RAM Game (Cách ly khỏi RAM giả lập)",
+                "Scan Game RAM only",
+                "Chỉ quét RAM Game Android",
             );
             let scan_ram_hint = self.tr(
                 "Only scan memory mapped directly to the selected Android process. Eliminates emulator host memory, mouse movement, and UI artifacts.",
@@ -7104,11 +7084,31 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 let count = procs.len();
                 self.memory_panel.android_bridge.processes = procs;
                 self.memory_panel.android_bridge.status = format!("Loaded {count} processes");
-                if self.memory_panel.android_bridge.selected_pid.is_none() {
-                    if let Some(user_app) = self.memory_panel.android_bridge.processes.iter().find(|p| p.is_user_app) {
+                let pid_alive = self.memory_panel.android_bridge.selected_pid.is_some_and(|p| {
+                    self.memory_panel.android_bridge.processes.iter().any(|proc| proc.pid == p)
+                });
+                if !pid_alive {
+                    if !self.memory_panel.android_bridge.selected_process_name.is_empty() {
+                        if let Some(matching) = self.memory_panel.android_bridge.processes.iter().find(|p| p.name == self.memory_panel.android_bridge.selected_process_name) {
+                            self.memory_panel.android_bridge.selected_pid = Some(matching.pid);
+                            self.android_load_maps(matching.pid);
+                        } else if let Some(user_app) = self.memory_panel.android_bridge.processes.iter().find(|p| p.is_user_app) {
+                            self.memory_panel.android_bridge.selected_pid = Some(user_app.pid);
+                            self.memory_panel.android_bridge.selected_process_name = user_app.name.clone();
+                            self.android_load_maps(user_app.pid);
+                        } else {
+                            self.memory_panel.android_bridge.selected_pid = None;
+                        }
+                    } else if let Some(user_app) = self.memory_panel.android_bridge.processes.iter().find(|p| p.is_user_app) {
                         self.memory_panel.android_bridge.selected_pid = Some(user_app.pid);
                         self.memory_panel.android_bridge.selected_process_name = user_app.name.clone();
                         self.android_load_maps(user_app.pid);
+                    } else {
+                        self.memory_panel.android_bridge.selected_pid = None;
+                    }
+                } else if let Some(pid) = self.memory_panel.android_bridge.selected_pid {
+                    if self.memory_panel.android_bridge.modules.is_empty() {
+                        self.android_load_maps(pid);
                     }
                 }
             }
@@ -8531,13 +8531,23 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 "This old entry has no saved AOB; add the instruction again".to_owned();
             return;
         }
-        let Some((_, module_base, module_size)) = process_modules(pid)
+        let clean_mod = entry.module.strip_prefix("Android::").unwrap_or(&entry.module);
+        let module_info = process_modules(pid)
             .ok()
             .and_then(|modules| {
                 modules
                     .into_iter()
-                    .find(|(name, _, _)| name.eq_ignore_ascii_case(&entry.module))
+                    .find(|(name, _, _)| name.eq_ignore_ascii_case(&entry.module) || name.eq_ignore_ascii_case(clean_mod))
             })
+            .or_else(|| {
+                let delta = self.memory_panel.android_bridge.delta?;
+                let m = self.memory_panel.android_bridge.modules.iter().find(|m| {
+                    m.name.eq_ignore_ascii_case(clean_mod) || m.name.eq_ignore_ascii_case(&entry.module)
+                })?;
+                let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                Some((m.name.clone(), host_base, m.size))
+            });
+        let Some((_, module_base, module_size)) = module_info
         else {
             self.memory_panel.code_relocate_status =
                 format!("Module '{}' is not loaded", entry.module);
@@ -8557,9 +8567,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 executable: true,
                 copy_on_write: true,
                 active_memory_only: false,
-                mem_private: false,
+                mem_private: true,
                 mem_image: true,
-                mem_mapped: false,
+                mem_mapped: true,
                 alignment: None,
                 target_ranges: None,
                 isolate_guest_ram: false,
@@ -8761,6 +8771,14 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         }
 
         let total_checked = items.len();
+        let android_modules: Vec<(String, usize, usize)> = if let Some(delta) = self.memory_panel.android_bridge.delta {
+            self.memory_panel.android_bridge.modules.iter().map(|m| {
+                let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                (m.name.clone(), host_base, m.size)
+            }).collect()
+        } else {
+            Vec::new()
+        };
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let modules = process_modules(pid).unwrap_or_default();
@@ -8769,9 +8787,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 executable: true,
                 copy_on_write: true,
                 active_memory_only: false,
-                mem_private: false,
+                mem_private: true,
                 mem_image: true,
-                mem_mapped: false,
+                mem_mapped: true,
                 alignment: None,
                 target_ranges: None,
                 isolate_guest_ram: false,
@@ -8779,17 +8797,25 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             };
             let mut successful = Vec::new();
             for item in items {
-                let Some((_, module_base, module_size)) = modules
+                let clean_mod = item.module.strip_prefix("Android::").unwrap_or(&item.module);
+                let module_info = modules
                     .iter()
-                    .find(|(name, _, _)| name.eq_ignore_ascii_case(&item.module))
-                else {
+                    .find(|(name, _, _)| name.eq_ignore_ascii_case(&item.module) || name.eq_ignore_ascii_case(clean_mod))
+                    .cloned()
+                    .or_else(|| {
+                        android_modules
+                            .iter()
+                            .find(|(name, _, _)| name.eq_ignore_ascii_case(&item.module) || name.eq_ignore_ascii_case(clean_mod))
+                            .cloned()
+                    });
+                let Some((_, module_base, module_size)) = module_info else {
                     continue;
                 };
                 let matches = scan_aob_memory_range_with_progress(
                     pid,
                     &item.aob_signature,
-                    *module_base,
-                    *module_size,
+                    module_base,
+                    module_size,
                     32,
                     options.clone(),
                     Arc::new(AtomicUsize::new(0)),
@@ -8798,7 +8824,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     // Only apply if exactly 1 match found. If 0 or >1, skip silently without asking.
                     if matched.len() == 1 {
                         let candidate_address = matched[0].address;
-                        let new_offset = (candidate_address - *module_base)
+                        let new_offset = (candidate_address - module_base)
                             .saturating_add(item.aob_target_offset);
                         successful.push(RelocatedCodeEntry {
                             index: item.index,
@@ -9015,8 +9041,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             }
         }
         if let Some(delta) = self.memory_panel.android_bridge.delta {
+            let clean_mod = module.strip_prefix("Android::").unwrap_or(module);
             for m in &self.memory_panel.android_bridge.modules {
-                if m.name.eq_ignore_ascii_case(module) || format!("Android::{}", m.name).eq_ignore_ascii_case(module) {
+                if m.name.eq_ignore_ascii_case(module) || m.name.eq_ignore_ascii_case(clean_mod) || format!("Android::{}", m.name).eq_ignore_ascii_case(module) {
                     let host_base = (m.base_address as isize).wrapping_add(delta) as usize;
                     return Ok(host_base.wrapping_add(offset));
                 }
@@ -9550,11 +9577,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
-        let is_data_watch = entry.writes
-            || entry.instruction.starts_with("Write:")
-            || entry.instruction.starts_with("Read:")
-            || entry.module.starts_with("Android::")
-            || is_android;
+        let is_data_watch = entry.instruction.starts_with("Write:")
+            || entry.instruction.starts_with("Read:");
 
         let text_encoding = self
             .memory_panel
@@ -17087,11 +17111,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             && self.memory_panel.android_bridge.selected_pid.is_some();
         let entry = self.state.memory_code_list.get(dialog.code_index);
         let is_data_watch = entry.map_or(false, |e| {
-            e.writes
-                || e.instruction.starts_with("Write:")
-                || e.instruction.starts_with("Read:")
-                || e.module.starts_with("Android::")
-                || is_android
+            e.instruction.starts_with("Write:") || e.instruction.starts_with("Read:")
         });
         if is_data_watch {
             let (tx, rx) = mpsc::channel();
@@ -20443,6 +20463,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             && self.memory_panel.android_bridge.scan_game_ram_only
         {
             scan_options.mem_image = false;
+            scan_options.mem_mapped = true;
+            scan_options.mem_private = true;
             let ranges = self.memory_panel.android_bridge.get_host_scan_ranges(
                 scan_options.writable,
                 scan_options.executable,
@@ -21325,7 +21347,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     }
 
     fn find_saved_address_by_aob(&mut self, pid: u32, saved_idx: usize, pattern: &str) {
-        let scan_options = if self.memory_panel.scan_scope_all {
+        let mut scan_options = if self.memory_panel.scan_scope_all {
             MemoryScanOptions {
                 writable: false,
                 executable: true,
@@ -21366,6 +21388,20 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 vm_allocation_base: None,
             }
         };
+        if self.memory_panel.android_bridge.is_connected
+            && self.memory_panel.android_bridge.selected_pid.is_some()
+            && self.memory_panel.android_bridge.scan_game_ram_only
+        {
+            scan_options.mem_mapped = true;
+            scan_options.mem_private = true;
+            let ranges = self.memory_panel.android_bridge.get_host_scan_ranges(
+                scan_options.writable,
+                scan_options.executable,
+            );
+            if !ranges.is_empty() {
+                scan_options.target_ranges = Some(Arc::new(ranges));
+            }
+        }
         let progress = Arc::clone(&self.memory_panel.scan_progress);
         progress.store(0, Ordering::Relaxed);
         self.memory_panel.status = "Scanning AOB pattern…".to_owned();

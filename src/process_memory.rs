@@ -3665,11 +3665,15 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
                 | PAGE_EXECUTE_READWRITE
                 | PAGE_EXECUTE_WRITECOPY
         );
-        let is_kind_allowed = match information.kind {
-            MEM_PRIVATE => options.mem_private,
-            MEM_IMAGE => options.mem_image,
-            MEM_MAPPED => options.mem_mapped,
-            _ => true,
+        let is_kind_allowed = if options.target_ranges.is_some() {
+            true
+        } else {
+            match information.kind {
+                MEM_PRIVATE => options.mem_private,
+                MEM_IMAGE => options.mem_image,
+                MEM_MAPPED => options.mem_mapped,
+                _ => true,
+            }
         };
         if options.isolate_guest_ram {
             if information.kind == MEM_IMAGE {
