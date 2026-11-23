@@ -1458,6 +1458,12 @@ fn assemble_x64_instruction(line: &str) -> Result<Option<Vec<u8>>, String> {
         "movups" => assemble_movups(rest),
         "movss" => assemble_movss(rest),
         "movsd" => assemble_movsd(rest),
+        "vmovdqa" => assemble_vex_mov(0x7F, 0x6F, 0x01, rest),
+        "vmovdqu" => assemble_vex_mov(0x7F, 0x6F, 0x02, rest),
+        "vmovups" => assemble_vex_mov(0x11, 0x10, 0x00, rest),
+        "vmovupd" => assemble_vex_mov(0x11, 0x10, 0x01, rest),
+        "vmovss" => assemble_vex_mov(0x11, 0x10, 0x02, rest),
+        "vmovsd" => assemble_vex_mov(0x11, 0x10, 0x03, rest),
         "cvtsi2sd" => assemble_cvtsi2sd(rest),
         "cvtsi2ss" => assemble_cvtsi2ss(rest),
         "addss" => assemble_sse_binary_op(Some(0xF3), 0x58, rest),
@@ -1786,6 +1792,81 @@ fn assemble_movsd(operands: &str) -> Result<Option<Vec<u8>>, String> {
             return Ok(Some(bytes));
         }
     }
+    Ok(None)
+}
+
+fn assemble_vex_mov(op_store: u8, op_load: u8, pp: u8, operands: &str) -> Result<Option<Vec<u8>>, String> {
+    let (dst, src) = match operands.split_once(',') {
+        Some((d, s)) => (d.trim(), s.trim()),
+        None => return Ok(None),
+    };
+
+    // Store: vmov* [mem], xmm
+    if let Some(mem) = parse_memory_operand(dst) {
+        if let Some(xmm) = parse_xmm(src) {
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
+            let rex_r = if xmm >= 8 { 1 } else { 0 };
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 1 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+
+            let mut bytes = Vec::new();
+            if rex_x == 0 && rex_b == 0 {
+                // 2-byte VEX C5
+                let r_inv = 1 - rex_r;
+                bytes.push(0xC5);
+                bytes.push((r_inv << 7) | (0b1111 << 3) | pp);
+            } else {
+                // 3-byte VEX C4
+                let r_inv = 1 - rex_r;
+                let x_inv = 1 - rex_x;
+                let b_inv = 1 - rex_b;
+                bytes.push(0xC4);
+                bytes.push((r_inv << 7) | (x_inv << 6) | (b_inv << 5) | 0x01);
+                bytes.push((0b1111 << 3) | pp);
+            }
+            bytes.push(op_store);
+            bytes.push(modrm);
+            if let Some(s) = sib {
+                bytes.push(s);
+            }
+            bytes.extend_from_slice(&disp_bytes);
+            return Ok(Some(bytes));
+        }
+    }
+
+    // Load: vmov* xmm, [mem]
+    if let Some(xmm) = parse_xmm(dst) {
+        if let Some(mem) = parse_memory_operand(src) {
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
+            let rex_r = if xmm >= 8 { 1 } else { 0 };
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 1 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+
+            let mut bytes = Vec::new();
+            if rex_x == 0 && rex_b == 0 {
+                // 2-byte VEX C5
+                let r_inv = 1 - rex_r;
+                bytes.push(0xC5);
+                bytes.push((r_inv << 7) | (0b1111 << 3) | pp);
+            } else {
+                // 3-byte VEX C4
+                let r_inv = 1 - rex_r;
+                let x_inv = 1 - rex_x;
+                let b_inv = 1 - rex_b;
+                bytes.push(0xC4);
+                bytes.push((r_inv << 7) | (x_inv << 6) | (b_inv << 5) | 0x01);
+                bytes.push((0b1111 << 3) | pp);
+            }
+            bytes.push(op_load);
+            bytes.push(modrm);
+            if let Some(s) = sib {
+                bytes.push(s);
+            }
+            bytes.extend_from_slice(&disp_bytes);
+            return Ok(Some(bytes));
+        }
+    }
+
     Ok(None)
 }
 
@@ -2633,5 +2714,12 @@ movss [rbx+84h],xmm6
         assert!(aob_tpl.contains("libil2cpp.so"));
 
         set_android_auto_asm_context(None);
+    }
+
+    #[test]
+    fn test_assemble_vmovdqa_instruction() {
+        let b = assemble_x64_instruction("vmovdqa [rbp+2D0h], xmm1").unwrap().unwrap();
+        // C5 F9 7F 8D D0 02 00 00
+        assert_eq!(b, vec![0xC5, 0xF9, 0x7F, 0x8D, 0xD0, 0x02, 0x00, 0x00]);
     }
 }
