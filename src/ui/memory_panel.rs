@@ -9295,9 +9295,93 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         all_regions: Vec<crate::android_bridge::AndroidMemoryRegion>,
         is_android: bool,
         emu_name: Option<String>,
+        delta: isize,
     ) -> EmulatorMemoryWatchSession {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stop_clone = std::sync::Arc::clone(&stop);
+
+        // Background XREF analysis to find real code instructions referencing this offset or address
+        let tx_xref = tx.clone();
+        let modules_for_xref = modules.clone();
+        let watch_targets_xref = watch_targets.clone();
+        let stop_xref = std::sync::Arc::clone(&stop);
+        let _ = std::thread::spawn(move || {
+            let game_mod = modules_for_xref.iter().find(|m| {
+                let l = m.name.to_lowercase();
+                l.contains("il2cpp") || l.contains("unity") || l.contains("neox") || l.contains("game") || l.contains("main")
+            }).or_else(|| modules_for_xref.first());
+
+            if let Some(gm) = game_mod {
+                let hva_base = (gm.base_address as isize).wrapping_add(delta) as usize;
+                let scan_len = gm.size.min(12 * 1024 * 1024); // Scan up to 12MB of code in chunks
+                let chunk_size = 64 * 1024;
+                let mut num_found = 0;
+
+                for &(display_addr, _hva) in &watch_targets_xref {
+                    if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 5 {
+                        break;
+                    }
+                    let field_offset = (display_addr & 0xFFF) as u32;
+                    if field_offset == 0 {
+                        continue;
+                    }
+                    let needle = field_offset.to_le_bytes();
+
+                    let mut offset = 0;
+                    while offset + 4 <= scan_len && num_found < 5 {
+                        if stop_xref.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        let current_chunk = chunk_size.min(scan_len - offset);
+                        let chunk_addr = hva_base + offset;
+                        if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, chunk_addr, current_chunk) {
+                            let mut i = 0;
+                            while i + 4 <= bytes.len() {
+                                if bytes[i..i + 4] == needle {
+                                    let match_hva = chunk_addr + i;
+                                    let disasm_start = match_hva.saturating_sub(4);
+                                    if let Ok(lines) = crate::memory_debugger::debugger::disassemble_from(
+                                        pid,
+                                        disasm_start,
+                                        crate::model::MemoryDebuggerArchitecture::Auto,
+                                        3,
+                                    ) {
+                                        for (inst_addr, _bytes_hex, asm_text) in lines {
+                                            let lower_asm = asm_text.to_lowercase();
+                                            let off_hex = format!("{:x}", field_offset);
+                                            if (lower_asm.contains(&off_hex) || lower_asm.contains(&format!("{:X}", field_offset)))
+                                                && (lower_asm.contains('[') || lower_asm.contains("mov") || lower_asm.contains("ldr"))
+                                            {
+                                                let inst_gva = if delta != 0 {
+                                                    (inst_addr as isize - delta) as usize
+                                                } else {
+                                                    inst_addr
+                                                };
+                                                let mod_off = inst_gva.saturating_sub(gm.base_address);
+                                                let mod_desc = format!("{}+0x{:X}", gm.name, mod_off);
+                                                let _ = tx_xref.send(WatchEvent::AddressHit {
+                                                    instruction_address: inst_addr,
+                                                    instruction: format!("{asm_text}  ({mod_desc})"),
+                                                    details: format!(
+                                                        "Referencing Instruction Found in Game Module!\nModule: {}\nInstruction: {asm_text}\nCode Address: {mod_desc} (HVA: 0x{inst_addr:X})\nTarget Field Offset: 0x{field_offset:X}\nClick 'Show disassembler' or 'Add to code list' to patch/hook this code!",
+                                                        gm.name
+                                                    ),
+                                                });
+                                                num_found += 1;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                i += 4;
+                            }
+                        }
+                        offset += current_chunk;
+                    }
+                }
+            }
+        });
+
         let handle = std::thread::spawn(move || {
             let mut prev_values: HashMap<usize, Vec<u8>> = HashMap::new();
             for &(_, hva) in &watch_targets {
@@ -9371,7 +9455,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         );
 
                         let _ = tx.send(WatchEvent::AddressHit {
-                            instruction_address: display_addr,
+                            instruction_address: hva,
                             instruction: summary,
                             details,
                         });
@@ -9462,6 +9546,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 all_regions,
                 is_android,
                 emu_name.clone(),
+                self.memory_panel.android_bridge.delta.unwrap_or(0),
             );
 
             let mut values = HashMap::new();
@@ -14760,6 +14845,21 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     ) {
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
+        let is_emu_process = {
+            let lower = self.memory_panel.process_selector.to_lowercase();
+            ["mumu", "nemu", "hd-player", "dnplayer", "nox", "memu", "vboxheadless"]
+                .iter()
+                .any(|&emu| lower.contains(emu))
+        };
+        let is_emulator_target = is_android || is_emu_process;
+        if is_emu_process && !self.memory_panel.android_bridge.is_connected {
+            if self.memory_panel.android_bridge.discovered_devices.is_empty() {
+                self.android_scan_emulators();
+            }
+            if !self.memory_panel.android_bridge.discovered_devices.is_empty() {
+                self.android_connect();
+            }
+        }
         if is_android && self.memory_panel.process_pid.is_none() {
             let procs = list_process_details().unwrap_or_default();
             let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu", "mumuplayer"];
@@ -14793,7 +14893,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let _ = tx.send(event);
         };
         let emu_display_name = self.memory_panel.detected_emulator_name();
-        let started = if is_android {
+        let started = if is_emulator_target {
             let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
@@ -14815,8 +14915,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 tx_watch,
                 modules,
                 all_regions,
-                true,
+                is_android || !self.memory_panel.android_bridge.modules.is_empty(),
                 emu_display_name.clone(),
+                delta,
             );
             Ok(ActiveInstructionWatch::Emulator(session))
         } else if reads_and_writes {
@@ -14909,9 +15010,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     armed_threads,
                     total_threads,
                 } => {
-                    dialog.status = format!(
-                        "Debugger running — {armed_threads}/{total_threads} thread(s) armed"
-                    )
+                    dialog.status = if matches!(dialog.active, Some(ActiveInstructionWatch::Emulator(_))) {
+                        "Emulator Watcher running — monitoring guest RAM & analyzing code references".to_owned()
+                    } else {
+                        format!("Debugger running — {armed_threads}/{total_threads} thread(s) armed")
+                    };
                 }
                 WatchEvent::AddressHit {
                     instruction_address,
@@ -15152,6 +15255,13 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         };
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
+        let is_emu_process = {
+            let lower = self.memory_panel.process_selector.to_lowercase();
+            ["mumu", "nemu", "hd-player", "dnplayer", "nox", "memu", "vboxheadless"]
+                .iter()
+                .any(|&emu| lower.contains(emu))
+        };
+        let is_emulator_target = is_android || is_emu_process;
         let emu_name = self.memory_panel.detected_emulator_name();
         let (tx, rx) = mpsc::channel();
         let tx_watch = tx.clone();
@@ -15159,7 +15269,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let _ = tx.send(event);
         };
         let reads_and_writes = !dialog.writes_only;
-        let started = if is_android {
+        let started = if is_emulator_target {
             let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
@@ -15180,8 +15290,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 tx_watch,
                 modules,
                 all_regions,
-                true,
+                is_android || !self.memory_panel.android_bridge.modules.is_empty(),
                 emu_name.clone(),
+                delta,
             );
             Ok(ActiveInstructionWatch::Emulator(session))
         } else if reads_and_writes {
@@ -15658,6 +15769,20 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     #[cfg(windows)]
     fn render_auto_assemble_body(&mut self, ui: &mut egui::Ui) {
         let pid = self.memory_panel.process_pid;
+        let target_hint = self.memory_panel.disassembler_dialog.as_ref().and_then(|d| {
+            if d.address != 0 {
+                let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+                let gva = if delta != 0 { (d.address as isize - delta) as usize } else { d.address };
+                if let Some((mod_name, off)) = self.memory_panel.android_bridge.resolve_gva_module(gva) {
+                    Some(format!("{mod_name}+0x{off:X}"))
+                } else {
+                    Some(format!("0x{:X}", d.address))
+                }
+            } else {
+                None
+            }
+        }).unwrap_or_default();
+
         if let Some((ref mut script, ref mut status)) = self.memory_panel.auto_assemble_dialog {
             ui.horizontal(|ui| {
                 if ui.button("Clear").clicked() {
@@ -15670,20 +15795,32 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     .selected_text("Template")
                     .show_ui(ui, |ui| {
                         if ui.button("Code Injection").clicked() {
-                            *script = crate::auto_assembler::generate_code_injection_template(pid, "");
+                            crate::auto_assembler::set_android_auto_asm_context(
+                                self.memory_panel.android_bridge.get_auto_asm_context(pid)
+                            );
+                            *script = crate::auto_assembler::generate_code_injection_template(pid, &target_hint);
                         }
                         if ui.button("Cheat Table Framework").clicked() {
                             *script = crate::auto_assembler::generate_framework_template();
                         }
                         if ui.button("AOB Injection").clicked() {
-                            *script = crate::auto_assembler::generate_aob_injection_template("");
+                            crate::auto_assembler::set_android_auto_asm_context(
+                                self.memory_panel.android_bridge.get_auto_asm_context(pid)
+                            );
+                            *script = crate::auto_assembler::generate_aob_injection_template(&target_hint);
                         }
                         if ui.button("NOP Patch").clicked() {
-                            *script = crate::auto_assembler::generate_nop_patch_template("");
+                            crate::auto_assembler::set_android_auto_asm_context(
+                                self.memory_panel.android_bridge.get_auto_asm_context(pid)
+                            );
+                            *script = crate::auto_assembler::generate_nop_patch_template(&target_hint);
                         }
                     });
                 if ui.button("Execute").clicked() {
                     if let Some(target_pid) = pid {
+                        crate::auto_assembler::set_android_auto_asm_context(
+                            self.memory_panel.android_bridge.get_auto_asm_context(Some(target_pid))
+                        );
                         match crate::auto_assembler::execute_auto_assembler_script(target_pid, script, true) {
                             Ok(_) => {
                                 *status = Some((true, format!("Injected successfully into PID {target_pid}!")));
@@ -16490,9 +16627,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     armed_threads,
                     total_threads,
                 } => {
-                    dialog.status = format!(
-                        "Debugger running — {armed_threads}/{total_threads} thread(s) armed"
-                    )
+                    dialog.status = if matches!(dialog.active, Some(ActiveInstructionWatch::Emulator(_))) {
+                        "Emulator Watcher running — monitoring guest RAM & analyzing code references".to_owned()
+                    } else {
+                        format!("Debugger running — {armed_threads}/{total_threads} thread(s) armed")
+                    };
                 }
                 WatchEvent::AccessHit { data_address, .. } => {
                     addresses_updated = true;
@@ -16879,6 +17018,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 all_regions,
                 is_android,
                 emu_name.clone(),
+                delta,
             );
 
             dialog.rx = rx;

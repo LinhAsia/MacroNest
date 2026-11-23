@@ -18,6 +18,25 @@ pub fn unregister_symbol(name: &str) {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AndroidAutoAsmContext {
+    pub delta: isize,
+    pub modules: Vec<(String, usize, usize)>, // (name, guest_base, size)
+    pub guest_pid: Option<u32>,
+    pub host_pid: Option<u32>,
+}
+
+pub static ANDROID_AUTO_ASM_CONTEXT: Lazy<Mutex<Option<AndroidAutoAsmContext>>> =
+    Lazy::new(|| Mutex::new(None));
+
+pub fn set_android_auto_asm_context(ctx: Option<AndroidAutoAsmContext>) {
+    *ANDROID_AUTO_ASM_CONTEXT.lock() = ctx;
+}
+
+pub fn get_android_auto_asm_context() -> Option<AndroidAutoAsmContext> {
+    ANDROID_AUTO_ASM_CONTEXT.lock().clone()
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActiveHookSession {
     pub pid: u32,
     pub allocated_blocks: Vec<(String, usize, usize)>, // (name, address, size)
@@ -436,6 +455,17 @@ fn scan_aob_for_script(pid: u32, module: &str, pattern: &str) -> Result<usize, S
                 }
             }
             if mod_base == 0 {
+                if let Some(ctx) = get_android_auto_asm_context() {
+                    for (mname, gva_base, size) in &ctx.modules {
+                        if mname.eq_ignore_ascii_case(module) {
+                            mod_base = (*gva_base as isize).wrapping_add(ctx.delta) as usize;
+                            mod_size = *size;
+                            break;
+                        }
+                    }
+                }
+            }
+            if mod_base == 0 {
                 return Err(format!("Module '{module}' not found for aobscanmodule"));
             }
             let matches = crate::process_memory::scan_aob_memory_range_with_progress(
@@ -762,8 +792,17 @@ pub fn format_ce_script(script: &str) -> String {
 }
 
 pub fn generate_code_injection_template(pid: Option<u32>, target_expr: &str) -> String {
+    let default_target = if let Some(ctx) = get_android_auto_asm_context() {
+        if let Some((mod_name, _, _)) = ctx.modules.first() {
+            format!("{mod_name}+1000")
+        } else {
+            "libil2cpp.so+1000".to_string()
+        }
+    } else {
+        "neox_engine.dll+50A7E2".to_string()
+    };
     let addr_str = if target_expr.trim().is_empty() {
-        "neox_engine.dll+50A7E2"
+        default_target.as_str()
     } else {
         target_expr.trim()
     };
@@ -855,9 +894,14 @@ pub fn generate_framework_template() -> String {
 pub fn generate_aob_injection_template(target_expr: &str) -> String {
     let (mod_name, aob) = if target_expr.contains('+') {
         let parts: Vec<&str> = target_expr.split('+').collect();
-        (parts[0].trim(), "48 89 5C 24 ??")
+        (parts[0].trim().to_string(), "48 89 5C 24 ??")
+    } else if !target_expr.trim().is_empty() {
+        (target_expr.trim().to_string(), "48 89 5C 24 ??")
+    } else if let Some(ctx) = get_android_auto_asm_context() {
+        let name = ctx.modules.first().map(|m| m.0.clone()).unwrap_or_else(|| "libil2cpp.so".to_string());
+        (name, "00 00 A0 E3 ??")
     } else {
-        ("game.exe", "48 89 5C 24 ??")
+        ("game.exe".to_string(), "48 89 5C 24 ??")
     };
 
     format!(
@@ -890,8 +934,17 @@ INJECT:
 }
 
 pub fn generate_nop_patch_template(target_expr: &str) -> String {
+    let default_target = if let Some(ctx) = get_android_auto_asm_context() {
+        if let Some((mod_name, _, _)) = ctx.modules.first() {
+            format!("{mod_name}+1000")
+        } else {
+            "libil2cpp.so+1000".to_string()
+        }
+    } else {
+        "neox_engine.dll+50A7E2".to_string()
+    };
     let addr_str = if target_expr.trim().is_empty() {
-        "neox_engine.dll+50A7E2"
+        default_target.as_str()
     } else {
         target_expr.trim()
     };
@@ -1375,6 +1428,16 @@ fn resolve_address_expr(
                 if name.eq_ignore_ascii_case(expr) {
                     return Ok(base);
                 }
+            }
+        }
+    }
+
+    // Android emulator module lookup: e.g. `libil2cpp.so`, `libunity.so`, `libneox.so`
+    if let Some(ctx) = get_android_auto_asm_context() {
+        for (name, gva_base, _) in &ctx.modules {
+            if name.eq_ignore_ascii_case(expr) {
+                let hva_base = (*gva_base as isize).wrapping_add(ctx.delta) as usize;
+                return Ok(hva_base);
             }
         }
     }
@@ -2543,5 +2606,32 @@ movss [rbx+84h],xmm6
             let parsed = parse_statement(stmt_str).unwrap();
             assert!(parsed.is_some(), "Failed parsing statement: {stmt_str}");
         }
+    }
+
+    #[test]
+    fn test_android_auto_asm_module_resolution_and_templates() {
+        let ctx = AndroidAutoAsmContext {
+            delta: 0x2000_0000,
+            modules: vec![
+                ("libil2cpp.so".to_string(), 0x7000_0000, 0x0200_0000),
+                ("libunity.so".to_string(), 0x7500_0000, 0x0100_0000),
+            ],
+            guest_pid: Some(1234),
+            host_pid: Some(5678),
+        };
+        set_android_auto_asm_context(Some(ctx));
+
+        let symbols = HashMap::new();
+        let res = resolve_address_expr(0, "libil2cpp.so+0x1000", &symbols).unwrap();
+        // 0x7000_0000 + 0x2000_0000 + 0x1000 = 0x9000_1000
+        assert_eq!(res, 0x9000_1000);
+
+        let tpl = generate_code_injection_template(None, "libil2cpp.so+0x2000");
+        assert!(tpl.contains("alloc(newmem,2048,libil2cpp.so+0x2000)"));
+
+        let aob_tpl = generate_aob_injection_template("");
+        assert!(aob_tpl.contains("libil2cpp.so"));
+
+        set_android_auto_asm_context(None);
     }
 }

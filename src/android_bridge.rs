@@ -190,6 +190,25 @@ impl AndroidBridgeState {
         }
         None
     }
+
+    /// Exports active Android modules and Delta to the Auto Assembler engine.
+    pub fn get_auto_asm_context(&self, host_pid: Option<u32>) -> Option<crate::auto_assembler::AndroidAutoAsmContext> {
+        if !self.is_connected || self.selected_pid.is_none() {
+            return None;
+        }
+        let delta = self.delta.unwrap_or(0);
+        let modules: Vec<(String, usize, usize)> = self
+            .modules
+            .iter()
+            .map(|m| (m.name.clone(), m.base_address, m.size))
+            .collect();
+        Some(crate::auto_assembler::AndroidAutoAsmContext {
+            delta,
+            modules,
+            guest_pid: self.selected_pid,
+            host_pid,
+        })
+    }
 }
 
 /// Discovers the path to an adb executable on the system.
@@ -726,6 +745,39 @@ pub fn read_android_memory_bytes(
     }
 
     Err("Could not read memory bytes (permission denied or unmapped address)".to_string())
+}
+
+/// Writes bytes into Android process memory `/proc/<pid>/mem`.
+pub fn write_android_memory_bytes(
+    adb: &Path,
+    target: &str,
+    pid: u32,
+    address: usize,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let hex_clean: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let subcmd = format!(
+        "printf $(echo '{hex_clean}' | sed 's/\\(..\\)/\\\\x\\1/g') | dd of=/proc/{pid}/mem bs=1 seek={address} count={} conv=notrunc 2>/dev/null",
+        bytes.len()
+    );
+    let commands = [
+        format!("su -c \"{subcmd}\""),
+        format!("su 0 sh -c \"{subcmd}\""),
+        subcmd,
+    ];
+
+    for cmd in &commands {
+        if let Ok(out) = run_adb_command(adb, &["-s", target, "shell", cmd]) {
+            if !out.contains("Permission denied") && !out.contains("failed") {
+                return Ok(());
+            }
+        }
+    }
+
+    Err("Could not write memory bytes (permission denied or protected page)".to_string())
 }
 
 /// Calculates translation delta between Windows Host Address (HVA) and Android Guest Address (GVA).
