@@ -1483,10 +1483,18 @@ fn assemble_mov(operands: &str) -> Result<Option<Vec<u8>>, String> {
             let modrm = 0xC0 | ((r32_src & 7) << 3) | (r32 & 7);
             return Ok(Some(vec![0x89, modrm]));
         }
-        if let Some((base, disp)) = parse_memory_operand(src) {
-            // mov r32, [r64 + disp] -> 8B /r
-            let (modrm, sib, disp_bytes) = encode_modrm(r32, base, disp);
-            let mut bytes = vec![0x8B, modrm];
+        if let Some(mem) = parse_memory_operand(src) {
+            // mov r32, [mem] -> 8B /r
+            let (modrm, sib, disp_bytes) = encode_mem_op(r32, &mem);
+            let rex_r = if r32 >= 8 { 4 } else { 0 };
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            let mut bytes = Vec::new();
+            if rex_r != 0 || rex_x != 0 || rex_b != 0 {
+                bytes.push(0x40 | rex_r | rex_x | rex_b);
+            }
+            bytes.push(0x8B);
+            bytes.push(modrm);
             if let Some(s) = sib {
                 bytes.push(s);
             }
@@ -1495,7 +1503,7 @@ fn assemble_mov(operands: &str) -> Result<Option<Vec<u8>>, String> {
         }
     }
 
-    // mov rax, 1 / mov <r64>, <imm64>
+    // mov rax, 1 / mov <r64>, <imm64> / mov r64, [mem]
     if let Some(r64) = parse_reg64(dst) {
         if let Some(imm) = parse_imm64(src) {
             let rex = 0x48 | if r64 >= 8 { 1 } else { 0 };
@@ -1503,13 +1511,49 @@ fn assemble_mov(operands: &str) -> Result<Option<Vec<u8>>, String> {
             bytes.extend_from_slice(&imm.to_le_bytes());
             return Ok(Some(bytes));
         }
+        if let Some(mem) = parse_memory_operand(src) {
+            // mov r64, [mem] -> 48 8B /r
+            let (modrm, sib, disp_bytes) = encode_mem_op(r64, &mem);
+            let rex_r = if r64 >= 8 { 4 } else { 0 };
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            let rex = 0x48 | rex_r | rex_x | rex_b;
+            let mut bytes = vec![rex, 0x8B, modrm];
+            if let Some(s) = sib {
+                bytes.push(s);
+            }
+            bytes.extend_from_slice(&disp_bytes);
+            return Ok(Some(bytes));
+        }
     }
 
-    // mov [r64 + disp], r32 / r64
-    if let Some((base, disp)) = parse_memory_operand(dst) {
+    // mov [mem], r64 / r32 / imm32
+    if let Some(mem) = parse_memory_operand(dst) {
+        if let Some(r64) = parse_reg64(src) {
+            // mov [mem], r64 -> 48 89 /r
+            let (modrm, sib, disp_bytes) = encode_mem_op(r64, &mem);
+            let rex_r = if r64 >= 8 { 4 } else { 0 };
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            let rex = 0x48 | rex_r | rex_x | rex_b;
+            let mut bytes = vec![rex, 0x89, modrm];
+            if let Some(s) = sib {
+                bytes.push(s);
+            }
+            bytes.extend_from_slice(&disp_bytes);
+            return Ok(Some(bytes));
+        }
         if let Some(r32) = parse_reg32(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(r32, base, disp);
-            let mut bytes = vec![0x89, modrm];
+            let (modrm, sib, disp_bytes) = encode_mem_op(r32, &mem);
+            let rex_r = if r32 >= 8 { 4 } else { 0 };
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            let mut bytes = Vec::new();
+            if rex_r != 0 || rex_x != 0 || rex_b != 0 {
+                bytes.push(0x40 | rex_r | rex_x | rex_b);
+            }
+            bytes.push(0x89);
+            bytes.push(modrm);
             if let Some(s) = sib {
                 bytes.push(s);
             }
@@ -1517,9 +1561,16 @@ fn assemble_mov(operands: &str) -> Result<Option<Vec<u8>>, String> {
             return Ok(Some(bytes));
         }
         if let Some(imm) = parse_imm32(src) {
-            // mov dword ptr [r64 + disp], imm32 -> C7 /0
-            let (modrm, sib, disp_bytes) = encode_modrm(0, base, disp);
-            let mut bytes = vec![0xC7, modrm];
+            // mov dword ptr [mem], imm32 -> C7 /0
+            let (modrm, sib, disp_bytes) = encode_mem_op(0, &mem);
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            let mut bytes = Vec::new();
+            if rex_x != 0 || rex_b != 0 {
+                bytes.push(0x40 | rex_x | rex_b);
+            }
+            bytes.push(0xC7);
+            bytes.push(modrm);
             if let Some(s) = sib {
                 bytes.push(s);
             }
@@ -1586,10 +1637,10 @@ fn assemble_movups(operands: &str) -> Result<Option<Vec<u8>>, String> {
         None => return Ok(None),
     };
 
-    // movups [r64 + disp], xmm -> 0F 11 /r
-    if let Some((base, disp)) = parse_memory_operand(dst) {
+    // movups [mem], xmm -> 0F 11 /r
+    if let Some(mem) = parse_memory_operand(dst) {
         if let Some(xmm) = parse_xmm(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(xmm, base, disp);
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
             let mut bytes = vec![0x0F, 0x11, modrm];
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1599,10 +1650,10 @@ fn assemble_movups(operands: &str) -> Result<Option<Vec<u8>>, String> {
         }
     }
 
-    // movups xmm, [r64 + disp] -> 0F 10 /r
+    // movups xmm, [mem] -> 0F 10 /r
     if let Some(xmm) = parse_xmm(dst) {
-        if let Some((base, disp)) = parse_memory_operand(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(xmm, base, disp);
+        if let Some(mem) = parse_memory_operand(src) {
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
             let mut bytes = vec![0x0F, 0x10, modrm];
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1620,9 +1671,9 @@ fn assemble_movss(operands: &str) -> Result<Option<Vec<u8>>, String> {
         Some((d, s)) => (d.trim(), s.trim()),
         None => return Ok(None),
     };
-    if let Some((base, disp)) = parse_memory_operand(dst) {
+    if let Some(mem) = parse_memory_operand(dst) {
         if let Some(xmm) = parse_xmm(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(xmm, base, disp);
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
             let mut bytes = vec![0xF3, 0x0F, 0x11, modrm];
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1632,8 +1683,8 @@ fn assemble_movss(operands: &str) -> Result<Option<Vec<u8>>, String> {
         }
     }
     if let Some(xmm) = parse_xmm(dst) {
-        if let Some((base, disp)) = parse_memory_operand(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(xmm, base, disp);
+        if let Some(mem) = parse_memory_operand(src) {
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
             let mut bytes = vec![0xF3, 0x0F, 0x10, modrm];
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1650,9 +1701,9 @@ fn assemble_movsd(operands: &str) -> Result<Option<Vec<u8>>, String> {
         Some((d, s)) => (d.trim(), s.trim()),
         None => return Ok(None),
     };
-    if let Some((base, disp)) = parse_memory_operand(dst) {
+    if let Some(mem) = parse_memory_operand(dst) {
         if let Some(xmm) = parse_xmm(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(xmm, base, disp);
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
             let mut bytes = vec![0xF2, 0x0F, 0x11, modrm];
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1662,8 +1713,8 @@ fn assemble_movsd(operands: &str) -> Result<Option<Vec<u8>>, String> {
         }
     }
     if let Some(xmm) = parse_xmm(dst) {
-        if let Some((base, disp)) = parse_memory_operand(src) {
-            let (modrm, sib, disp_bytes) = encode_modrm(xmm, base, disp);
+        if let Some(mem) = parse_memory_operand(src) {
+            let (modrm, sib, disp_bytes) = encode_mem_op(xmm, &mem);
             let mut bytes = vec![0xF2, 0x0F, 0x10, modrm];
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1755,19 +1806,20 @@ fn assemble_sse_binary_op(prefix: Option<u8>, opcode: u8, operands: &str) -> Res
         return Ok(Some(bytes));
     }
     if let Some(x1) = parse_xmm(dst) {
-        if let Some((base, disp)) = parse_memory_operand(src) {
+        if let Some(mem) = parse_memory_operand(src) {
             let mut bytes = Vec::new();
             if let Some(p) = prefix {
                 bytes.push(p);
             }
             let rex_r = if x1 >= 8 { 4 } else { 0 };
-            let rex_b = if base >= 8 { 1 } else { 0 };
-            if rex_r != 0 || rex_b != 0 {
-                bytes.push(0x40 | rex_r | rex_b);
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            if rex_r != 0 || rex_x != 0 || rex_b != 0 {
+                bytes.push(0x40 | rex_r | rex_x | rex_b);
             }
             bytes.push(0x0F);
             bytes.push(opcode);
-            let (modrm, sib, disp_bytes) = encode_modrm(x1, base, disp);
+            let (modrm, sib, disp_bytes) = encode_mem_op(x1, &mem);
             bytes.push(modrm);
             if let Some(s) = sib {
                 bytes.push(s);
@@ -1837,13 +1889,14 @@ fn assemble_int_arithmetic(sub_code: u8, operands: &str) -> Result<Option<Vec<u8
         }
     }
     // [memory], imm (e.g. sub qword ptr [r12], 1)
-    if let Some((base, disp)) = parse_memory_operand(dst) {
+    if let Some(mem) = parse_memory_operand(dst) {
         if let Some(imm) = parse_imm32(src) {
             let is_qword = dst.to_ascii_lowercase().starts_with("qword ptr");
             let rex_w = if is_qword { 8 } else { 0 };
-            let rex_b = if base >= 8 { 1 } else { 0 };
-            let rex = if rex_w != 0 || rex_b != 0 { Some(0x40 | rex_w | rex_b) } else { None };
-            let (modrm_byte, sib, disp_bytes) = encode_modrm(sub_code, base, disp);
+            let rex_x = if let Some((idx, _)) = mem.index { if idx >= 8 { 2 } else { 0 } } else { 0 };
+            let rex_b = if mem.base >= 8 { 1 } else { 0 };
+            let rex = if rex_w != 0 || rex_x != 0 || rex_b != 0 { Some(0x40 | rex_w | rex_x | rex_b) } else { None };
+            let (modrm_byte, sib, disp_bytes) = encode_mem_op(sub_code, &mem);
             let mut b = Vec::new();
             if let Some(r) = rex { b.push(r); }
             if (-128..=127).contains(&imm) {
@@ -1973,27 +2026,79 @@ fn parse_imm64(text: &str) -> Option<i64> {
     }
 }
 
-// Parses `[rcx+0x88]` or `[rcx+00000088]` or `[rdx+4]` or `dword ptr [rcx+88h]`
-fn parse_memory_operand(text: &str) -> Option<(u8, i64)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemOp {
+    pub base: u8,
+    pub index: Option<(u8, u8)>, // (index_reg, scale)
+    pub disp: i64,
+}
+
+// Parses `[rcx+0x88]` or `[rax+rcx*8+28h]` or `[r10+r9*8+8]`
+fn parse_memory_operand(text: &str) -> Option<MemOp> {
     let s = strip_ptr_prefix(text);
     if !s.starts_with('[') || !s.ends_with(']') {
         return None;
     }
-    let inner = &s[1..s.len() - 1].trim();
-
-    // Check for base + offset or base - offset
-    if let Some((base_str, off_str)) = inner.split_once('+') {
-        let base = parse_reg64(base_str.trim())?;
-        let off = parse_disp(off_str.trim())?;
-        Some((base, off))
-    } else if let Some((base_str, off_str)) = inner.split_once('-') {
-        let base = parse_reg64(base_str.trim())?;
-        let off = parse_disp(off_str.trim())?;
-        Some((base, -off))
-    } else {
-        let base = parse_reg64(inner)?;
-        Some((base, 0))
+    let inner = s[1..s.len() - 1].trim();
+    if inner.is_empty() {
+        return None;
     }
+
+    let mut base: Option<u8> = None;
+    let mut index: Option<(u8, u8)> = None;
+    let mut disp: i64 = 0;
+
+    let mut terms: Vec<(bool, &str)> = Vec::new();
+    let mut cur_pos = true;
+    let mut start = 0;
+    for (i, c) in inner.char_indices() {
+        if c == '+' || c == '-' {
+            let part = inner[start..i].trim();
+            if !part.is_empty() {
+                terms.push((cur_pos, part));
+            }
+            cur_pos = c == '+';
+            start = i + 1;
+        }
+    }
+    let last = inner[start..].trim();
+    if !last.is_empty() {
+        terms.push((cur_pos, last));
+    }
+
+    for (is_pos, term) in terms {
+        let t = term.trim();
+        if let Some((idx_str, scale_str)) = t.split_once('*') {
+            let idx = parse_reg64(idx_str.trim())?;
+            let scale: u8 = scale_str.trim().parse().ok()?;
+            if !matches!(scale, 1 | 2 | 4 | 8) {
+                return None;
+            }
+            index = Some((idx, scale));
+        } else if let Some(r) = parse_reg64(t) {
+            if base.is_none() {
+                base = Some(r);
+            } else if index.is_none() {
+                index = Some((r, 1));
+            } else {
+                return None;
+            }
+        } else if let Some(d) = parse_disp(t) {
+            if is_pos {
+                disp += d;
+            } else {
+                disp -= d;
+            }
+        } else {
+            return None;
+        }
+    }
+
+    Some(MemOp {
+        base: base?,
+        index,
+        disp,
+    })
 }
 
 fn parse_disp(text: &str) -> Option<i64> {
@@ -2011,6 +2116,40 @@ fn parse_disp(text: &str) -> Option<i64> {
         i64::from_str_radix(t, 16).ok().or_else(|| t.parse::<i64>().ok())
     } else {
         t.parse::<i64>().ok().or_else(|| i64::from_str_radix(t, 16).ok())
+    }
+}
+
+fn encode_mem_op(reg: u8, mem: &MemOp) -> (u8, Option<u8>, Vec<u8>) {
+    let reg_field = reg & 7;
+    let base_field = mem.base & 7;
+
+    if let Some((idx_reg, scale)) = mem.index {
+        let idx_field = idx_reg & 7;
+        let scale_field = match scale {
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            _ => 0,
+        };
+        let sib = (scale_field << 6) | (idx_field << 3) | base_field;
+        let mod_bits = if mem.disp == 0 && base_field != 5 {
+            0
+        } else if (-128..=127).contains(&mem.disp) {
+            1
+        } else {
+            2
+        };
+        let modrm = (mod_bits << 6) | (reg_field << 3) | 4;
+        let disp_bytes = if mod_bits == 0 {
+            Vec::new()
+        } else if mod_bits == 1 {
+            vec![mem.disp as u8]
+        } else {
+            (mem.disp as i32).to_le_bytes().to_vec()
+        };
+        (modrm, Some(sib), disp_bytes)
+    } else {
+        encode_modrm(reg, mem.base, mem.disp)
     }
 }
 
@@ -2103,6 +2242,14 @@ mod tests {
         assert_eq!(
             assemble_x64_instruction("sub qword ptr [r12], 1").unwrap(),
             Some(vec![0x49, 0x83, 0x2C, 0x24, 0x01])
+        );
+        assert_eq!(
+            assemble_x64_instruction("mov rcx, [rax+rcx*8+28h]").unwrap(),
+            Some(vec![0x48, 0x8B, 0x4C, 0xC8, 0x28])
+        );
+        assert_eq!(
+            assemble_x64_instruction("mov [r10+r9*8+8], rsi").unwrap(),
+            Some(vec![0x4B, 0x89, 0x74, 0xCA, 0x08])
         );
     }
 
