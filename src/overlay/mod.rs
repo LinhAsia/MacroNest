@@ -33467,7 +33467,15 @@ mod windows_overlay {
             };
             use crate::model::MemoryDebuggerArchitecture;
 
-            let Ok(instruction_address) = resolve_module_offset(pid, &code_module, code_offset)
+            let instruction_address = resolve_module_offset(pid, &code_module, code_offset)
+                .or_else(|_| {
+                    if code_offset > 0x1000 && crate::process_memory::read_memory_bytes(pid, code_offset, 4).is_ok() {
+                        Ok(code_offset)
+                    } else {
+                        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Module is not loaded"))
+                    }
+                });
+            let Ok(instruction_address) = instruction_address
             else {
                 MEMORY_TRACKED_REBINDS.lock().insert(pid, Instant::now());
                 return;

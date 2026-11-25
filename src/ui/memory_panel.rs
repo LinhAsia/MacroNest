@@ -772,16 +772,34 @@ struct ModuleListDialog {
 pub struct EmulatorMemoryWatchSession {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
+    _hw_watch: Option<WriteWatch>,
 }
 
 #[cfg(windows)]
 impl EmulatorMemoryWatchSession {
     pub fn stop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(mut hw) = self._hw_watch.take() {
+            hw.stop();
+        }
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
     }
+}
+
+#[cfg(windows)]
+pub(super) struct ActiveCodeCaptureSession {
+    pub code_index: usize,
+    #[allow(dead_code)]
+    pub instruction_address: usize,
+    pub code_name: String,
+    pub delta: isize,
+    pub value_type: ScanValueType,
+    pub rx: Receiver<WatchEvent>,
+    #[allow(dead_code)]
+    pub watch: AccessWatch,
+    pub started_at: Instant,
 }
 
 #[cfg(windows)]
@@ -1268,6 +1286,8 @@ pub(crate) struct MemoryPanelState {
     code_access_last_size: Option<egui::Vec2>,
     #[cfg(windows)]
     code_compare_dialog: Option<CodeCompareDialog>,
+    #[cfg(windows)]
+    pub(super) active_code_capture: Option<ActiveCodeCaptureSession>,
     aob_compare_dialog: Option<AobCompareDialog>,
     pub(super) show_proximity_finder: bool,
     proximity_finder_dialog: ProximityFinderDialog,
@@ -1425,6 +1445,8 @@ impl Default for MemoryPanelState {
             code_access_last_size: None,
             #[cfg(windows)]
             code_compare_dialog: None,
+            #[cfg(windows)]
+            active_code_capture: None,
             aob_compare_dialog: None,
             show_proximity_finder: false,
             proximity_finder_dialog: ProximityFinderDialog::default(),
@@ -7796,6 +7818,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         self.poll_code_entry_relocate();
         #[cfg(windows)]
         self.poll_code_entry_relocate_all();
+        #[cfg(windows)]
+        self.poll_active_code_capture();
         let mut corrected_actions = false;
         #[cfg(windows)]
         let debugger_active = self
@@ -7859,6 +7883,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             RegenerateAob(usize),
             ToggleHighlight(usize),
             AddTargetToAddressList(usize),
+            CaptureLiveValue(usize),
         }
 
         let mut pending_action = None;
@@ -7991,7 +8016,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         Self::memory_code_list_cell(ui, 326.0, "Action / Status", None);
                     });
                     ui.separator();
-                    let is_android = self.memory_panel.android_bridge.is_connected
+                    let _is_android = self.memory_panel.android_bridge.is_connected
                         && self.memory_panel.android_bridge.selected_pid.is_some();
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
                         let selected = self.memory_panel.selected_code.contains(&index);
@@ -8079,7 +8104,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                         )
                                     };
 
-                                let action_w = 98.0 * s;
+                                let action_w = 92.0 * s;
+                                let live_w = 82.0 * s;
                                 let copy_aob_w = 64.0 * s;
                                 let relocate_w = 60.0 * s;
                                 let rename_w = 54.0 * s;
@@ -8087,7 +8113,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
                                 let action_label = if entry.replaced {
                                     "NOP Active"
-                                } else if entry.instruction.starts_with("Write:") || entry.writes || is_android {
+                                } else if entry.instruction.starts_with("Write:") || entry.writes {
                                     "Watch Writes"
                                 } else {
                                     "Find accessed"
@@ -8099,6 +8125,42 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 if action_response.clicked() {
                                     btn_clicked = true;
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
+                                }
+
+                                #[cfg(windows)]
+                                let is_capturing = self.memory_panel.active_code_capture.as_ref().map_or(false, |c| c.code_index == index);
+                                #[cfg(not(windows))]
+                                let is_capturing = false;
+
+                                if is_capturing {
+                                    ui.ctx().request_repaint();
+                                }
+
+                                let live_label = if is_capturing {
+                                    "⚡ Waiting..."
+                                } else if is_vietnamese {
+                                    "⚡ Lấy giá trị"
+                                } else {
+                                    "⚡ Get Value"
+                                };
+                                let live_response = ui.add_sized(
+                                    [live_w, btn_h],
+                                    egui::Button::new(
+                                        RichText::new(live_label)
+                                            .color(if is_capturing { Color32::from_rgb(255, 193, 7) } else { Color32::from_rgb(0, 230, 118) })
+                                            .strong()
+                                    ).small(),
+                                )
+                                .on_hover_text(
+                                    if is_vietnamese {
+                                        "Tự động bắt lại địa chỉ động và cập nhật giá trị hiện tại vào Address List khi vào lại game!"
+                                    } else {
+                                        "Capture the new dynamic address and update live value into Address List after game restart!"
+                                    }
+                                );
+                                if live_response.clicked() {
+                                    btn_clicked = true;
+                                    pending_action = Some(CodeAction::CaptureLiveValue(index));
                                 }
                                 let copy_aob_enabled = !entry.aob_signature.is_empty();
                                 let copy_aob_tooltip = if entry.aob_target_offset > 0 {
@@ -8156,6 +8218,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 let mut combined_res = star_response
                                     .union(instruction_response)
                                     .union(action_response)
+                                    .union(live_response)
                                     .union(copy_aob_response)
                                     .union(relocate_response)
                                     .union(rename_response)
@@ -8283,6 +8346,16 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             };
                             if ui.button(disasm_label).clicked() {
                                 pending_action = Some(CodeAction::OpenDisassembler(index));
+                                ui.close_menu();
+                            }
+
+                            let live_cap_label = if is_vietnamese {
+                                "⚡ Lấy địa chỉ & giá trị mới vào Address List (Capture Live Address)"
+                            } else {
+                                "⚡ Capture Live Address & Value to Address List"
+                            };
+                            if ui.button(live_cap_label).clicked() {
+                                pending_action = Some(CodeAction::CaptureLiveValue(index));
                                 ui.close_menu();
                             }
 
@@ -8416,6 +8489,10 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
 
         match pending_action {
+            Some(CodeAction::CaptureLiveValue(index)) => {
+                #[cfg(windows)]
+                self.capture_code_entry_live_address(index);
+            }
             Some(CodeAction::AddTargetToAddressList(target)) => {
                 self.add_code_access_address(target, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
                 self.memory_panel.status = format!("[OK] Added Target Address {} to Address list", format_prefixed_memory_address(target));
@@ -9056,6 +9133,176 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     }
 
     #[cfg(windows)]
+    fn capture_code_entry_live_address(&mut self, code_index: usize) {
+        let Some(entry) = self.state.memory_code_list.get(code_index).cloned() else { return; };
+        let is_vietnamese = self.state.ui_language == UiLanguage::Vietnamese;
+        if self.memory_panel.process_pid.is_none() {
+            self.memory_panel.status = if is_vietnamese {
+                "Vui lòng chọn process (hoặc khởi động game/giả lập) trước".to_owned()
+            } else {
+                "Select a process first (or launch game/emulator)".to_owned()
+            };
+            return;
+        }
+        let pid = self.memory_panel.process_pid.unwrap();
+
+        let instruction_address = match self.resolve_code_entry_address(pid, &entry.module, entry.offset) {
+            Ok(addr) => addr,
+            Err(err) => {
+                self.memory_panel.status = if is_vietnamese {
+                    format!("Không thể định vị code cho '{}': {err}. Đảm bảo game đang chạy!", entry.name)
+                } else {
+                    format!("Unable to resolve code address for '{}': {err}. Make sure game is running!", entry.name)
+                };
+                return;
+            }
+        };
+
+        let (tx, rx) = mpsc::channel();
+        let code_name = entry.name.clone();
+        let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+        let value_type = self.memory_panel.value_type;
+
+        let started = AccessWatch::start_once(
+            pid,
+            instruction_address,
+            self.state.memory_debugger_architecture,
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+
+        match started {
+            Ok(active_watch) => {
+                self.memory_panel.status = if is_vietnamese {
+                    format!("⚡ Đang đợi instruction '{}' (0x{:X}) thực thi… Hãy di chuyển nhân vật hoặc thao tác trong game!", code_name, instruction_address)
+                } else {
+                    format!("⚡ Arming capture on '{}' at 0x{:X}… Interact with game/character to trigger!", code_name, instruction_address)
+                };
+                self.memory_panel.active_code_capture = Some(ActiveCodeCaptureSession {
+                    code_index,
+                    instruction_address,
+                    code_name,
+                    delta,
+                    value_type,
+                    rx,
+                    watch: active_watch,
+                    started_at: Instant::now(),
+                });
+            }
+            Err(err) => {
+                self.memory_panel.status = format!("Unable to start capture debugger: {err}");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn poll_active_code_capture(&mut self) {
+        let is_vietnamese = self.state.ui_language == UiLanguage::Vietnamese;
+        let mut finished = false;
+        let mut captured_data_addr = None;
+        let mut error_msg = None;
+
+        if let Some(capture) = &mut self.memory_panel.active_code_capture {
+            while let Ok(event) = capture.rx.try_recv() {
+                match event {
+                    WatchEvent::AccessHit { data_address, .. } => {
+                        captured_data_addr = Some((data_address, capture.code_index, capture.code_name.clone(), capture.delta, capture.value_type));
+                        finished = true;
+                        break;
+                    }
+                    WatchEvent::Error(err) => {
+                        error_msg = Some(format!("Capture debugger error: {err}"));
+                        finished = true;
+                        break;
+                    }
+                    WatchEvent::Stopped | WatchEvent::CaptureLimitReached(_) => {
+                        finished = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if !finished && capture.started_at.elapsed() > Duration::from_secs(30) {
+                let name = capture.code_name.clone();
+                error_msg = Some(if is_vietnamese {
+                    format!("Hết thời gian chờ bắt địa chỉ cho '{name}' (không có hit trong 30s)")
+                } else {
+                    format!("Capture timed out for '{name}' (no hits within 30s)")
+                });
+                finished = true;
+            }
+        }
+
+        if let Some(msg) = error_msg {
+            self.memory_panel.status = msg;
+        }
+
+        if let Some((hva_or_data_addr, code_index, code_name, delta, value_type)) = captured_data_addr {
+            if let Some(pid) = self.memory_panel.process_pid {
+                let display_addr = if delta != 0 {
+                    (hva_or_data_addr as isize - delta) as usize
+                } else {
+                    hva_or_data_addr
+                };
+                let effective_read_addr = if crate::process_memory::read_memory_bytes(pid, display_addr, 4).is_ok() {
+                    display_addr
+                } else {
+                    hva_or_data_addr
+                };
+
+                let val_opt = read_scan_value(pid, effective_read_addr, value_type).ok();
+                let val_str = val_opt.map(|v| format_scan_value(v, self.memory_panel.hex)).unwrap_or_else(|| "?".to_string());
+
+                let desc = format!("[Live] {}", code_name);
+                if let Some(existing) = self.memory_panel.saved.iter_mut().find(|s| s.address == display_addr) {
+                    existing.current = val_opt;
+                    existing.description = desc;
+                } else {
+                    self.memory_panel.saved.push(SavedMemoryAddress {
+                        address: display_addr,
+                        value_type,
+                        current: val_opt,
+                        text_encoding: None,
+                        text_byte_len: 0,
+                        current_text: None,
+                        description: desc,
+                        group: String::new(),
+                        hexadecimal: false,
+                        pointer: None,
+                        frozen: None,
+                        saved_to_library: false,
+                        aob_sample_1: None,
+                        aob_pattern: None,
+                    });
+                }
+
+                if let Some(entry) = self.state.memory_code_list.get_mut(code_index) {
+                    entry.target_address = Some(display_addr);
+                }
+                self.persist();
+
+                self.memory_panel.status = if is_vietnamese {
+                    format!(
+                        "[OK] Đã bắt thành công địa chỉ live 0x{:X} (Giá trị: {}) từ instruction '{}'! Đã cập nhật vào Address List.",
+                        display_addr, val_str, code_name
+                    )
+                } else {
+                    format!(
+                        "[OK] Successfully captured live address 0x{:X} (Value: {}) from instruction '{}'! Added to Address List.",
+                        display_addr, val_str, code_name
+                    )
+                };
+            }
+        }
+
+        if finished {
+            self.memory_panel.active_code_capture = None;
+        }
+    }
+
+    #[cfg(windows)]
     fn replace_code_entry_with_nop(&mut self, code_index: usize) {
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process first".to_owned();
@@ -9373,9 +9620,24 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         is_android: bool,
         emu_name: Option<String>,
         delta: isize,
+        host_modules: Vec<(String, usize, usize)>,
     ) -> EmulatorMemoryWatchSession {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stop_clone = std::sync::Arc::clone(&stop);
+
+        let hw_watch = if let Some(&(_, hva)) = watch_targets.first() {
+            let tx_hw = tx.clone();
+            WriteWatch::start_many(
+                pid,
+                &[hva],
+                crate::model::MemoryDebuggerArchitecture::Auto,
+                move |event| {
+                    let _ = tx_hw.send(event);
+                },
+            ).ok()
+        } else {
+            None
+        };
 
         // Background XREF analysis to find real code instructions referencing this offset or address
         let tx_xref = tx.clone();
@@ -9383,73 +9645,118 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         let watch_targets_xref = watch_targets.clone();
         let stop_xref = std::sync::Arc::clone(&stop);
         let _ = std::thread::spawn(move || {
-            let game_mod = modules_for_xref.iter().find(|m| {
-                let l = m.name.to_lowercase();
-                l.contains("il2cpp") || l.contains("unity") || l.contains("neox") || l.contains("game") || l.contains("main")
-            }).or_else(|| modules_for_xref.first());
+            let mut candidate_mods: Vec<(String, usize, usize, usize)> = Vec::new(); // (name, base_gva, hva_base, size)
+            for m in &modules_for_xref {
+                let hva_base = (m.base_address as isize).wrapping_add(delta) as usize;
+                candidate_mods.push((m.name.clone(), m.base_address, hva_base, m.size));
+            }
+            if candidate_mods.is_empty() {
+                for (name, base, size) in &host_modules {
+                    candidate_mods.push((name.clone(), *base, *base, *size));
+                }
+            }
 
-            if let Some(gm) = game_mod {
-                let hva_base = (gm.base_address as isize).wrapping_add(delta) as usize;
-                let scan_len = gm.size.min(12 * 1024 * 1024); // Scan up to 12MB of code in chunks
-                let chunk_size = 64 * 1024;
-                let mut num_found = 0;
+            candidate_mods.sort_by_key(|(name, _, _, _)| {
+                let l = name.to_lowercase();
+                if l.contains("il2cpp") { 0 }
+                else if l.contains("unity") { 1 }
+                else if l.contains("neox") || l.contains("game") || l.contains("main") { 2 }
+                else if l.ends_with(".so") || l.ends_with(".dll") { 3 }
+                else { 4 }
+            });
 
-                for &(display_addr, _hva) in &watch_targets_xref {
-                    if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 5 {
+            let mut seen_instructions: HashSet<usize> = HashSet::new();
+            let mut num_found = 0;
+            let chunk_size = 64 * 1024;
+
+            for (mod_name, base_gva, hva_base, mod_size) in candidate_mods {
+                if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 10 {
+                    break;
+                }
+                let scan_len = mod_size.min(128 * 1024 * 1024);
+                if scan_len < 16 {
+                    continue;
+                }
+
+                for &(display_addr, _) in &watch_targets_xref {
+                    if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 10 {
                         break;
                     }
-                    let field_offset = (display_addr & 0xFFF) as u32;
-                    if field_offset == 0 {
-                        continue;
-                    }
-                    let needle = field_offset.to_le_bytes();
 
-                    let mut offset = 0;
-                    while offset + 4 <= scan_len && num_found < 5 {
-                        if stop_xref.load(std::sync::atomic::Ordering::Relaxed) {
+                    let mut cand_offsets = Vec::new();
+                    let off_fff = (display_addr & 0xFFF) as u32;
+                    if off_fff > 0 { cand_offsets.push(off_fff); }
+                    let off_1fff = (display_addr & 0x1FFF) as u32;
+                    if off_1fff > 0 && !cand_offsets.contains(&off_1fff) { cand_offsets.push(off_1fff); }
+                    let off_7fff = (display_addr & 0x7FFF) as u32;
+                    if off_7fff > 0 && !cand_offsets.contains(&off_7fff) { cand_offsets.push(off_7fff); }
+                    let off_ffff = (display_addr & 0xFFFF) as u32;
+                    if off_ffff > 0 && !cand_offsets.contains(&off_ffff) { cand_offsets.push(off_ffff); }
+
+                    for field_offset in cand_offsets {
+                        if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 10 {
                             break;
                         }
-                        let current_chunk = chunk_size.min(scan_len - offset);
-                        let chunk_addr = hva_base + offset;
-                        if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, chunk_addr, current_chunk) {
-                            let mut i = 0;
-                            while i + 4 <= bytes.len() {
-                                if bytes[i..i + 4] == needle {
-                                    let match_hva = chunk_addr + i;
-                                    let disasm_start = match_hva.saturating_sub(4);
-                                    if let Ok(lines) = crate::memory_debugger::debugger::disassemble_from(
-                                        pid,
-                                        disasm_start,
-                                        crate::model::MemoryDebuggerArchitecture::Auto,
-                                        3,
-                                    ) {
-                                        for (inst_addr, _bytes_hex, asm_text) in lines {
-                                            if Self::is_memory_displacement_match(&asm_text, field_offset) {
+                        let needle = field_offset.to_le_bytes();
+
+                        let mut offset = 0;
+                        while offset + 4 <= scan_len && num_found < 10 {
+                            if stop_xref.load(std::sync::atomic::Ordering::Relaxed) {
+                                break;
+                            }
+                            let current_chunk = chunk_size.min(scan_len - offset);
+                            let chunk_addr = hva_base + offset;
+                            if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, chunk_addr, current_chunk) {
+                                for i in 0..bytes.len().saturating_sub(3) {
+                                    if bytes[i..i + 4] == needle {
+                                        let match_hva = chunk_addr + i;
+                                        let mut matched_inst = None;
+                                        for backtrack in 1..=12 {
+                                            let test_start = match_hva.saturating_sub(backtrack);
+                                            if let Ok(lines) = crate::memory_debugger::debugger::disassemble_from(
+                                                pid,
+                                                test_start,
+                                                crate::model::MemoryDebuggerArchitecture::Auto,
+                                                4,
+                                            ) {
+                                                for (inst_addr, _bytes_hex, asm_text) in lines {
+                                                    if inst_addr <= match_hva && match_hva < inst_addr + 15 {
+                                                        if Self::is_memory_displacement_match(&asm_text, field_offset) {
+                                                            matched_inst = Some((inst_addr, asm_text));
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if matched_inst.is_some() {
+                                                break;
+                                            }
+                                        }
+
+                                        if let Some((inst_addr, asm_text)) = matched_inst {
+                                            if seen_instructions.insert(inst_addr) {
                                                 let inst_gva = if delta != 0 {
                                                     (inst_addr as isize - delta) as usize
                                                 } else {
                                                     inst_addr
                                                 };
-                                                let mod_off = inst_gva.saturating_sub(gm.base_address);
-                                                let mod_desc = format!("{}+0x{:X}", gm.name, mod_off);
+                                                let mod_off = inst_gva.saturating_sub(base_gva);
+                                                let mod_desc = format!("{mod_name}+0x{mod_off:X}");
                                                 let _ = tx_xref.send(WatchEvent::AddressHit {
                                                     instruction_address: inst_addr,
                                                     instruction: format!("{asm_text}  ({mod_desc})"),
                                                     details: format!(
-                                                        "Referencing Instruction Found in Game Module!\nModule: {}\nInstruction: {asm_text}\nCode Address: {mod_desc} (HVA: 0x{inst_addr:X})\nTarget Field Offset: 0x{field_offset:X}\nClick 'Show disassembler' or 'Add to code list' to patch/hook this code!",
-                                                        gm.name
+                                                        "Referencing Instruction Found in Game Module!\nModule: {mod_name}\nInstruction: {asm_text}\nCode Address: {mod_desc} (HVA: 0x{inst_addr:X})\nTarget Field Offset: 0x{field_offset:X}\nClick 'Show disassembler' or 'Add to code list' to patch/hook this code!",
                                                     ),
                                                 });
                                                 num_found += 1;
-                                                break;
                                             }
                                         }
                                     }
                                 }
-                                i += 4;
                             }
+                            offset += current_chunk;
                         }
-                        offset += current_chunk;
                     }
                 }
             }
@@ -9546,6 +9853,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         EmulatorMemoryWatchSession {
             stop,
             handle: Some(handle),
+            _hw_watch: hw_watch,
         }
     }
 
@@ -9624,6 +9932,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 is_android,
                 emu_name.clone(),
                 self.memory_panel.android_bridge.delta.unwrap_or(0),
+                self.memory_panel.scan_modules.clone(),
             );
 
             let mut values = HashMap::new();
@@ -14995,6 +15304,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 is_android || !self.memory_panel.android_bridge.modules.is_empty(),
                 emu_display_name.clone(),
                 delta,
+                self.memory_panel.scan_modules.clone(),
             );
             Ok(ActiveInstructionWatch::Emulator(session))
         } else if reads_and_writes {
@@ -15384,6 +15694,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 is_android || !self.memory_panel.android_bridge.modules.is_empty(),
                 emu_name.clone(),
                 delta,
+                self.memory_panel.scan_modules.clone(),
             );
             Ok(ActiveInstructionWatch::Emulator(session))
         } else if reads_and_writes {
@@ -15569,7 +15880,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
                 if ui
                     .button("+ Add Target to Address List")
-                    .on_hover_text("Save this data address to the main Address List to keep track of its value")
+                    .on_hover_text("Save this data address to Address List (Note: dynamic address changes after restart; add instruction below to Code List to retrieve new address after restart!)")
                     .clicked()
                 {
                     dialog.pending_target_address_add = true;
@@ -15605,12 +15916,14 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             }
             if ui
                 .add_enabled(dialog.selected.is_some(), Button::new("Add to code list"))
+                .on_hover_text("Add instruction to Code List so you can automatically retrieve the new dynamic address after restarting the game!")
                 .clicked()
             {
                 dialog.pending_code_add = dialog.selected;
             }
             if ui
                 .add_enabled(!dialog.hits.is_empty(), Button::new("Add all to code list"))
+                .on_hover_text("Add all captured instructions to Code List for reuse across game restarts")
                 .clicked()
             {
                 dialog.pending_code_add_all = true;
@@ -17137,6 +17450,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 is_android,
                 emu_name.clone(),
                 delta,
+                self.memory_panel.scan_modules.clone(),
             );
 
             dialog.rx = rx;
@@ -22132,13 +22446,29 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         }
     }
 
+    fn resolve_saved_effective_address(&self, address: usize) -> usize {
+        if let Some(pid) = self.memory_panel.process_pid {
+            if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
+                return address;
+            }
+            if let Some(delta) = self.memory_panel.android_bridge.delta {
+                let hva = (address as isize + delta) as usize;
+                if crate::process_memory::read_memory_bytes(pid, hva, 4).is_ok() {
+                    return hva;
+                }
+            }
+        }
+        address
+    }
+
     fn format_saved_live_value(&self, saved: &SavedMemoryAddress) -> String {
         if let Some(pid) = self.memory_panel.process_pid {
+            let effective_addr = self.resolve_saved_effective_address(saved.address);
             if let Some(enc) = saved.text_encoding {
-                if let Ok(text) = read_text_memory(pid, saved.address, saved.text_byte_len.max(16), enc) {
+                if let Ok(text) = read_text_memory(pid, effective_addr, saved.text_byte_len.max(16), enc) {
                     return text;
                 }
-            } else if let Ok(val) = read_scan_value(pid, saved.address, saved.value_type) {
+            } else if let Ok(val) = read_scan_value(pid, effective_addr, saved.value_type) {
                 return format_scan_value(val, saved.hexadecimal);
             }
         }
@@ -23944,34 +24274,48 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             self.memory_panel.saved_background_refresh_cursor = (cursor + 16) % total_saved;
         }
 
+        let delta = self.memory_panel.android_bridge.delta;
         for index in to_refresh {
-            let Some(saved) = self.memory_panel.saved.get_mut(index) else {
+            let Some(saved_info) = self.memory_panel.saved.get(index).cloned() else {
                 continue;
             };
-            let address = if let Some(pointer) = saved.pointer.as_ref() {
+            let (new_address, address) = if let Some(pointer) = saved_info.pointer.as_ref() {
                 if let Ok(addr) = resolve_memory_address(pid, pointer.base, Some(pointer)) {
-                    saved.address = addr;
-                    addr
+                    (Some(addr), addr)
                 } else {
-                    0
+                    (None, 0)
                 }
             } else {
-                saved.address
+                (None, saved_info.address)
             };
-            if address == 0 {
-                saved.current = None;
-                saved.current_text = None;
-                continue;
-            }
-            if let Some(encoding) = saved.text_encoding {
-                let byte_len = saved.text_byte_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
-                saved.current_text =
-                    read_text_memory(pid, address, byte_len, encoding).ok();
-                saved.current = None;
+            let effective_address = if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
+                address
+            } else if let Some(d) = delta {
+                let hva = (address as isize + d) as usize;
+                if crate::process_memory::read_memory_bytes(pid, hva, 4).is_ok() {
+                    hva
+                } else {
+                    address
+                }
             } else {
-                let value = read_scan_value(pid, address, saved.value_type).ok();
-                saved.current = value;
-                saved.current_text = None;
+                address
+            };
+
+            let (current_val, current_text) = if effective_address == 0 {
+                (None, None)
+            } else if let Some(encoding) = saved_info.text_encoding {
+                let byte_len = saved_info.text_byte_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
+                (None, read_text_memory(pid, effective_address, byte_len, encoding).ok())
+            } else {
+                (read_scan_value(pid, effective_address, saved_info.value_type).ok(), None)
+            };
+
+            if let Some(saved) = self.memory_panel.saved.get_mut(index) {
+                if let Some(addr) = new_address {
+                    saved.address = addr;
+                }
+                saved.current = current_val;
+                saved.current_text = current_text;
             }
         }
     }
@@ -23982,8 +24326,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             .saved
             .iter()
             .filter_map(|saved| {
+                let effective_addr = self.resolve_saved_effective_address(saved.address);
                 saved.frozen.map(|value| FreezeTarget {
-                    address: saved.address,
+                    address: effective_addr,
                     value,
                     pointer: saved.pointer.clone(),
                 })
@@ -24113,10 +24458,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 let Some(entry) = self.memory_panel.saved.get(target).cloned() else {
                     continue;
                 };
+                let effective_addr = self.resolve_saved_effective_address(entry.address);
                 if entry.text_encoding != Some(encoding)
                     || write_text_memory(
                         pid,
-                        entry.address,
+                        effective_addr,
                         &self.memory_panel.edit_value_input,
                         encoding,
                         entry.text_byte_len,
@@ -24142,19 +24488,20 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 let Some(entry) = self.memory_panel.saved.get(target).cloned() else {
                     continue;
                 };
+                let effective_addr = self.resolve_saved_effective_address(entry.address);
                 if entry.text_encoding.is_some()
                     || entry.value_type != saved.value_type
-                    || write_scan_value(pid, entry.address, value).is_err()
+                    || write_scan_value(pid, effective_addr, value).is_err()
                 {
                     continue;
                 }
-                let observed = read_scan_value(pid, entry.address, entry.value_type).ok();
+                let observed = read_scan_value(pid, effective_addr, entry.value_type).ok();
                 self.memory_panel.saved[target].current = observed.or(Some(value));
                 self.memory_panel
                     .pending_write_checks
                     .push(PendingWriteCheck {
                         due: Instant::now() + Duration::from_millis(250),
-                        address: entry.address,
+                        address: effective_addr,
                         value_type: entry.value_type,
                         expected: value,
                     });
