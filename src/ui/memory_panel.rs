@@ -9399,6 +9399,14 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 self.android_connect();
             }
         } else {
+            if let Some(ref adb) = self.memory_panel.android_bridge.adb_path {
+                if self.memory_panel.android_bridge.all_regions.is_empty() {
+                    crate::android_perf_watch::ensure_adb_root(
+                        adb,
+                        &self.memory_panel.android_bridge.selected_target,
+                    );
+                }
+            }
             self.android_refresh_processes();
             if self.memory_panel.android_bridge.selected_pid.is_none() {
                 let foreground_games: Vec<_> = self
@@ -16837,15 +16845,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 dialog.last_value_refresh = now;
             }
             if let Some(pid) = self.memory_panel.process_pid {
-                let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
                 for (data_address, _) in &dialog.addresses {
-                    let effective_addr = if crate::process_memory::read_memory_bytes(pid, *data_address, 4).is_ok() {
-                        *data_address
-                    } else if delta != 0 {
-                        (*data_address as isize + delta) as usize
-                    } else {
-                        *data_address
-                    };
+                    let effective_addr = self.resolve_saved_effective_address(*data_address);
                     if let Some(enc) = dialog.text_encoding {
                         if let Ok(text) = read_text_memory(pid, effective_addr, dialog.text_byte_len.max(1), enc) {
                             dialog.values.insert(*data_address, text);
@@ -22183,6 +22184,12 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             }
             if let Some(delta) = self.memory_panel.android_bridge.delta {
                 let hva = (address as isize + delta) as usize;
+                if crate::process_memory::read_memory_bytes(pid, hva, 4).is_ok() {
+                    return hva;
+                }
+            }
+            if let Some(h_delta) = crate::android_perf_watch::lookup_heap_delta() {
+                let hva = (address as isize).wrapping_add(h_delta) as usize;
                 if crate::process_memory::read_memory_bytes(pid, hva, 4).is_ok() {
                     return hva;
                 }

@@ -45,6 +45,7 @@ pub struct CapturedAndroidInstrMeta {
 
 static CAPTURED_META: OnceLock<Mutex<HashMap<usize, CapturedAndroidInstrMeta>>> = OnceLock::new();
 static CAPTURED_GUEST_VALUES: OnceLock<Mutex<HashMap<usize, [u8; 8]>>> = OnceLock::new();
+static CAPTURED_HEAP_DELTA: OnceLock<Mutex<Option<isize>>> = OnceLock::new();
 
 fn meta_map() -> &'static Mutex<HashMap<usize, CapturedAndroidInstrMeta>> {
     CAPTURED_META.get_or_init(|| Mutex::new(HashMap::new()))
@@ -52,6 +53,20 @@ fn meta_map() -> &'static Mutex<HashMap<usize, CapturedAndroidInstrMeta>> {
 
 fn guest_val_map() -> &'static Mutex<HashMap<usize, [u8; 8]>> {
     CAPTURED_GUEST_VALUES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn heap_delta_slot() -> &'static Mutex<Option<isize>> {
+    CAPTURED_HEAP_DELTA.get_or_init(|| Mutex::new(None))
+}
+
+pub fn lookup_heap_delta() -> Option<isize> {
+    *heap_delta_slot().lock()
+}
+
+pub fn record_heap_delta(target_gva: usize, target_hva: usize) {
+    if target_gva != 0 && target_hva != 0 && target_gva != target_hva {
+        *heap_delta_slot().lock() = Some((target_hva as isize).wrapping_sub(target_gva as isize));
+    }
 }
 
 pub fn lookup_captured_instruction(addr: usize) -> Option<CapturedAndroidInstrMeta> {
@@ -113,7 +128,26 @@ fn spawn_adb_root(adb: &Path, target: &str, shell_cmd: &str) -> Result<Child, St
     cmd.spawn().map_err(|e| format!("Failed to spawn adb mn_watch: {e}"))
 }
 
+pub fn ensure_adb_root(adb: &Path, target: &str) {
+    let is_root = adb_run(adb, &["-s", target, "shell", "id -u"])
+        .is_ok_and(|s| s.trim() == "0");
+    if is_root {
+        return;
+    }
+    let _ = adb_run(adb, &["-s", target, "root"]);
+    thread::sleep(Duration::from_millis(350));
+    for _ in 0..8 {
+        if adb_run(adb, &["-s", target, "shell", "id -u"])
+            .is_ok_and(|s| s.trim() == "0")
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
 pub fn ensure_mn_watch_deployed(adb: &Path, target: &str) -> Result<String, String> {
+    ensure_adb_root(adb, target);
     let size_cmd = format!(
         "stat -c %s {REMOTE_MN_WATCH} 2>/dev/null || wc -c < {REMOTE_MN_WATCH} 2>/dev/null || echo 0"
     );
@@ -377,37 +411,49 @@ fn resolve_target_gva(
         return Ok(target_gva_hint);
     }
 
-    // Fallback: match 48 bytes around target_hva (wildcarding the 4 mutating value bytes) in guest RAM
+    // Fallback: match 48 bytes around target_hva (auto-wildcarding mutating bytes across 2 snapshots
+    // and falling back to 16-byte SIMD vector wildcarding around target if adjacent coordinates move).
     let page_base = target_hva & !0xFFF;
     let page_off = target_hva & 0xFFF;
     let win_off = page_off.saturating_sub(16).min(4096 - 48);
     let delta_in_win = page_off - win_off;
 
-    let bytes = read_memory_bytes(host_pid, page_base + win_off, 48)
+    let b1 = read_memory_bytes(host_pid, page_base + win_off, 48)
         .map_err(|e| format!("Cannot snapshot host target page 0x{target_hva:X}: {e}"))?;
-    let mut pat = String::with_capacity(48 * 2);
-    for (idx, &b) in bytes.iter().enumerate() {
-        if idx >= delta_in_win && idx < delta_in_win + 4 {
-            pat.push_str("??");
-        } else {
-            use std::fmt::Write;
-            let _ = write!(&mut pat, "{b:02X}");
-        }
-    }
+    thread::sleep(Duration::from_millis(30));
+    let b2 = read_memory_bytes(host_pid, page_base + win_off, 48).unwrap_or_else(|_| b1.clone());
 
-    let cmd = format!(
-        "{REMOTE_MN_WATCH} find {android_pid} 0x{win_off:x} 0x{delta_in_win:x} \"{pat}\""
-    );
-    let out = adb_shell_root(adb, adb_target, &cmd)?;
-    for line in out.lines() {
-        if let Some(rest) = line.trim().strip_prefix("FOUND ") {
-            if let Some(gva) = parse_hex_u64(rest) {
-                return Ok(gva as usize);
+    let passes = [
+        (delta_in_win, delta_in_win + 4),
+        (delta_in_win.saturating_sub(4), (delta_in_win + 12).min(48)),
+        (delta_in_win.saturating_sub(8), (delta_in_win + 16).min(48)),
+    ];
+
+    for (w_lo, w_hi) in passes {
+        let mut pat = String::with_capacity(48 * 2);
+        for (idx, &b) in b1.iter().enumerate() {
+            if (idx >= w_lo && idx < w_hi) || b != b2[idx] {
+                pat.push_str("??");
+            } else {
+                use std::fmt::Write;
+                let _ = write!(&mut pat, "{b:02X}");
+            }
+        }
+        let cmd = format!(
+            "{REMOTE_MN_WATCH} find {android_pid} 0x{win_off:x} 0x{delta_in_win:x} \"{pat}\""
+        );
+        if let Ok(out) = adb_shell_root(adb, adb_target, &cmd) {
+            for line in out.lines() {
+                if let Some(rest) = line.trim().strip_prefix("FOUND ") {
+                    if let Some(gva) = parse_hex_u64(rest) {
+                        return Ok(gva as usize);
+                    }
+                }
             }
         }
     }
     Err(format!(
-        "Could not translate HVA 0x{target_hva:X} to Android guest address (try syncing Android Bridge Delta)"
+        "Could not translate HVA 0x{target_hva:X} to Android guest address (ensure adb root & Android Bridge selected)"
     ))
 }
 
@@ -501,10 +547,14 @@ impl AndroidPerfInstructionWatch {
                 &adb_path,
                 &adb_target,
             ) {
-                Ok(g) => g,
+                Ok(g) => {
+                    record_heap_delta(g, target_hva);
+                    g
+                }
                 Err(err) => {
-                    let _ = tx.send(WatchEvent::Status(err));
-                    target_gva_hint
+                    let _ = tx.send(WatchEvent::Error(err));
+                    let _ = tx.send(WatchEvent::Stopped);
+                    return;
                 }
             };
 
@@ -604,9 +654,10 @@ impl AndroidPerfInstructionWatch {
                 if let Some(n_str) = t.strip_prefix("ARMED ") {
                     let armed_n = n_str.trim().parse::<usize>().unwrap_or(0);
                     if armed_n == 0 {
-                        let _ = tx.send(WatchEvent::Status(format!(
-                            "Kernel HW Watchpoint armed 0 threads (check root/PID {android_pid})"
+                        let _ = tx.send(WatchEvent::Error(format!(
+                            "Kernel HW Watchpoint armed 0 threads (check adb root / PID {android_pid})"
                         )));
+                        break;
                     } else {
                         let mode = if writes_only { "Write" } else { "Access" };
                         let _ = tx.send(WatchEvent::Status(format!(
@@ -952,6 +1003,29 @@ mod tests {
         assert!(!aob.is_empty());
         assert!(aob.contains("C4 C1 79 7E 8D E0 02 00 00"), "{aob}");
         assert_eq!(off + 9 <= aob.split_whitespace().count(), true);
+    }
+
+    #[test]
+    fn test_decode_clash_of_critters_simd_transform_write() {
+        // Exact 64 bytes captured live from Clash of Critters (`vmovdqu [rsi+70h], xmm7`)
+        let buf64 = parse_hex_bytes(
+            "ffc4c13973f80cc5c1db3d7f9631ffc4c141ebf8c5f97fbde0020000c5fa7f6640c5fa7f6e50c5fa7f7660c5fa7f7e70488bb548010000488d76014889b54801",
+        )
+        .unwrap();
+        assert_eq!(buf64.len(), 64);
+        let ip_after = 0x4000_60DC_B6D2usize;
+        let (inst_ip, len, asm, instr, writes) =
+            decode_access_instr_before(ip_after, &buf64).expect("should decode vmovdqu");
+        assert_eq!(inst_ip, 0x4000_60DC_B6CD);
+        assert_eq!(len, 5);
+        assert!(asm.contains("rsi+70h"), "{asm}");
+        assert_eq!(instr.memory_base(), Register::RSI);
+        assert_eq!(instr.memory_displacement64(), 0x70);
+        assert!(writes);
+
+        let (aob, off) = generate_aob_from_code64(&buf64, ip_after - 48, inst_ip);
+        assert!(aob.contains("C5 FA 7F 7E 70"), "{aob}");
+        assert_eq!(off + 5 <= aob.split_whitespace().count(), true);
     }
 
     #[test]
