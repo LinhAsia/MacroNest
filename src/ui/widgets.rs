@@ -53,14 +53,44 @@ impl CrosshairApp {
             .stroke(egui::Stroke::new(1.0, stroke_color))
     }
 
+    pub(crate) fn drag_card_style(dark_mode: bool) -> (Color32, egui::Stroke) {
+        if dark_mode {
+            (
+                Color32::from_rgb(56, 114, 92),
+                egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220)),
+            )
+        } else {
+            (
+                Color32::from_rgb(184, 238, 214),
+                egui::Stroke::new(2.5, Color32::from_rgb(48, 172, 124)),
+            )
+        }
+    }
+
     pub(crate) fn show_folder_card<R>(
         ui: &mut egui::Ui,
         active: bool,
         hovered: bool,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> (R, egui::Response) {
+        Self::show_folder_card_with_drag(ui, active, hovered, false, add_contents)
+    }
+
+    pub(crate) fn show_folder_card_with_drag<R>(
+        ui: &mut egui::Ui,
+        active: bool,
+        hovered: bool,
+        is_dragged: bool,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
-        let res = Self::folder_frame(ui, active, hovered).show(ui, |ui| {
+        let frame = if is_dragged {
+            let (fill, stroke) = Self::drag_card_style(dark_mode);
+            egui::Frame::group(ui.style()).fill(fill).stroke(stroke)
+        } else {
+            Self::folder_frame(ui, active, hovered)
+        };
+        let res = frame.show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             let previous = ui.visuals().override_text_color;
             if dark_mode {
@@ -132,9 +162,8 @@ impl CrosshairApp {
     ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
         let frame = if is_dragged {
-            egui::Frame::group(ui.style())
-                .fill(Color32::from_rgba_unmultiplied(120, 235, 190, 95))
-                .stroke(egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220)))
+            let (fill, stroke) = Self::drag_card_style(dark_mode);
+            egui::Frame::group(ui.style()).fill(fill).stroke(stroke)
         } else {
             Self::preset_frame(ui, enabled)
         };
@@ -212,10 +241,7 @@ impl CrosshairApp {
     ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
         let (fill, stroke) = if is_dragged {
-            (
-                Color32::from_rgba_unmultiplied(120, 235, 190, 95),
-                egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220)),
-            )
+            Self::drag_card_style(dark_mode)
         } else if group_enabled {
             if preset_enabled {
                 if window_focus_trigger {

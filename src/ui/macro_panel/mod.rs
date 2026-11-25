@@ -7394,6 +7394,7 @@ impl CrosshairApp {
         let pending_macro_group_scroll_target = resolved_scroll_target;
         #[derive(Clone, Debug)]
         enum MacroRightDragKind {
+            Folder { folder_id: u32 },
             Group { group_id: u32 },
             Preset { group_id: u32, preset_id: u32 },
             Step {
@@ -7924,6 +7925,49 @@ impl CrosshairApp {
             .iter()
             .map(|preset| (preset.id, preset.name.clone()))
             .collect();
+        let visible_folder_ids: Vec<u32> = render_items
+            .iter()
+            .filter_map(|item| match item {
+                RenderItem::FolderHeader(folder_id) => Some(*folder_id),
+                _ => None,
+            })
+            .collect();
+        let active_dragged_folder_id = match &right_drag_state {
+            Some(MacroRightDragState {
+                kind: MacroRightDragKind::Folder { folder_id },
+                active: true,
+                ..
+            }) => Some(*folder_id),
+            _ => None,
+        };
+        let dragged_visible_folder_pos = active_dragged_folder_id.and_then(|drag_fid| {
+            visible_folder_ids.iter().position(|&fid| fid == drag_fid)
+        });
+        let (
+            folder_active_current_compact,
+            mut next_folder_compact_preview,
+            mut folder_compact_cursor,
+            _folder_preview_drop_visible_pos,
+        ) = if let Some(drag_vis_pos) = dragged_visible_folder_pos {
+            let total_vis = visible_folder_ids.len();
+            let stored = right_drag_state
+                .as_ref()
+                .and_then(|s| s.preview_compact_index);
+            let (visual_pos_order, cur_compact, drop_vis_pos) =
+                Self::compute_compact_visual_order(total_vis, &[drag_vis_pos], stored);
+            let mut slot = 0usize;
+            for item in &mut render_items {
+                if let RenderItem::FolderHeader(fid) = item {
+                    *fid = visible_folder_ids[visual_pos_order[slot]];
+                    slot += 1;
+                }
+            }
+            (Some(cur_compact), total_vis, 0usize, drop_vis_pos)
+        } else {
+            (None, 0usize, 0usize, 0usize)
+        };
+        let mut move_folder_to_indices: Option<(usize, usize)> = None;
+
         let visible_group_indices: Vec<usize> = render_items
             .iter()
             .filter_map(|item| match item {
@@ -8108,8 +8152,14 @@ impl CrosshairApp {
                     let rect_key = ui.make_persistent_id((folder_id, "folder-rect"));
                     let last_rect: Option<egui::Rect> = ui.ctx().data(|data| data.get_temp(rect_key));
                     let hovered = last_rect.map_or(false, |rect| ui.rect_contains_pointer(rect));
+                    let folder_is_being_dragged = active_dragged_folder_id == Some(folder_id);
                     let mut delete_clicked = false;
-                    let (inner_res, frame_response) = Self::show_folder_card(ui, folder_has_enabled_content, hovered, |ui| {
+                    let (inner_res, frame_response) = Self::show_folder_card_with_drag(
+                        ui,
+                        folder_has_enabled_content,
+                        hovered && !right_drag_lock_scroll,
+                        folder_is_being_dragged,
+                        |ui| {
                         ui.horizontal(|ui| {
                             let icon_btn = ui.add_sized(
                                 [28.0, 21.0],
@@ -8154,12 +8204,34 @@ impl CrosshairApp {
                     let card_hovered = frame_response.hovered();
                     let pointer_in_widgets = ui.rect_contains_pointer(name_response.rect)
                         || ui.rect_contains_pointer(delete_response.rect);
-                    let card_clicked = card_hovered && ui.input(|i| i.pointer.any_click());
-                    if card_hovered && !pointer_in_widgets {
+                    let card_clicked = card_hovered && ui.input(|i| i.pointer.primary_clicked());
+                    if card_hovered && !pointer_in_widgets && !right_drag_lock_scroll {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
-                    if ((card_clicked && !pointer_in_widgets && !delete_clicked && !name_response.has_focus()) || icon_btn.clicked()) && !self.confirm_delete_folder_id.is_some() {
+                    if ((card_clicked && !pointer_in_widgets && !delete_clicked && !name_response.has_focus() && !right_drag_active) || icon_btn.clicked()) && !self.confirm_delete_folder_id.is_some() {
                         enter_folder_id = Some(folder_id);
+                    }
+                    if dragged_visible_folder_pos.is_some() {
+                        Self::advance_compact_preview_index(
+                            &mut next_folder_compact_preview,
+                            visible_folder_ids.len(),
+                            right_drag_pointer_y,
+                            frame_response.rect.bottom(),
+                            folder_is_being_dragged,
+                            &mut folder_compact_cursor,
+                            folder_active_current_compact,
+                        );
+                    }
+                    if sec_pressed
+                        && !right_drag_popup_open
+                        && pending_right_drag_claim.is_none()
+                        && let Some(press_pos) = right_drag_ptr_pos
+                        && frame_response.rect.contains(press_pos)
+                    {
+                        pending_right_drag_claim = Some((
+                            MacroRightDragKind::Folder { folder_id },
+                            press_pos,
+                        ));
                     }
                     if delete_clicked {
                         if folder_group_count > 0 {
@@ -14855,7 +14927,10 @@ if supports_move_mouse || show_detection_tuning {
                                     row_fill = Color32::from_rgba_unmultiplied(0, 255, 170, 35);
                                 }
                                 if step_is_being_dragged {
-                                    row_fill = Color32::from_rgba_unmultiplied(120, 235, 190, 95);
+                                    row_fill = Self::drag_card_style(
+                                        self.state.ui_theme == UiThemeMode::Dark,
+                                    )
+                                    .0;
                                 }
                                 let row_drag_payload = MacroStepDragPayload {
                                     group_id: group.id,
@@ -14864,7 +14939,10 @@ if supports_move_mouse || show_detection_tuning {
                                 };
                                 let step_right_drag_indices = row_drag_payload.indices.clone();
                                 let border_stroke = if step_is_being_dragged {
-                                    egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220))
+                                    Self::drag_card_style(
+                                        self.state.ui_theme == UiThemeMode::Dark,
+                                    )
+                                    .1
                                 } else if is_active {
                                     egui::Stroke::new(1.5, Color32::from_rgb(0, 255, 170))
                                 } else {
@@ -19353,6 +19431,39 @@ if supports_move_mouse || show_detection_tuning {
         }
     }
 
+        if let Some(drag_vis_pos) = dragged_visible_folder_pos {
+            let total_vis = visible_folder_ids.len();
+            let compact_len = total_vis.saturating_sub(1);
+            let resolved_compact = next_folder_compact_preview.min(compact_len);
+            if let Some(state) = right_drag_state.as_mut() {
+                state.preview_compact_index = Some(resolved_compact);
+            }
+            let drop_vis_pos =
+                Self::expand_compact_drag_drop_index(total_vis, resolved_compact, &[drag_vis_pos]);
+            if sec_released {
+                let from_id = visible_folder_ids[drag_vis_pos];
+                if let Some(from_vec_idx) =
+                    self.state.macro_folders.iter().position(|f| f.id == from_id)
+                {
+                    let to_vec_idx = if drop_vis_pos < total_vis {
+                        let target_id = visible_folder_ids[drop_vis_pos];
+                        self.state
+                            .macro_folders
+                            .iter()
+                            .position(|f| f.id == target_id)
+                            .unwrap_or(self.state.macro_folders.len())
+                    } else {
+                        self.state.macro_folders.len()
+                    };
+                    move_folder_to_indices = Some((from_vec_idx, to_vec_idx));
+                }
+            }
+        }
+        if let Some((from_vec_idx, to_vec_idx)) = move_folder_to_indices {
+            if Self::reorder_vec_by_indices(&mut self.state.macro_folders, &[from_vec_idx], to_vec_idx) {
+                macro_presets_persist_requested = true;
+            }
+        }
         if let Some(drag_vis_pos) = dragged_visible_group_pos {
             let total_vis = visible_group_indices.len();
             let compact_len = total_vis.saturating_sub(1);
