@@ -70,6 +70,9 @@ pub fn discover_x64_elfs_in_process_memory(pid: u32) -> Vec<DiscoveredElfModule>
 
     let mut out = Vec::new();
     for base_hva in addrs {
+        if (base_hva & 0xFFF) != 0 {
+            continue;
+        }
         let Ok(hdr) = read_memory_bytes(pid, base_hva, 4096) else {
             continue;
         };
@@ -188,21 +191,22 @@ impl CaveAllocator {
         module_bases.sort_by_key(|(_, base_hva, _)| anchor_hva.abs_diff(*base_hva));
 
         let region_allows = |hva: usize, len: usize, want_exec: bool, want_write: bool| -> bool {
-            if all_regions.is_empty() {
+            if all_regions.is_empty() || delta == 0 {
                 return true;
             }
-            let gva = if delta != 0 {
-                (hva as isize - delta) as usize
-            } else {
-                hva
-            };
+            let gva = (hva as isize - delta) as usize;
             let gva_end = gva.saturating_add(len);
-            all_regions.iter().any(|r| {
-                gva >= r.start
-                    && gva_end <= r.end
-                    && (!want_exec || r.executable)
-                    && (!want_write || (r.writable && !r.executable))
-            })
+            // Reject ONLY if an overlapping guest region explicitly forbids the needed permission.
+            let mut overlapped = false;
+            for r in all_regions {
+                if gva < r.end && gva_end > r.start {
+                    overlapped = true;
+                    if (!want_exec || r.executable) && (!want_write || r.writable) {
+                        return true;
+                    }
+                }
+            }
+            !overlapped
         };
 
         let mut exec_caves = Vec::new();
@@ -322,7 +326,7 @@ impl CaveAllocator {
     }
 
     fn alloc_data(&mut self, size: usize) -> Option<usize> {
-        let aligned = (size + 15) & !15;
+        let aligned = (size + 7) & !7;
         for (cur, rem) in &mut self.data_caves {
             if *rem >= aligned {
                 let addr = *cur;
@@ -411,13 +415,16 @@ pub fn parse_elf64_x64_caves(
         let aligned_start = (seg_end_hva + 15) & !15;
         if page_end_hva > aligned_start {
             let len = page_end_hva - aligned_start;
-            if len >= 64 {
+            let is_exec = (p_flags & PF_X) != 0;
+            let is_write = (p_flags & PF_W) != 0 && !is_exec;
+            let min_len = if is_write { 16 } else { 64 };
+            if len >= min_len && (is_exec || is_write) {
                 caves.push(ElfCaveRange {
                     module_name: module_name.to_string(),
                     start_hva: aligned_start,
                     len,
-                    is_exec: (p_flags & PF_X) != 0,
-                    is_write: (p_flags & PF_W) != 0 && (p_flags & PF_X) == 0,
+                    is_exec,
+                    is_write,
                 });
             }
         }
@@ -1117,19 +1124,7 @@ pub fn scan_verified_xref_candidates(
         candidate_mods.push((m.name.clone(), m.base_address, hva_base, m.size));
     }
 
-    let mut used_elfs = Vec::new();
-    if candidate_mods.is_empty() {
-        used_elfs = discover_x64_elfs_in_process_memory(pid);
-        for elf in &used_elfs {
-            candidate_mods.push((elf.name.clone(), elf.base_gva, elf.base_hva, elf.size));
-        }
-    }
-    if candidate_mods.is_empty() {
-        for (name, base, size) in host_modules {
-            candidate_mods.push((name.clone(), *base, *base, *size));
-        }
-    }
-
+    // Sort first so top game modules are validated for readable 4KB-aligned ELF headers
     candidate_mods.sort_by_key(|(name, _, _, sz)| {
         let l = name.to_lowercase();
         if l.contains("il2cpp") {
@@ -1144,6 +1139,28 @@ pub fn scan_verified_xref_candidates(
             (4, usize::MAX - *sz)
         }
     });
+
+    let has_valid_elf_mapping = candidate_mods.iter().take(6).any(|(_, _, hva_base, _)| {
+        (*hva_base & 0xFFF) == 0
+            && read_memory_bytes(pid, *hva_base, 8)
+                .is_ok_and(|h| h.len() >= 7 && h[0..4] == ELF_MAGIC && h[4] == ELFCLASS64)
+    });
+
+    let mut used_elfs = Vec::new();
+    if candidate_mods.is_empty() || !has_valid_elf_mapping {
+        used_elfs = discover_x64_elfs_in_process_memory(pid);
+        if !used_elfs.is_empty() {
+            candidate_mods.clear();
+            for elf in &used_elfs {
+                candidate_mods.push((elf.name.clone(), elf.base_gva, elf.base_hva, elf.size));
+            }
+        }
+    }
+    if candidate_mods.is_empty() {
+        for (name, base, size) in host_modules {
+            candidate_mods.push((name.clone(), *base, *base, *size));
+        }
+    }
 
     // Probe offsets against ALL modules (for vtable/Il2CppClass pointer identification),
     // then restrict instruction hooking strictly to game modules when any exist so we never
@@ -1166,11 +1183,14 @@ pub fn scan_verified_xref_candidates(
     };
 
     // 1. Discover candidate field offsets:
-    //    - Probe backwards up to 8KB from target_hva for direct vptr OR 1-hop Il2CppClass* headers
-    //    - Include page masks (& 0xFFF, & 0x1FFF, & 0x7FFF, & 0xFFFF)
-    let mut cand_offsets: Vec<u32> = Vec::new();
+    //    - Probe backwards up to 8KB from target_hva for direct vptr, 1-hop Il2CppClass* (256B),
+    //      and 16-byte aligned Il2CppObject headers ({ ptr, monitor=0 }).
+    //    - Merge page masks (& 0xFFF, & 0x1FFF, & 0x7FFF, & 0xFFFF).
+    let mut confirmed_offsets: Vec<u32> = Vec::new();
+    let mut struct_offsets: Vec<u32> = Vec::new();
     let probe_len = 0x2000usize;
     let probe_base = target_hva.saturating_sub(probe_len);
+    let arena_hi = target_hva & !0xFFFF_FFFFusize;
     if let Ok(obj_probe) = read_memory_bytes(pid, probe_base, probe_len) {
         for off in (0..obj_probe.len()).step_by(8).rev() {
             if off + 8 > obj_probe.len() {
@@ -1181,47 +1201,77 @@ pub fn scan_verified_xref_candidates(
             if ptr_val < 0x10000 || ptr_val > 0x0000_7FFF_FFFF_FFFF {
                 continue;
             }
-            let field_off = (target_hva - (probe_base + off)) as u32;
+            let obj_hva = probe_base + off;
+            let field_off = (target_hva - obj_hva) as u32;
             if field_off == 0 || field_off > 0xFFFF {
                 continue;
             }
-            let mut is_header = pointer_into_modules(ptr_val, &probe_mods, delta);
-            // 1-hop Il2CppClass* check (aligned heap pointer whose first 32 bytes contain .so pointers)
-            if !is_header && (ptr_val & 7) == 0 {
-                let ptr_hva = if delta != 0 {
-                    let h = (ptr_val as isize).wrapping_add(delta) as usize;
-                    if read_memory_bytes(pid, h, 32).is_ok() {
-                        Some(h)
-                    } else if read_memory_bytes(pid, ptr_val, 32).is_ok() {
-                        Some(ptr_val)
-                    } else {
-                        None
-                    }
-                } else {
-                    Some(ptr_val)
-                };
-                if let Some(hva) = ptr_hva {
-                    if let Ok(klass_bytes) = read_memory_bytes(pid, hva, 32) {
-                        for k_off in (0..32).step_by(8) {
+            let mut is_confirmed = pointer_into_modules(ptr_val, &probe_mods, delta);
+            // 1-hop Il2CppClass* check (read 256 bytes so vtable/methods past +0x20 are seen!)
+            if !is_confirmed && (ptr_val & 7) == 0 {
+                let mut candidate_ptrs = Vec::with_capacity(3);
+                if delta != 0 {
+                    candidate_ptrs.push((ptr_val as isize).wrapping_add(delta) as usize);
+                }
+                if arena_hi != 0 && ptr_val > 0x1000_0000 {
+                    candidate_ptrs.push(arena_hi | (ptr_val & 0xFFFF_FFFF));
+                }
+                candidate_ptrs.push(ptr_val);
+
+                for hva in candidate_ptrs {
+                    if let Ok(klass_bytes) = read_memory_bytes(pid, hva, 256) {
+                        for k_off in (0..klass_bytes.len().saturating_sub(7)).step_by(8) {
                             let q = u64::from_le_bytes(
                                 klass_bytes[k_off..k_off + 8].try_into().unwrap_or_default(),
                             ) as usize;
                             if pointer_into_modules(q, &probe_mods, delta) {
-                                is_header = true;
+                                is_confirmed = true;
                                 break;
                             }
+                        }
+                        if is_confirmed {
+                            break;
                         }
                     }
                 }
             }
-            if is_header && !cand_offsets.contains(&field_off) {
-                cand_offsets.push(field_off);
+            if is_confirmed {
+                if !confirmed_offsets.contains(&field_off) {
+                    confirmed_offsets.push(field_off);
+                }
+            } else if (obj_hva & 0xF) == 0
+                && (ptr_val & 7) == 0
+                && ptr_val >= 0x1000_0000
+                && (0x10..=0x1000).contains(&field_off)
+                && off + 16 <= obj_probe.len()
+            {
+                let next_qword = u64::from_le_bytes(
+                    obj_probe[off + 8..off + 16].try_into().unwrap_or_default(),
+                );
+                if next_qword == 0 && !struct_offsets.contains(&field_off) {
+                    struct_offsets.push(field_off);
+                }
             }
         }
     }
 
+    let mut cand_offsets: Vec<u32> = Vec::new();
+    for off in confirmed_offsets {
+        cand_offsets.push(off);
+    }
     for addr_source in [target_gva, target_hva] {
-        for mask in [0xFFFusize, 0x1FFF, 0x7FFF, 0xFFFF] {
+        let off = (addr_source & 0xFFF) as u32;
+        if off > 0 && !cand_offsets.contains(&off) {
+            cand_offsets.push(off);
+        }
+    }
+    for off in struct_offsets.into_iter().take(6) {
+        if !cand_offsets.contains(&off) {
+            cand_offsets.push(off);
+        }
+    }
+    for addr_source in [target_gva, target_hva] {
+        for mask in [0x1FFFusize, 0x7FFF, 0xFFFF] {
             let off = (addr_source & mask) as u32;
             if off > 0 && !cand_offsets.contains(&off) {
                 cand_offsets.push(off);
@@ -1230,9 +1280,11 @@ pub fn scan_verified_xref_candidates(
     }
 
     let mod_count = probe_mods.len();
-    let max_cands = 64usize;
+    let max_cands = 72usize;
+    let max_per_offset = 12usize;
     let mut results = Vec::new();
     let mut seen_hva = HashSet::new();
+    let mut offset_counts: HashMap<i64, usize> = HashMap::new();
     let mut factory = InstructionInfoFactory::new();
     let chunk_size = 256 * 1024;
     let sync_lead = 256usize;
@@ -1270,7 +1322,10 @@ pub fn scan_verified_xref_candidates(
                         }
                         let slice4 = &bytes[i..i + 4];
                         for &(field_off, needle) in &disp32_needles {
-                            if slice4 == needle {
+                            if slice4 == needle
+                                && offset_counts.get(&(field_off as i64)).copied().unwrap_or(0)
+                                    < max_per_offset
+                            {
                                 if let Some(cand) = verify_candidate_in_buffer(
                                     &bytes,
                                     read_addr,
@@ -1283,6 +1338,7 @@ pub fn scan_verified_xref_candidates(
                                     &mut factory,
                                     &mut seen_hva,
                                 ) {
+                                    *offset_counts.entry(cand.field_offset).or_insert(0) += 1;
                                     results.push(cand);
                                 }
                             }
@@ -1292,7 +1348,11 @@ pub fn scan_verified_xref_candidates(
                         if !disp8_offsets.is_empty() && i >= 2 {
                             let b = bytes[i];
                             let prev = bytes[i - 1];
-                            if (prev & 0xC0) == 0x40 && disp8_offsets.contains(&(b as u32)) {
+                            if (prev & 0xC0) == 0x40
+                                && disp8_offsets.contains(&(b as u32))
+                                && offset_counts.get(&(b as i64)).copied().unwrap_or(0)
+                                    < max_per_offset
+                            {
                                 if let Some(cand) = verify_candidate_in_buffer(
                                     &bytes,
                                     read_addr,
@@ -1305,6 +1365,7 @@ pub fn scan_verified_xref_candidates(
                                     &mut factory,
                                     &mut seen_hva,
                                 ) {
+                                    *offset_counts.entry(cand.field_offset).or_insert(0) += 1;
                                     results.push(cand);
                                 }
                             }
@@ -1561,12 +1622,10 @@ impl EmulatorInstructionWatch {
             // 1. Scan & install runtime filter hooks for candidate instructions
             struct ActiveHookMeta {
                 cand: CandidateInfo,
-                counter_slot_idx: usize,
+                counter_va: usize,
                 last_hits: u64,
             }
             let mut active_hooks: Vec<ActiveHookMeta> = Vec::new();
-            let mut data_cave_base = 0usize;
-            let mut data_cave_size = 0usize;
 
             if let Some(&(target_gva, target_hva)) = watch_targets.first() {
                 let outcome = scan_verified_xref_candidates(
@@ -1601,7 +1660,7 @@ impl EmulatorInstructionWatch {
                         || all_regions
                             .iter()
                             .any(|r| target_gva >= r.start && target_gva < r.end));
-                let mode_label = if use_exact_gva {
+                let mut mode_label = if use_exact_gva {
                     "ExactGva"
                 } else {
                     "PageOffset(&FFF)"
@@ -1619,71 +1678,75 @@ impl EmulatorInstructionWatch {
                     exec_avail = caves.total_exec_bytes();
                     data_avail = caves.total_data_bytes();
 
-                    let max_slots = caves.max_data_cave_len().saturating_sub(8) / 8;
-                    let num_cands = outcome.candidates.len().min(48).min(max_slots);
-                    let needed_data = 8 + num_cands * 8;
-                    if num_cands > 0 {
-                        if let Some(d_cave) = caves.alloc_data(needed_data) {
-                        data_cave_base = d_cave;
-                        data_cave_size = needed_data;
-                        let mut init_data = vec![0u8; needed_data];
-                        init_data[0..8].copy_from_slice(&(target_gva as u64).to_le_bytes());
-                        if write_code_bytes(pid, d_cave, &init_data).is_ok() {
-                            patches_clone.lock().push(PatchedSite {
-                                hva: d_cave,
-                                original_bytes: vec![0u8; needed_data],
-                            });
-
-                            let match_mode = if use_exact_gva {
-                                FilterMatchMode::ExactGva {
-                                    target_gva_slot_va: d_cave,
-                                }
-                            } else {
-                                FilterMatchMode::PageOffset {
-                                    page_off: (target_hva & 0xFFF) as u32,
-                                }
-                            };
-
-                            for (idx, cand) in outcome.candidates.into_iter().take(num_cands).enumerate()
-                            {
-                                if stop_clone.load(Ordering::Relaxed) {
-                                    break;
-                                }
-                                let Some((cave_idx, c_cave)) = caves.peek_exec(96) else {
-                                    break;
-                                };
-                                let counter_va = d_cave + 8 + idx * 8;
-                                if let Ok((stub, patch, orig)) = build_candidate_filter_hook_bytes(
-                                    cand.inst_hva,
-                                    &cand.code_bytes,
-                                    c_cave,
-                                    match_mode,
-                                    counter_va,
-                                ) {
-                                    if write_code_bytes(pid, c_cave, &stub).is_ok()
-                                        && write_code_bytes(pid, cand.inst_hva, &patch).is_ok()
-                                    {
-                                        caves.commit_exec(cave_idx, stub.len());
-                                        {
-                                            let mut p = patches_clone.lock();
-                                            p.push(PatchedSite {
-                                                hva: cand.inst_hva,
-                                                original_bytes: orig,
-                                            });
-                                            p.push(PatchedSite {
-                                                hva: c_cave,
-                                                original_bytes: vec![0u8; stub.len()],
-                                            });
-                                        }
-                                        active_hooks.push(ActiveHookMeta {
-                                            cand,
-                                            counter_slot_idx: idx,
-                                            last_hits: 0,
-                                        });
-                                    }
-                                }
+                    let mut target_slot_va = None;
+                    if use_exact_gva {
+                        if let Some(slot) = caves.alloc_data(8) {
+                            if write_code_bytes(pid, slot, &(target_gva as u64).to_le_bytes()).is_ok() {
+                                patches_clone.lock().push(PatchedSite {
+                                    hva: slot,
+                                    original_bytes: vec![0u8; 8],
+                                });
+                                target_slot_va = Some(slot);
                             }
                         }
+                    }
+
+                    let match_mode = if let Some(slot) = target_slot_va {
+                        FilterMatchMode::ExactGva {
+                            target_gva_slot_va: slot,
+                        }
+                    } else {
+                        mode_label = "PageOffset(&FFF)";
+                        FilterMatchMode::PageOffset {
+                            page_off: (target_hva & 0xFFF) as u32,
+                        }
+                    };
+
+                    for cand in outcome.candidates.into_iter().take(48) {
+                        if stop_clone.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let Some((cave_idx, c_cave)) = caves.peek_exec(96) else {
+                            break;
+                        };
+                        let Some(counter_va) = caves.alloc_data(8) else {
+                            break;
+                        };
+                        if write_code_bytes(pid, counter_va, &[0u8; 8]).is_err() {
+                            continue;
+                        }
+                        if let Ok((stub, patch, orig)) = build_candidate_filter_hook_bytes(
+                            cand.inst_hva,
+                            &cand.code_bytes,
+                            c_cave,
+                            match_mode,
+                            counter_va,
+                        ) {
+                            if write_code_bytes(pid, c_cave, &stub).is_ok()
+                                && write_code_bytes(pid, cand.inst_hva, &patch).is_ok()
+                            {
+                                caves.commit_exec(cave_idx, stub.len());
+                                {
+                                    let mut p = patches_clone.lock();
+                                    p.push(PatchedSite {
+                                        hva: cand.inst_hva,
+                                        original_bytes: orig,
+                                    });
+                                    p.push(PatchedSite {
+                                        hva: c_cave,
+                                        original_bytes: vec![0u8; stub.len()],
+                                    });
+                                    p.push(PatchedSite {
+                                        hva: counter_va,
+                                        original_bytes: vec![0u8; 8],
+                                    });
+                                }
+                                active_hooks.push(ActiveHookMeta {
+                                    cand,
+                                    counter_va,
+                                    last_hits: 0,
+                                });
+                            }
                         }
                     }
                 }
@@ -1713,14 +1776,22 @@ impl EmulatorInstructionWatch {
             }
 
             while !stop_clone.load(Ordering::Acquire) {
-                // Poll real-time candidate counters
-                if !active_hooks.is_empty() && data_cave_base != 0 {
-                    if let Ok(counters_buf) = read_memory_bytes(pid, data_cave_base, data_cave_size) {
-                        for hook in &mut active_hooks {
-                            let off = 8 + hook.counter_slot_idx * 8;
-                            if off + 8 <= counters_buf.len() {
+                // Poll real-time candidate counters (batched per unique 4KB page)
+                if !active_hooks.is_empty() {
+                    let mut page_cache: HashMap<usize, Vec<u8>> = HashMap::new();
+                    for hook in &active_hooks {
+                        let page = hook.counter_va & !0xFFF;
+                        page_cache.entry(page).or_insert_with(|| {
+                            read_memory_bytes(pid, page, 4096).unwrap_or_default()
+                        });
+                    }
+                    for hook in &mut active_hooks {
+                        let page = hook.counter_va & !0xFFF;
+                        let off = hook.counter_va & 0xFFF;
+                        if let Some(page_buf) = page_cache.get(&page) {
+                            if off + 8 <= page_buf.len() {
                                 let count = u64::from_le_bytes(
-                                    counters_buf[off..off + 8].try_into().unwrap_or_default(),
+                                    page_buf[off..off + 8].try_into().unwrap_or_default(),
                                 );
                                 if count > hook.last_hits {
                                     let delta_hits = (count - hook.last_hits).min(16);

@@ -7202,14 +7202,39 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             };
 
             let progress = Arc::new(AtomicUsize::new(0));
-            let mut matched = crate::process_memory::scan_aob_memory_addresses(h_pid, &hex_pattern, 5, options.clone(), progress.clone()).unwrap_or_default();
+            let mut matched = crate::process_memory::scan_aob_memory_addresses(h_pid, &hex_pattern, 64, options.clone(), progress.clone()).unwrap_or_default();
             if matched.is_empty() && magic.len() >= 16 {
                 let fallback_pat = magic[..16].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
                 progress.store(0, Ordering::Relaxed);
-                matched = crate::process_memory::scan_aob_memory_addresses(h_pid, &fallback_pat, 5, options, progress).unwrap_or_default();
+                matched = crate::process_memory::scan_aob_memory_addresses(h_pid, &fallback_pat, 64, options, progress).unwrap_or_default();
             }
 
-            if let Some(&first_host) = matched.first() {
+            // Pick a 4KB-aligned host address (never an unaligned .apk zip entry) and
+            // cross-verify other guest .so modules at the same delta when available.
+            let mut best_host: Option<(usize, usize)> = None;
+            for &cand in &matched {
+                if (cand & 0xFFF) != 0 {
+                    continue;
+                }
+                let d = cand as isize - guest_base as isize;
+                let mut score = 0usize;
+                for m in self.memory_panel.android_bridge.modules.iter().skip(1).take(8) {
+                    if let Some(other_h) = (m.base_address as isize).checked_add(d) {
+                        if other_h > 0 {
+                            if let Ok(hdr) = crate::process_memory::read_memory_bytes(h_pid, other_h as usize, 8) {
+                                if hdr.len() >= 7 && hdr[0..7] == [0x7F, b'E', b'L', b'F', 2, 1, 1] {
+                                    score += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if best_host.is_none_or(|(_, best_score)| score > best_score) {
+                    best_host = Some((cand, score));
+                }
+            }
+
+            if let Some((first_host, _)) = best_host {
                 let delta = first_host as isize - guest_base as isize;
                 self.memory_panel.android_bridge.host_base_address = Some(first_host);
                 self.memory_panel.android_bridge.delta = Some(delta);
