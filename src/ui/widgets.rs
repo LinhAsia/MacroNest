@@ -157,6 +157,9 @@ impl CrosshairApp {
     }
 
     fn paint_card_hover(ui: &egui::Ui, response: &egui::Response, dark_mode: bool) {
+        if ui.input(|i| i.pointer.secondary_down()) {
+            return;
+        }
         // ponytail: collapsed cards are header-height; expanded cards should stay visually clear.
         if response.hovered() && response.rect.height() <= 44.0 {
             let (hover_fill, hover_stroke) = if dark_mode {

@@ -7392,6 +7392,56 @@ impl CrosshairApp {
             last_scroll_target
         };
         let pending_macro_group_scroll_target = resolved_scroll_target;
+        #[derive(Clone, Debug)]
+        enum MacroRightDragKind {
+            Group { group_id: u32 },
+            Preset { group_id: u32, preset_id: u32 },
+            Step {
+                group_id: u32,
+                preset_id: u32,
+                indices: Vec<usize>,
+            },
+        }
+
+        #[derive(Clone, Debug)]
+        struct MacroRightDragState {
+            kind: MacroRightDragKind,
+            origin: egui::Pos2,
+            active: bool,
+            preview_compact_index: Option<usize>,
+        }
+
+        const RIGHT_DRAG_THRESHOLD_PX: f32 = 6.0;
+        let right_drag_id = egui::Id::new("macro-panel-right-drag-state");
+        let (sec_down, sec_pressed, sec_released, right_drag_ptr_pos) = ui.input(|i| {
+            (
+                i.pointer.secondary_down(),
+                i.pointer.button_pressed(egui::PointerButton::Secondary),
+                i.pointer.button_released(egui::PointerButton::Secondary),
+                i.pointer.latest_pos().or(i.pointer.interact_pos()),
+            )
+        });
+        let mut right_drag_state: Option<MacroRightDragState> = if !sec_down && !sec_released {
+            None
+        } else {
+            ui.ctx().data(|d| d.get_temp(right_drag_id))
+        };
+        if let Some(state) = right_drag_state.as_mut()
+            && !state.active
+            && sec_down
+            && right_drag_ptr_pos.is_some_and(|p| p.distance(state.origin) > RIGHT_DRAG_THRESHOLD_PX)
+        {
+            state.active = true;
+        }
+        let right_drag_active = right_drag_state.as_ref().is_some_and(|s| s.active);
+        if right_drag_active {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            ui.ctx().request_repaint();
+        }
+        let right_drag_lock_scroll = sec_down || right_drag_state.is_some();
+        let mut pending_right_drag_claim: Option<(MacroRightDragKind, egui::Pos2)> = None;
+        let right_drag_pointer_y = right_drag_ptr_pos.map(|p| p.y);
+
         let mut pending_macro_group_scroll_consumed = false;
         let macro_panel_scroll_salt = (
             "macro-panel-scroll",
@@ -7400,9 +7450,16 @@ impl CrosshairApp {
         );
         let mut macro_panel_scroll_output = egui::ScrollArea::vertical()
             .id_salt(macro_panel_scroll_salt)
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: !right_drag_lock_scroll,
+                ..Default::default()
+            })
             .auto_shrink([false, false])
             .max_height(macro_panel_scroll_height)
             .show_viewport(ui, |ui, viewport| {
+        if right_drag_lock_scroll {
+            ui.style_mut().interaction.selectable_labels = false;
+        }
         let mut pending_macro_group_scroll_rect: Option<egui::Rect> = None;
         let release_folder_id = None;
         let mut delete_folder_id = None;
@@ -7562,59 +7619,12 @@ impl CrosshairApp {
                 }
             }
         }
-        #[derive(Clone, Debug)]
-        enum MacroRightDragKind {
-            Group { group_id: u32 },
-            Preset { group_id: u32, preset_id: u32 },
-            Step {
-                group_id: u32,
-                preset_id: u32,
-                indices: Vec<usize>,
-            },
-        }
-
-        #[derive(Clone, Debug)]
-        struct MacroRightDragState {
-            kind: MacroRightDragKind,
-            origin: egui::Pos2,
-            active: bool,
-            preview_compact_index: Option<usize>,
-        }
-
-        const RIGHT_DRAG_THRESHOLD_PX: f32 = 6.0;
-        let right_drag_id = egui::Id::new("macro-panel-right-drag-state");
-        let (sec_down, sec_pressed, sec_released, right_drag_ptr_pos) = ui.input(|i| {
-            (
-                i.pointer.secondary_down(),
-                i.pointer.button_pressed(egui::PointerButton::Secondary),
-                i.pointer.button_released(egui::PointerButton::Secondary),
-                i.pointer.latest_pos().or(i.pointer.interact_pos()),
-            )
-        });
         let right_drag_popup_open = ui.ctx().memory(|m| {
             m.any_popup_open()
                 || m.data
                     .get_temp::<bool>(egui::Id::new("any_popup_open"))
                     .unwrap_or(false)
         });
-        let mut right_drag_state: Option<MacroRightDragState> = if !sec_down && !sec_released {
-            None
-        } else {
-            ui.ctx().data(|d| d.get_temp(right_drag_id))
-        };
-        if let Some(state) = right_drag_state.as_mut()
-            && !state.active
-            && sec_down
-            && right_drag_ptr_pos.is_some_and(|p| p.distance(state.origin) > RIGHT_DRAG_THRESHOLD_PX)
-        {
-            state.active = true;
-        }
-        if right_drag_state.as_ref().is_some_and(|s| s.active) {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            ui.ctx().request_repaint();
-        }
-        let mut pending_right_drag_claim: Option<(MacroRightDragKind, egui::Pos2)> = None;
-        let right_drag_pointer_y = right_drag_ptr_pos.map(|p| p.y);
 
         let mut remove_group = None;
         let mut live_sync = false;
@@ -18311,7 +18321,12 @@ if supports_move_mouse || show_detection_tuning {
                                         .ctx()
                                         .pointer_hover_pos()
                                         .is_some_and(|pointer| row_hover_rect.contains(pointer));
-                                if is_row_hovered && !step_is_being_dragged {
+                                if is_row_hovered
+                                    && !step_is_being_dragged
+                                    && !step_drag_active
+                                    && !sec_down
+                                    && !right_drag_active
+                                {
                                     let hover_fill = if self.state.ui_theme == UiThemeMode::Dark {
                                         Color32::from_rgba_unmultiplied(255, 255, 255, 14)
                                     } else {
@@ -18679,7 +18694,11 @@ if supports_move_mouse || show_detection_tuning {
                                 );
                             }
                             // Dynamic hover highlight for Loop and If blocks
-                            let hover_pos = ui.ctx().pointer_interact_pos();
+                            let hover_pos = if step_drag_active || sec_down || right_drag_active {
+                                None
+                            } else {
+                                ui.ctx().pointer_interact_pos()
+                            };
                             if let Some(pos) = hover_pos {
                                 let mut active_block: Option<&(usize, usize)> = None;
                                 for block in &block_ranges {
