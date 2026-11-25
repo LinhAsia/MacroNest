@@ -672,7 +672,8 @@ impl CrosshairApp {
                 WatchEvent::Stopped
                 | WatchEvent::AddressHit { .. }
                 | WatchEvent::ValueMutation { .. }
-                | WatchEvent::BatchProgress { .. } => {}
+                | WatchEvent::BatchProgress { .. }
+                | WatchEvent::Status(_) => {}
             }
         }
         let (candidate, matched, mut resolved_addresses) = match capture.scan_mode {

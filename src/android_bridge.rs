@@ -715,7 +715,7 @@ pub fn read_android_memory_bytes(
 ) -> Result<Vec<u8>, String> {
     let clamped_size = size.clamp(1, 1024);
     let subcmd = format!(
-        "dd if=/proc/{pid}/mem bs=1 skip={address} count={clamped_size} 2>/dev/null | xxd -p || xxd -s {address} -l {clamped_size} -p /proc/{pid}/mem 2>/dev/null"
+        "dd if=/proc/{pid}/mem bs=1 skip={address} count={clamped_size} 2>/dev/null | (xxd -p 2>/dev/null || od -An -tx1 -v 2>/dev/null) || xxd -s {address} -l {clamped_size} -p /proc/{pid}/mem 2>/dev/null"
     );
     let commands = [
         format!("su -c \"{subcmd}\""),

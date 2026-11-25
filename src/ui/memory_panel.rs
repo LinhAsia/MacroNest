@@ -7982,7 +7982,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
                         let selected = self.memory_panel.selected_code.contains(&index);
                         let address_str = if let Some(target) = entry.target_address {
-                            format!("{}+{:X} (🎯 0x{:X})", entry.module, entry.offset, target)
+                            format!("{}+{:X} (Target: 0x{:X})", entry.module, entry.offset, target)
                         } else {
                             format!("{}+{:X}", entry.module, entry.offset)
                         };
@@ -14996,6 +14996,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     dialog.target_value_details = Some(details);
                 }
                 WatchEvent::AccessHit { .. } | WatchEvent::BatchProgress { .. } => {}
+                WatchEvent::Status(msg) => {
+                    dialog.status = msg;
+                }
                 WatchEvent::CaptureLimitReached(limit) => {
                     dialog.status = if limit == 1 {
                         "First hit captured — debugger detached safely".to_owned()
@@ -15424,7 +15427,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
 
         ui.group(|ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("🎯 Watched Target Address:").strong().color(Color32::from_rgb(250, 204, 21)));
+                ui.label(RichText::new("Watched Target Address:").strong().color(Color32::from_rgb(250, 204, 21)));
                 ui.label(
                     RichText::new(format_prefixed_memory_address(dialog.address))
                         .strong()
@@ -16285,7 +16288,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
                 WatchEvent::CaptureLimitReached(_)
                 | WatchEvent::AddressHit { .. }
-                | WatchEvent::ValueMutation { .. } => {}
+                | WatchEvent::ValueMutation { .. }
+                | WatchEvent::Status(_) => {}
             }
         }
         let title = if dialog.nearby {
@@ -16688,6 +16692,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         active.stop();
                         dialog.status = "First address captured — debugger detached safely".to_owned();
                     }
+                }
+                WatchEvent::Status(msg) => {
+                    dialog.status = msg;
                 }
                 WatchEvent::BatchProgress { .. }
                 | WatchEvent::ValueMutation { .. } => {}
@@ -20857,7 +20864,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                     if ui.small_button(self.tr("-> S1", "-> M1")).on_hover_text(self.tr("Use in Sample 1", "Dán vào Mẫu 1")).clicked() {
                                         use_as_sample_1 = Some(scenario.pattern.clone());
                                     }
-                                    if ui.small_button(self.tr("📋", "📋")).on_hover_text(self.tr("Copy pattern", "Sao chép mã")).clicked() {
+                                    if ui.small_button(self.tr("Copy", "Sao chép")).on_hover_text(self.tr("Copy pattern", "Sao chép mã")).clicked() {
                                         copy_pattern = Some((scenario.pattern.clone(), scenario.label.clone()));
                                     }
                                     let show_btn = ui.small_button(RichText::new(self.tr("View", "Xem")).color(Color32::from_rgb(90, 205, 250)));
@@ -20922,7 +20929,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 if ui.small_button(self.tr("-> S1", "-> M1")).clicked() {
                                     apply_to_sample_1 = true;
                                 }
-                                if ui.small_button(RichText::new(self.tr("📋 Copy", "📋 Sao chép")).strong()).clicked() {
+                                if ui.small_button(RichText::new(self.tr("Copy", "Sao chép")).strong()).clicked() {
                                     copy_selected = true;
                                 }
                             });
@@ -21780,7 +21787,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             if tokens1.len() != tokens2.len() && !tokens1.is_empty() && !tokens2.is_empty() {
                                 ui.label(
                                     RichText::new(format!(
-                                        "⚠ {} ({} ≠ {} B)",
+                                        "[!] {} ({} != {} B)",
                                         self.tr("Length mismatch", "Lệch độ dài"),
                                         tokens1.len(),
                                         tokens2.len(),
@@ -21810,7 +21817,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             if ui
                                 .add_enabled(
                                     !result_pattern.is_empty(),
-                                    egui::Button::new(self.tr("📋 Copy", "📋 Sao chép")),
+                                    egui::Button::new(self.tr("Copy", "Sao chép")),
                                 )
                                 .on_hover_text(self.tr(
                                     "Copy the merged AOB pattern to clipboard",

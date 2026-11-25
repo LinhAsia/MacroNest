@@ -18,18 +18,110 @@ use iced_x86::{
     OpKind, Register,
 };
 
+use std::sync::atomic::AtomicUsize;
+
 use crate::{
     android_bridge::{AndroidMemoryModule, AndroidMemoryRegion},
     memory_debugger::debugger::WatchEvent,
-    process_memory::{read_memory_bytes, write_code_bytes},
+    process_memory::{MemoryScanOptions, read_memory_bytes, scan_aob_memory_addresses, write_code_bytes},
 };
 
 const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 const ELFCLASS64: u8 = 2;
+const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 0x3E;
 const PT_LOAD: u32 = 1;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
+
+#[derive(Clone, Debug)]
+pub struct DiscoveredElfModule {
+    pub name: String,
+    pub base_gva: usize,
+    pub base_hva: usize,
+    pub size: usize,
+}
+
+/// Scans `pid` memory at 4KB page boundaries for x86_64 ELF64 shared libraries (`\x7fELF\x02\x01\x01`).
+/// Used as a self-contained fallback when ADB / Android Bridge modules are unavailable.
+pub fn discover_x64_elfs_in_process_memory(pid: u32) -> Vec<DiscoveredElfModule> {
+    let options = MemoryScanOptions {
+        writable: false,
+        executable: true,
+        copy_on_write: true,
+        active_memory_only: false,
+        mem_private: true,
+        mem_image: false,
+        mem_mapped: true,
+        alignment: Some(4096),
+        target_ranges: None,
+        isolate_guest_ram: false,
+        vm_allocation_base: None,
+    };
+    let progress = Arc::new(AtomicUsize::new(0));
+    let addrs = scan_aob_memory_addresses(
+        pid,
+        "7F 45 4C 46 02 01 01",
+        256,
+        options,
+        progress,
+    )
+    .unwrap_or_default();
+
+    let mut out = Vec::new();
+    for base_hva in addrs {
+        let Ok(hdr) = read_memory_bytes(pid, base_hva, 4096) else {
+            continue;
+        };
+        if hdr.len() < 64 || hdr[0..4] != ELF_MAGIC || hdr[4] != ELFCLASS64 {
+            continue;
+        }
+        let e_type = u16::from_le_bytes([hdr[16], hdr[17]]);
+        let e_machine = u16::from_le_bytes([hdr[18], hdr[19]]);
+        if e_machine != EM_X86_64 || (e_type != ET_DYN && e_type != 2) {
+            continue;
+        }
+        let e_phoff = u64::from_le_bytes(hdr[32..40].try_into().unwrap_or_default()) as usize;
+        let e_phentsize = u16::from_le_bytes([hdr[54], hdr[55]]) as usize;
+        let e_phnum = u16::from_le_bytes([hdr[56], hdr[57]]) as usize;
+        if e_phentsize < 56 || e_phoff + e_phentsize.saturating_mul(e_phnum) > hdr.len() {
+            continue;
+        }
+        let mut min_vaddr = u64::MAX;
+        let mut max_end = 0u64;
+        let mut has_exec = false;
+        for i in 0..e_phnum {
+            let off = e_phoff + i * e_phentsize;
+            let ph = &hdr[off..off + e_phentsize];
+            if u32::from_le_bytes(ph[0..4].try_into().unwrap_or_default()) != PT_LOAD {
+                continue;
+            }
+            let p_flags = u32::from_le_bytes(ph[4..8].try_into().unwrap_or_default());
+            let p_vaddr = u64::from_le_bytes(ph[16..24].try_into().unwrap_or_default());
+            let p_memsz = u64::from_le_bytes(ph[40..48].try_into().unwrap_or_default());
+            if (p_flags & PF_X) != 0 {
+                has_exec = true;
+            }
+            min_vaddr = min_vaddr.min(p_vaddr);
+            max_end = max_end.max(p_vaddr.saturating_add(p_memsz));
+        }
+        if !has_exec || min_vaddr == u64::MAX {
+            continue;
+        }
+        let span = max_end.saturating_sub(min_vaddr) as usize;
+        if span >= 256 * 1024 {
+            out.push(DiscoveredElfModule {
+                name: format!("elf_0x{:X}.so", base_hva),
+                base_gva: base_hva,
+                base_hva,
+                size: span,
+            });
+        }
+    }
+    // Largest .so first (libil2cpp.so is always largest game binary)
+    out.sort_by(|a, b| b.size.cmp(&a.size));
+    out
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ElfCaveRange {
@@ -53,6 +145,7 @@ impl CaveAllocator {
         modules: &[AndroidMemoryModule],
         all_regions: &[AndroidMemoryRegion],
         delta: isize,
+        extra_elfs: &[DiscoveredElfModule],
     ) -> Self {
         let mut module_bases: Vec<(String, usize, usize)> = modules
             .iter()
@@ -66,8 +159,13 @@ impl CaveAllocator {
             })
             .collect();
 
-        // Fallback: if Android bridge module list is empty, probe backwards page-by-page from anchor_hva
-        // to locate the enclosing ELF64 header.
+        for elf in extra_elfs {
+            if !module_bases.iter().any(|(_, b, _)| *b == elf.base_hva) {
+                module_bases.push((elf.name.clone(), elf.base_hva, elf.size));
+            }
+        }
+
+        // Fallback: probe backwards page-by-page from anchor_hva to locate the enclosing ELF64 header.
         if module_bases.is_empty() {
             let aligned = anchor_hva & !0xFFF;
             for page_idx in 0..16384usize {
@@ -103,7 +201,7 @@ impl CaveAllocator {
                     }
                     if let Ok(existing) = read_memory_bytes(pid, cave.start_hva, cave.len) {
                         let is_clean = if cave.is_exec {
-                            existing.iter().all(|&b| b == 0x00 || b == 0xCC)
+                            existing.iter().all(|&b| b == 0x00 || b == 0xCC || b == 0x90)
                         } else {
                             existing.iter().all(|&b| b == 0x00)
                         };
@@ -119,9 +217,9 @@ impl CaveAllocator {
             }
         }
 
-        // Additional fallback for executable caves: scan alignment padding (0xCC runs >= 96 bytes)
+        // Additional fallback for executable caves: scan alignment padding (0xCC/0x00 runs >= 96 bytes)
         // near the end of r-xp regions within rel32 reach.
-        if exec_caves.is_empty() && !all_regions.is_empty() {
+        if exec_caves.iter().map(|(_, l)| *l).sum::<usize>() < 1024 && !all_regions.is_empty() {
             for r in all_regions {
                 if !r.executable || r.writable {
                     continue;
@@ -142,7 +240,10 @@ impl CaveAllocator {
                     if let Some((off, len)) = find_trailing_padding(&tail, 96, true) {
                         let aligned_off = (off + 15) & !15;
                         if off + len > aligned_off && (off + len - aligned_off) >= 96 {
-                            exec_caves.push((probe_start + aligned_off, off + len - aligned_off));
+                            let start = probe_start + aligned_off;
+                            if !exec_caves.iter().any(|(s, l)| start >= *s && start < *s + *l) {
+                                exec_caves.push((start, off + len - aligned_off));
+                            }
                         }
                     }
                 }
@@ -182,6 +283,31 @@ impl CaveAllocator {
         Self {
             exec_caves,
             data_caves,
+        }
+    }
+
+    fn total_exec_bytes(&self) -> usize {
+        self.exec_caves.iter().map(|(_, l)| *l).sum()
+    }
+
+    fn total_data_bytes(&self) -> usize {
+        self.data_caves.iter().map(|(_, l)| *l).sum()
+    }
+
+    fn peek_exec(&self, min_size: usize) -> Option<(usize, usize)> {
+        self.exec_caves
+            .iter()
+            .enumerate()
+            .find(|(_, (_, rem))| *rem >= min_size)
+            .map(|(idx, (cur, _))| (idx, *cur))
+    }
+
+    fn commit_exec(&mut self, idx: usize, used_size: usize) {
+        let aligned = (used_size + 15) & !15;
+        if let Some((cur, rem)) = self.exec_caves.get_mut(idx) {
+            let adv = aligned.min(*rem);
+            *cur += adv;
+            *rem -= adv;
         }
     }
 
@@ -497,13 +623,19 @@ pub fn build_code_access_hook_bytes(
     Ok((encoded.code_buffer, jmp_patch, orig_bytes))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterMatchMode {
+    ExactGva { target_gva_slot_va: usize },
+    PageOffset { page_off: u32 },
+}
+
 /// Builds a candidate verification hook for `InstructionWatchDialog`.
-/// Increments `[counter_va]` ONLY when runtime effective address covers `target_gva`.
+/// Increments `[counter_slot_va]` ONLY when runtime effective address matches `mode`.
 pub fn build_candidate_filter_hook_bytes(
     inst_hva: usize,
     code_bytes: &[u8],
     code_cave_hva: usize,
-    target_gva_slot_va: usize,
+    mode: FilterMatchMode,
     counter_slot_va: usize,
 ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
     let (stolen, stolen_len, mem_idx) = decode_stolen_instructions(code_bytes, inst_hva)?;
@@ -517,22 +649,51 @@ pub fn build_candidate_filter_hook_bytes(
     let return_va = (inst_hva + stolen_len) as u64;
 
     // 1. Pre-branch prefix
-    let pre_instrs = vec![
+    let mut pre_instrs = vec![
         Instruction::with(Code::Pushfq),
         Instruction::with1(Code::Push_r64, Register::RAX).map_err(|e| e.to_string())?,
         Instruction::with1(Code::Push_r64, Register::RDX).map_err(|e| e.to_string())?,
         Instruction::with2(Code::Lea_r64_m, Register::RAX, lea_mem_op).map_err(|e| e.to_string())?,
-        Instruction::with2(
-            Code::Mov_r64_rm64,
-            Register::RDX,
-            MemoryOperand::with_base_displ(Register::RIP, target_gva_slot_va as i64),
-        )
-        .map_err(|e| e.to_string())?,
-        Instruction::with2(Code::Sub_r64_rm64, Register::RDX, Register::RAX)
-            .map_err(|e| e.to_string())?,
-        Instruction::with2(Code::Cmp_rm64_imm8, Register::RDX, access_size)
-            .map_err(|e| e.to_string())?,
     ];
+    match mode {
+        FilterMatchMode::ExactGva { target_gva_slot_va } => {
+            pre_instrs.push(
+                Instruction::with2(
+                    Code::Mov_r64_rm64,
+                    Register::RDX,
+                    MemoryOperand::with_base_displ(Register::RIP, target_gva_slot_va as i64),
+                )
+                .map_err(|e| e.to_string())?,
+            );
+            pre_instrs.push(
+                Instruction::with2(Code::Sub_r64_rm64, Register::RDX, Register::RAX)
+                    .map_err(|e| e.to_string())?,
+            );
+            pre_instrs.push(
+                Instruction::with2(Code::Cmp_rm64_imm8, Register::RDX, access_size)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        FilterMatchMode::PageOffset { page_off } => {
+            pre_instrs.push(
+                Instruction::with2(Code::And_rm32_imm32, Register::EAX, 0xFFFi32)
+                    .map_err(|e| e.to_string())?,
+            );
+            pre_instrs.push(
+                Instruction::with2(Code::Mov_r32_imm32, Register::EDX, (page_off & 0xFFF) as i32)
+                    .map_err(|e| e.to_string())?,
+            );
+            pre_instrs.push(
+                Instruction::with2(Code::Sub_r32_rm32, Register::EDX, Register::EAX)
+                    .map_err(|e| e.to_string())?,
+            );
+            pre_instrs.push(
+                Instruction::with2(Code::Cmp_rm32_imm8, Register::EDX, access_size)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+    }
+
     let pre_encoded = BlockEncoder::encode(
         64,
         InstructionBlock::new(&pre_instrs, code_cave_hva as u64),
@@ -615,7 +776,12 @@ impl EmulatorCodeAccessHook {
         let code_bytes = read_memory_bytes(pid, inst_hva, 32)
             .map_err(|e| format!("Cannot read instruction bytes at 0x{inst_hva:X}: {e}"))?;
 
-        let mut caves = CaveAllocator::discover(pid, inst_hva, &modules, &all_regions, _delta);
+        let extra_elfs = if modules.is_empty() {
+            discover_x64_elfs_in_process_memory(pid)
+        } else {
+            Vec::new()
+        };
+        let mut caves = CaveAllocator::discover(pid, inst_hva, &modules, &all_regions, _delta, &extra_elfs);
         let code_cave_hva = caves
             .alloc_exec(160)
             .ok_or_else(|| "No unused executable ELF cave found near instruction (+/- 1.8GB)".to_string())?;
@@ -741,6 +907,27 @@ pub struct CandidateInfo {
     field_offset: i64,
 }
 
+pub struct CandidateScanOutcome {
+    pub candidates: Vec<CandidateInfo>,
+    pub used_elfs: Vec<DiscoveredElfModule>,
+    pub cand_offsets: Vec<u32>,
+    pub mod_count: usize,
+}
+
+fn pointer_into_modules(ptr_val: usize, mods: &[(String, usize, usize, usize)], delta: isize) -> bool {
+    mods.iter().any(|(_, base_gva, base_hva, sz)| {
+        let in_gva = ptr_val >= *base_gva && ptr_val < base_gva.saturating_add(*sz);
+        let in_hva = ptr_val >= *base_hva && ptr_val < base_hva.saturating_add(*sz);
+        let in_shifted = if delta != 0 {
+            let s = (ptr_val as isize).wrapping_add(delta) as usize;
+            s >= *base_hva && s < base_hva.saturating_add(*sz)
+        } else {
+            false
+        };
+        in_gva || in_hva || in_shifted
+    })
+}
+
 /// Scans game modules byte-by-byte in RAM (0 syscalls per candidate match) for instructions
 /// matching candidate offsets and filters them cleanly via `iced-x86`.
 pub fn scan_verified_xref_candidates(
@@ -751,11 +938,19 @@ pub fn scan_verified_xref_candidates(
     delta: isize,
     modules: &[AndroidMemoryModule],
     host_modules: &[(String, usize, usize)],
-) -> Vec<CandidateInfo> {
+) -> CandidateScanOutcome {
     let mut candidate_mods: Vec<(String, usize, usize, usize)> = Vec::new();
     for m in modules {
         let hva_base = (m.base_address as isize).wrapping_add(delta) as usize;
         candidate_mods.push((m.name.clone(), m.base_address, hva_base, m.size));
+    }
+
+    let mut used_elfs = Vec::new();
+    if candidate_mods.is_empty() {
+        used_elfs = discover_x64_elfs_in_process_memory(pid);
+        for elf in &used_elfs {
+            candidate_mods.push((elf.name.clone(), elf.base_gva, elf.base_hva, elf.size));
+        }
     }
     if candidate_mods.is_empty() {
         for (name, base, size) in host_modules {
@@ -763,51 +958,87 @@ pub fn scan_verified_xref_candidates(
         }
     }
 
-    candidate_mods.sort_by_key(|(name, _, _, _)| {
+    candidate_mods.sort_by_key(|(name, _, _, sz)| {
         let l = name.to_lowercase();
         if l.contains("il2cpp") {
-            0
+            (0u8, usize::MAX - *sz)
         } else if l.contains("unity") {
-            1
+            (1, usize::MAX - *sz)
         } else if l.contains("neox") || l.contains("game") || l.contains("main") {
-            2
+            (2, usize::MAX - *sz)
         } else if l.ends_with(".so") || l.ends_with(".dll") {
-            3
+            (3, usize::MAX - *sz)
         } else {
-            4
+            (4, usize::MAX - *sz)
         }
     });
 
     // 1. Discover candidate field offsets:
-    //    - Probe backwards from target_hva for object vptr/klass pointers into loaded .so modules
-    //    - Include target_gva page masks (& 0xFFF, & 0x1FFF, & 0x7FFF, & 0xFFFF)
+    //    - Probe backwards up to 8KB from target_hva for direct vptr OR 1-hop Il2CppClass* headers
+    //    - Include page masks (& 0xFFF, & 0x1FFF, & 0x7FFF, & 0xFFFF)
     let mut cand_offsets: Vec<u32> = Vec::new();
-    if let Ok(obj_probe) = read_memory_bytes(pid, target_hva.saturating_sub(0x1000), 0x1000) {
-        let base_addr = target_hva.saturating_sub(0x1000);
+    let probe_len = 0x2000usize;
+    let probe_base = target_hva.saturating_sub(probe_len);
+    if let Ok(obj_probe) = read_memory_bytes(pid, probe_base, probe_len) {
         for off in (0..obj_probe.len()).step_by(8).rev() {
             if off + 8 > obj_probe.len() {
                 continue;
             }
-            let ptr_val = u64::from_le_bytes(obj_probe[off..off + 8].try_into().unwrap_or_default()) as usize;
-            let points_into_mod = candidate_mods.iter().any(|(_, gva, _, sz)| {
-                ptr_val >= *gva && ptr_val < gva.saturating_add(*sz)
-            });
-            if points_into_mod {
-                let field_off = (target_hva - (base_addr + off)) as u32;
-                if field_off > 0 && field_off <= 0xFFFF && !cand_offsets.contains(&field_off) {
-                    cand_offsets.push(field_off);
+            let ptr_val =
+                u64::from_le_bytes(obj_probe[off..off + 8].try_into().unwrap_or_default()) as usize;
+            if ptr_val < 0x10000 || ptr_val > 0x0000_7FFF_FFFF_FFFF {
+                continue;
+            }
+            let field_off = (target_hva - (probe_base + off)) as u32;
+            if field_off == 0 || field_off > 0xFFFF {
+                continue;
+            }
+            let mut is_header = pointer_into_modules(ptr_val, &candidate_mods, delta);
+            // 1-hop Il2CppClass* check (aligned heap pointer whose first 32 bytes contain .so pointers)
+            if !is_header && (ptr_val & 7) == 0 {
+                let ptr_hva = if delta != 0 {
+                    let h = (ptr_val as isize).wrapping_add(delta) as usize;
+                    if read_memory_bytes(pid, h, 32).is_ok() {
+                        Some(h)
+                    } else if read_memory_bytes(pid, ptr_val, 32).is_ok() {
+                        Some(ptr_val)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(ptr_val)
+                };
+                if let Some(hva) = ptr_hva {
+                    if let Ok(klass_bytes) = read_memory_bytes(pid, hva, 32) {
+                        for k_off in (0..32).step_by(8) {
+                            let q = u64::from_le_bytes(
+                                klass_bytes[k_off..k_off + 8].try_into().unwrap_or_default(),
+                            ) as usize;
+                            if pointer_into_modules(q, &candidate_mods, delta) {
+                                is_header = true;
+                                break;
+                            }
+                        }
+                    }
                 }
+            }
+            if is_header && !cand_offsets.contains(&field_off) {
+                cand_offsets.push(field_off);
             }
         }
     }
 
-    for mask in [0xFFFusize, 0x1FFF, 0x7FFF, 0xFFFF] {
-        let off = (target_gva & mask) as u32;
-        if off > 0 && !cand_offsets.contains(&off) {
-            cand_offsets.push(off);
+    for addr_source in [target_gva, target_hva] {
+        for mask in [0xFFFusize, 0x1FFF, 0x7FFF, 0xFFFF] {
+            let off = (addr_source & mask) as u32;
+            if off > 0 && !cand_offsets.contains(&off) {
+                cand_offsets.push(off);
+            }
         }
     }
 
+    let mod_count = candidate_mods.len();
+    let max_cands = 256usize;
     let mut results = Vec::new();
     let mut seen_hva = HashSet::new();
     let mut factory = InstructionInfoFactory::new();
@@ -815,7 +1046,7 @@ pub fn scan_verified_xref_candidates(
     let overlap = 16;
 
     for (mod_name, base_gva, hva_base, mod_size) in &candidate_mods {
-        if results.len() >= 32 {
+        if results.len() >= max_cands {
             break;
         }
         let scan_len = (*mod_size).min(128 * 1024 * 1024);
@@ -832,13 +1063,13 @@ pub fn scan_verified_xref_candidates(
         let disp8_offsets: Vec<u32> = cand_offsets.iter().copied().filter(|&o| o <= 0x7F).collect();
 
         let mut offset = 0usize;
-        while offset + 4 <= scan_len && results.len() < 32 {
+        while offset + 4 <= scan_len && results.len() < max_cands {
             let current_chunk = (chunk_size + overlap).min(scan_len - offset);
             let chunk_addr = hva_base + offset;
             if let Ok(bytes) = read_memory_bytes(pid, chunk_addr, current_chunk) {
                 let limit = bytes.len().saturating_sub(3);
                 for i in 0..limit {
-                    if results.len() >= 32 {
+                    if results.len() >= max_cands {
                         break;
                     }
                     let slice4 = &bytes[i..i + 4];
@@ -888,7 +1119,12 @@ pub fn scan_verified_xref_candidates(
         }
     }
 
-    results
+    CandidateScanOutcome {
+        candidates: results,
+        used_elfs,
+        cand_offsets,
+        mod_count,
+    }
 }
 
 fn verify_candidate_in_buffer(
@@ -1039,7 +1275,7 @@ impl EmulatorInstructionWatch {
             let mut data_cave_size = 0usize;
 
             if let Some(&(target_gva, target_hva)) = watch_targets.first() {
-                let candidates = scan_verified_xref_candidates(
+                let outcome = scan_verified_xref_candidates(
                     pid,
                     target_gva,
                     target_hva,
@@ -1048,15 +1284,47 @@ impl EmulatorInstructionWatch {
                     &modules,
                     &host_modules,
                 );
-                if !candidates.is_empty() {
+                let total_cands = outcome.candidates.len();
+                let mod_count = outcome.mod_count;
+                let off_preview = if outcome.cand_offsets.is_empty() {
+                    "none".to_string()
+                } else {
+                    outcome
+                        .cand_offsets
+                        .iter()
+                        .take(5)
+                        .map(|o| format!("0x{o:X}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+
+                let mut exec_avail = 0usize;
+                let mut data_avail = 0usize;
+                let use_exact_gva = delta != 0
+                    && target_gva != target_hva
+                    && (all_regions.is_empty()
+                        || all_regions
+                            .iter()
+                            .any(|r| target_gva >= r.start && target_gva < r.end));
+                let mode_label = if use_exact_gva {
+                    "ExactGva"
+                } else {
+                    "PageOffset(&FFF)"
+                };
+
+                if !outcome.candidates.is_empty() {
                     let mut caves = CaveAllocator::discover(
                         pid,
-                        candidates[0].inst_hva,
+                        outcome.candidates[0].inst_hva,
                         &modules,
                         &all_regions,
                         delta,
+                        &outcome.used_elfs,
                     );
-                    let num_cands = candidates.len().min(32);
+                    exec_avail = caves.total_exec_bytes();
+                    data_avail = caves.total_data_bytes();
+
+                    let num_cands = outcome.candidates.len().min(256);
                     let needed_data = 8 + num_cands * 8;
                     if let Some(d_cave) = caves.alloc_data(needed_data) {
                         data_cave_base = d_cave;
@@ -1069,11 +1337,22 @@ impl EmulatorInstructionWatch {
                                 original_bytes: vec![0u8; needed_data],
                             });
 
-                            for (idx, cand) in candidates.into_iter().take(num_cands).enumerate() {
+                            let match_mode = if use_exact_gva {
+                                FilterMatchMode::ExactGva {
+                                    target_gva_slot_va: d_cave,
+                                }
+                            } else {
+                                FilterMatchMode::PageOffset {
+                                    page_off: (target_hva & 0xFFF) as u32,
+                                }
+                            };
+
+                            for (idx, cand) in outcome.candidates.into_iter().take(num_cands).enumerate()
+                            {
                                 if stop_clone.load(Ordering::Relaxed) {
                                     break;
                                 }
-                                let Some(c_cave) = caves.alloc_exec(96) else {
+                                let Some((cave_idx, c_cave)) = caves.peek_exec(80) else {
                                     break;
                                 };
                                 let counter_va = d_cave + 8 + idx * 8;
@@ -1081,12 +1360,13 @@ impl EmulatorInstructionWatch {
                                     cand.inst_hva,
                                     &cand.code_bytes,
                                     c_cave,
-                                    d_cave,
+                                    match_mode,
                                     counter_va,
                                 ) {
                                     if write_code_bytes(pid, c_cave, &stub).is_ok()
                                         && write_code_bytes(pid, cand.inst_hva, &patch).is_ok()
                                     {
+                                        caves.commit_exec(cave_idx, stub.len());
                                         {
                                             let mut p = patches_clone.lock();
                                             p.push(PatchedSite {
@@ -1109,6 +1389,20 @@ impl EmulatorInstructionWatch {
                         }
                     }
                 }
+
+                let armed = active_hooks.len();
+                let hint = if mod_count == 0 {
+                    " | No ELF/x64 modules found in target"
+                } else if total_cands == 0 {
+                    " | 0 matching instructions for probed offsets"
+                } else if armed == 0 {
+                    " | 0 hooks armed (no usable code/data cave near target)"
+                } else {
+                    ""
+                };
+                let _ = tx.send(WatchEvent::Status(format!(
+                    "Hooks: {armed}/{total_cands} | Mods: {mod_count} | Offsets: [{off_preview}] | Caves: {exec_avail}B/{data_avail}B | Mode: {mode_label}{hint}"
+                )));
             }
 
             // 2. Poll target memory changes + real-time hook counters
@@ -1372,7 +1666,9 @@ mod tests {
             inst_hva,
             &mov_bytes,
             code_cave,
-            target_slot,
+            FilterMatchMode::ExactGva {
+                target_gva_slot_va: target_slot,
+            },
             counter_slot,
         )
         .unwrap();
@@ -1383,6 +1679,34 @@ mod tests {
         assert!(lines.contains("lea rax,[r15+2E0h]"), "{lines}");
         assert!(lines.contains("sub rdx,rax"), "{lines}");
         assert!(lines.contains("cmp rdx,4"), "{lines}");
+        assert!(lines.contains("jae"), "{lines}");
+        assert!(lines.contains("lock inc"), "{lines}");
+        assert!(lines.contains("mov [r15+2E0h],eax"), "{lines}");
+    }
+
+    #[test]
+    fn test_build_candidate_filter_hook_page_offset_mode() {
+        let mov_bytes = [0x41, 0x89, 0x87, 0xE0, 0x02, 0x00, 0x00, 0xC3];
+        let inst_hva = 0x17195725855usize;
+        let code_cave = 0x17196000000usize;
+        let counter_slot = 0x17196500008usize;
+
+        let (stub, patch, orig) = build_candidate_filter_hook_bytes(
+            inst_hva,
+            &mov_bytes,
+            code_cave,
+            FilterMatchMode::PageOffset { page_off: 0x2E0 },
+            counter_slot,
+        )
+        .unwrap();
+        assert_eq!(orig.len(), 7);
+        assert_eq!(patch[0], 0xE9);
+
+        let lines = decode_all_intel(&stub, code_cave).join("\n");
+        assert!(lines.contains("and eax,0FFFh"), "{lines}");
+        assert!(lines.contains("mov edx,2E0h"), "{lines}");
+        assert!(lines.contains("sub edx,eax"), "{lines}");
+        assert!(lines.contains("cmp edx,4"), "{lines}");
         assert!(lines.contains("jae"), "{lines}");
         assert!(lines.contains("lock inc"), "{lines}");
         assert!(lines.contains("mov [r15+2E0h],eax"), "{lines}");

@@ -479,6 +479,7 @@ pub enum WatchEvent {
         total_batches: usize,
     },
     CaptureLimitReached(usize),
+    Status(String),
     Error(String),
     Stopped,
 }
@@ -2241,7 +2242,7 @@ mod tests {
                 WatchEvent::Error(error) => panic!("watch failed: {error}"),
                 WatchEvent::Stopped => panic!("watch stopped before a write"),
                 WatchEvent::Started { .. } => {}
-                WatchEvent::CaptureLimitReached(_) => {}
+                WatchEvent::CaptureLimitReached(_) | WatchEvent::Status(_) => {}
             }
         };
         assert_ne!(ip, 0);
