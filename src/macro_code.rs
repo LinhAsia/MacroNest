@@ -601,7 +601,13 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
         return action == MacroAction::OcrSearch;
     }
     if field.starts_with("memory_") {
-        return matches!(action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction);
+        return matches!(
+            action,
+            MacroAction::ReadMemory
+                | MacroAction::WriteMemory
+                | MacroAction::ScanInstruction
+                | MacroAction::AutoAssembler
+        );
     }
     if field.starts_with("scan_instruction_") {
         return action == MacroAction::ScanInstruction;

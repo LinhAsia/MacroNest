@@ -40442,24 +40442,42 @@ mod windows_overlay {
         }
     }
 
-    fn title_matches_window_target(
+    pub(super) fn title_matches_window_target(
         title: &str,
         hwnd: HWND,
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
         let clean_target = crate::window_list::strip_rule_suffix(target);
-        let selector = if clean_target.ends_with(')') && clean_target.contains(" (0x") {
+        let is_specific = crate::window_list::looks_like_window_selector(clean_target);
+        let selector = if is_specific {
             crate::window_list::window_selector(hwnd, title)
         } else {
             String::new()
         };
-        crate::window_list::window_matches_candidate_title(
+        if crate::window_list::window_matches_candidate_title(
             title,
             &selector,
             clean_target,
             match_duplicate_window_titles,
-        )
+        ) {
+            return true;
+        }
+        // If a saved/copied target referenced a stale specific HWND (0x...), fall back to its base
+        // window title when that old HWND no longer exists.
+        if is_specific
+            && !match_duplicate_window_titles
+            && !crate::window_list::is_specific_selector_hwnd_alive(clean_target)
+        {
+            let base = crate::window_list::selector_base_title(clean_target);
+            return crate::window_list::window_matches_candidate_title(
+                title,
+                "",
+                base,
+                false,
+            );
+        }
+        false
     }
 
     fn title_matches_any_window_target(
@@ -43221,6 +43239,28 @@ mod tests {
         assert!(is_android_code_module("[dynamic]", true));
 
         set_memory_code_entries(&[]);
+    }
+
+    #[test]
+    fn test_title_matches_window_target_stale_selector_fallback() {
+        use super::windows_overlay::title_matches_window_target;
+        use windows::Win32::Foundation::HWND;
+
+        let live_hwnd = HWND(0x9999_usize as *mut _);
+        // Stale HWND 0xDEAD does not exist -> falls back to base title "Android 2"
+        assert!(title_matches_window_target(
+            "Android 2",
+            live_hwnd,
+            "Android 2 (0xDEAD)",
+            false,
+        ));
+        // Still rejects different window titles
+        assert!(!title_matches_window_target(
+            "Other Game",
+            live_hwnd,
+            "Android 2 (0xDEAD)",
+            false,
+        ));
     }
 }
 

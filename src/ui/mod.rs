@@ -427,7 +427,6 @@ pub fn build_runtime_macro_groups(state: &AppState) -> Vec<MacroGroup> {
             group.enabled = false;
         }
     }
-    CrosshairApp::sort_macro_groups(&mut macro_groups);
     macro_groups
 }
 
@@ -3749,10 +3748,6 @@ impl CrosshairApp {
 
     fn trimmed_eq_ignore_ascii_case(left: &str, right: &str) -> bool {
         left.trim().eq_ignore_ascii_case(right.trim())
-    }
-
-    fn sort_macro_groups(groups: &mut [MacroGroup]) {
-        groups.sort_by_key(|group| group.id);
     }
 
     fn macro_preset_matches_search_query(

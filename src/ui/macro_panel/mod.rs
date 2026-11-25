@@ -2253,6 +2253,108 @@ impl CrosshairApp {
         let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(spec));
     }
 
+    fn expand_compact_drag_drop_index(
+        total_len: usize,
+        compact_index: usize,
+        dragged_indices: &[usize],
+    ) -> usize {
+        let mut compact_cursor = 0usize;
+        for boundary in 0..=total_len {
+            if compact_cursor == compact_index {
+                return boundary;
+            }
+            if boundary < total_len && !dragged_indices.contains(&boundary) {
+                compact_cursor += 1;
+            }
+        }
+        total_len
+    }
+
+    fn compute_compact_visual_order(
+        total_len: usize,
+        dragged_indices: &[usize],
+        stored_compact_index: Option<usize>,
+    ) -> (Vec<usize>, usize, usize) {
+        let mut sorted = dragged_indices
+            .iter()
+            .copied()
+            .filter(|i| *i < total_len)
+            .collect::<Vec<_>>();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.is_empty() {
+            return ((0..total_len).collect(), 0, total_len);
+        }
+        let compact_len = total_len.saturating_sub(sorted.len());
+        let default_compact = sorted[0]
+            .saturating_sub(sorted.iter().filter(|i| **i < sorted[0]).count())
+            .min(compact_len);
+        let current_compact = stored_compact_index.unwrap_or(default_compact).min(compact_len);
+        let mut compact_order = (0..total_len)
+            .filter(|index| !sorted.contains(index))
+            .collect::<Vec<_>>();
+        for (offset, dragged_index) in sorted.iter().copied().enumerate() {
+            compact_order.insert((current_compact + offset).min(compact_order.len()), dragged_index);
+        }
+        let drop_index = Self::expand_compact_drag_drop_index(total_len, current_compact, &sorted);
+        (compact_order, current_compact, drop_index)
+    }
+
+    fn advance_compact_preview_index(
+        next_compact_preview_index: &mut usize,
+        total_len: usize,
+        pointer_y: Option<f32>,
+        rect_bottom: f32,
+        is_being_dragged: bool,
+        compact_cursor: &mut usize,
+        active_current_compact_index: Option<usize>,
+    ) {
+        if *next_compact_preview_index == total_len
+            && pointer_y.is_some_and(|y| y < rect_bottom)
+        {
+            *next_compact_preview_index = if is_being_dragged {
+                *compact_cursor
+            } else {
+                let moving_up = active_current_compact_index
+                    .is_some_and(|current| *compact_cursor < current);
+                if moving_up {
+                    *compact_cursor
+                } else {
+                    *compact_cursor + 1
+                }
+            };
+        }
+        if !is_being_dragged {
+            *compact_cursor += 1;
+        }
+    }
+
+    fn reorder_vec_by_indices<T>(items: &mut Vec<T>, dragged_indices: &[usize], to_index: usize) -> bool {
+        let mut indices = dragged_indices
+            .iter()
+            .copied()
+            .filter(|index| *index < items.len())
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices.dedup();
+        if indices.is_empty() {
+            return false;
+        }
+        let mut moved = Vec::with_capacity(indices.len());
+        for index in indices.iter().rev().copied() {
+            moved.push(items.remove(index));
+        }
+        moved.reverse();
+        let removed_before_target = indices.iter().filter(|index| **index < to_index).count();
+        let insert_at = to_index
+            .saturating_sub(removed_before_target)
+            .min(items.len());
+        for (offset, item) in moved.into_iter().enumerate() {
+            items.insert(insert_at + offset, item);
+        }
+        true
+    }
+
     fn send_geometry_preset_preview_command(
         overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
         preset_id: Option<u32>,
@@ -7460,6 +7562,60 @@ impl CrosshairApp {
                 }
             }
         }
+        #[derive(Clone, Debug)]
+        enum MacroRightDragKind {
+            Group { group_id: u32 },
+            Preset { group_id: u32, preset_id: u32 },
+            Step {
+                group_id: u32,
+                preset_id: u32,
+                indices: Vec<usize>,
+            },
+        }
+
+        #[derive(Clone, Debug)]
+        struct MacroRightDragState {
+            kind: MacroRightDragKind,
+            origin: egui::Pos2,
+            active: bool,
+            preview_compact_index: Option<usize>,
+        }
+
+        const RIGHT_DRAG_THRESHOLD_PX: f32 = 6.0;
+        let right_drag_id = egui::Id::new("macro-panel-right-drag-state");
+        let (sec_down, sec_pressed, sec_released, right_drag_ptr_pos) = ui.input(|i| {
+            (
+                i.pointer.secondary_down(),
+                i.pointer.button_pressed(egui::PointerButton::Secondary),
+                i.pointer.button_released(egui::PointerButton::Secondary),
+                i.pointer.latest_pos().or(i.pointer.interact_pos()),
+            )
+        });
+        let right_drag_popup_open = ui.ctx().memory(|m| {
+            m.any_popup_open()
+                || m.data
+                    .get_temp::<bool>(egui::Id::new("any_popup_open"))
+                    .unwrap_or(false)
+        });
+        let mut right_drag_state: Option<MacroRightDragState> = if !sec_down && !sec_released {
+            None
+        } else {
+            ui.ctx().data(|d| d.get_temp(right_drag_id))
+        };
+        if let Some(state) = right_drag_state.as_mut()
+            && !state.active
+            && sec_down
+            && right_drag_ptr_pos.is_some_and(|p| p.distance(state.origin) > RIGHT_DRAG_THRESHOLD_PX)
+        {
+            state.active = true;
+        }
+        if right_drag_state.as_ref().is_some_and(|s| s.active) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            ui.ctx().request_repaint();
+        }
+        let mut pending_right_drag_claim: Option<(MacroRightDragKind, egui::Pos2)> = None;
+        let right_drag_pointer_y = right_drag_ptr_pos.map(|p| p.y);
+
         let mut remove_group = None;
         let mut live_sync = false;
         let mut geom_presets_changed = false;
@@ -7479,7 +7635,6 @@ impl CrosshairApp {
         let active_folder_view = self.resolved_active_macro_folder_view();
         let search_query = self.macro_preset_search_query.trim().to_owned();
         let total_group_count = self.state.macro_groups.len();
-        Self::sort_macro_groups(&mut self.state.macro_groups);
         let mut render_items = Vec::new();
         if self.macro_folders_panel_open {
             if let Some(active_folder_id) = active_folder_view {
@@ -7759,6 +7914,51 @@ impl CrosshairApp {
             .iter()
             .map(|preset| (preset.id, preset.name.clone()))
             .collect();
+        let visible_group_indices: Vec<usize> = render_items
+            .iter()
+            .filter_map(|item| match item {
+                RenderItem::MacroGroup(idx) => Some(*idx),
+                _ => None,
+            })
+            .collect();
+        let active_dragged_group_id = match &right_drag_state {
+            Some(MacroRightDragState {
+                kind: MacroRightDragKind::Group { group_id },
+                active: true,
+                ..
+            }) => Some(*group_id),
+            _ => None,
+        };
+        let dragged_visible_group_pos = active_dragged_group_id.and_then(|drag_gid| {
+            visible_group_indices
+                .iter()
+                .position(|&g_idx| self.state.macro_groups[g_idx].id == drag_gid)
+        });
+        let (
+            group_active_current_compact,
+            mut next_group_compact_preview,
+            mut group_compact_cursor,
+            _group_preview_drop_visible_pos,
+        ) = if let Some(drag_vis_pos) = dragged_visible_group_pos {
+            let total_vis = visible_group_indices.len();
+            let stored = right_drag_state
+                .as_ref()
+                .and_then(|s| s.preview_compact_index);
+            let (visual_pos_order, cur_compact, drop_vis_pos) =
+                Self::compute_compact_visual_order(total_vis, &[drag_vis_pos], stored);
+            let mut slot = 0usize;
+            for item in &mut render_items {
+                if let RenderItem::MacroGroup(idx) = item {
+                    *idx = visible_group_indices[visual_pos_order[slot]];
+                    slot += 1;
+                }
+            }
+            (Some(cur_compact), total_vis, 0usize, drop_vis_pos)
+        } else {
+            (None, 0usize, 0usize, 0usize)
+        };
+        let mut move_group_to_indices: Option<(usize, usize)> = None;
+
         for item in render_items {
             match item {
                 RenderItem::AddFolder => {
@@ -7962,6 +8162,7 @@ impl CrosshairApp {
                 }
                 RenderItem::MacroGroup(group_index) => {
                     let group_id = self.state.macro_groups[group_index].id;
+                    let group_is_being_dragged = active_dragged_group_id == Some(group_id);
                     let group_is_collapsed = self.state.macro_groups[group_index].collapsed;
                     let should_scroll_to_group =
                         pending_macro_group_scroll_target == Some(group_id);
@@ -7970,10 +8171,24 @@ impl CrosshairApp {
                     let cached_group_height: Option<f32> =
                         ui.ctx().data(|data| data.get_temp(macro_group_height_key));
                     let group_top = ui.cursor().min.y;
-                    if group_is_collapsed && let Some(cached_height) = cached_group_height {
+                    if group_is_collapsed
+                        && !group_is_being_dragged
+                        && let Some(cached_height) = cached_group_height
+                    {
                         let visible_bottom = viewport.bottom() + macro_group_virtualization_margin;
                         if group_top > visible_bottom && !should_scroll_to_group {
                             ui.add_space(cached_height);
+                            if dragged_visible_group_pos.is_some() {
+                                Self::advance_compact_preview_index(
+                                    &mut next_group_compact_preview,
+                                    visible_group_indices.len(),
+                                    right_drag_pointer_y,
+                                    group_top + cached_height,
+                                    false,
+                                    &mut group_compact_cursor,
+                                    group_active_current_compact,
+                                );
+                            }
                             continue;
                         }
                     }
@@ -8020,6 +8235,9 @@ impl CrosshairApp {
                     }
                 };
                 if render_preset_indices.is_empty() {
+                    if dragged_visible_group_pos.is_some() {
+                        group_compact_cursor += 1;
+                    }
                     continue;
                 }
                 {
@@ -8044,7 +8262,11 @@ impl CrosshairApp {
                     let group = &mut self.state.macro_groups[group_index];
                     let folder_enabled = true;
                     let group_scroll_rect_top = ui.cursor().min.y;
-                    Self::show_preset_card(ui, group.enabled && folder_enabled, |ui| {
+                    let (_, group_card_response) = Self::show_preset_card_with_drag(
+                        ui,
+                        group.enabled && folder_enabled,
+                        group_is_being_dragged,
+                        |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.horizontal(|ui| {
@@ -8539,8 +8761,47 @@ impl CrosshairApp {
                             .iter()
                             .map(|preset_option| (preset_option.id, preset_option.name.clone()))
                             .collect::<Vec<_>>();
-                        for preset_index in render_preset_indices.iter().copied() {
+                        let active_dragged_preset_id = match &right_drag_state {
+                            Some(MacroRightDragState {
+                                kind: MacroRightDragKind::Preset { group_id: gid, preset_id },
+                                active: true,
+                                ..
+                            }) if *gid == group.id => Some(*preset_id),
+                            _ => None,
+                        };
+                        let dragged_visible_preset_pos = active_dragged_preset_id.and_then(|drag_pid| {
+                            render_preset_indices
+                                .iter()
+                                .position(|&p_idx| group.presets[p_idx].id == drag_pid)
+                        });
+                        let total_visible_presets = render_preset_indices.len();
+                        let (
+                            visual_preset_positions,
+                            preset_active_current_compact,
+                            mut next_preset_compact_preview,
+                            mut preset_compact_cursor,
+                            _preset_preview_drop_pos,
+                        ) = if let Some(drag_vis_pos) = dragged_visible_preset_pos {
+                            let stored = right_drag_state
+                                .as_ref()
+                                .and_then(|s| s.preview_compact_index);
+                            let (order, cur_compact, drop_pos) = Self::compute_compact_visual_order(
+                                total_visible_presets,
+                                &[drag_vis_pos],
+                                stored,
+                            );
+                            (order, Some(cur_compact), total_visible_presets, 0usize, drop_pos)
+                        } else {
+                            ((0..total_visible_presets).collect(), None, 0usize, 0usize, 0usize)
+                        };
+                        let mut move_preset_to: Option<(usize, usize)> = None;
+
+                        for &pos_in_render in &visual_preset_positions {
+                            let preset_index = render_preset_indices[pos_in_render];
                             let preset = &mut group.presets[preset_index];
+                            let preset_id_for_drag = preset.id;
+                            let preset_is_being_dragged =
+                                active_dragged_preset_id == Some(preset_id_for_drag);
                             // Convert old MouseHeld to KeyHeld
                             for step in &mut preset.steps {
                                 if step.if_condition_type == IfConditionType::MouseHeld {
@@ -8593,11 +8854,12 @@ impl CrosshairApp {
                                     }
                                 }
                             }
-                            Self::show_macro_preset_card(
+                            let (_, preset_card_response) = Self::show_macro_preset_card_with_drag(
                                 ui,
                                 group.enabled && folder_enabled,
                                 preset.enabled,
                                 preset.trigger_mode == MacroTriggerMode::WindowFocus,
+                                preset_is_being_dragged,
                                 |ui| {
                                 ui.horizontal_top(|ui| {
                                     let available_width = ui.available_width();
@@ -14312,72 +14574,51 @@ if supports_move_mouse || show_detection_tuning {
                             let has_stop_vision = preset.steps.iter().any(|s| s.action == MacroAction::StopVision && s.enabled);
                             let drag_payload = egui::DragAndDrop::payload::<MacroStepDragPayload>(ui.ctx())
                                 .filter(|payload| payload.group_id == group.id && payload.preset_id == preset.id);
-                            let pointer_y = ui.ctx().pointer_interact_pos().map(|pointer| pointer.y);
+                            let step_right_drag_indices_active = match &right_drag_state {
+                                Some(MacroRightDragState {
+                                    kind:
+                                        MacroRightDragKind::Step {
+                                            group_id: gid,
+                                            preset_id: pid,
+                                            indices,
+                                        },
+                                    active: true,
+                                    ..
+                                }) if *gid == group.id && *pid == preset.id => Some(indices.clone()),
+                                _ => None,
+                            };
+                            let step_drag_active =
+                                drag_payload.is_some() || step_right_drag_indices_active.is_some();
+                            let pointer_y = right_drag_pointer_y
+                                .or_else(|| ui.ctx().pointer_interact_pos().map(|pointer| pointer.y));
                             let drag_preview_index_id =
                                 ui.make_persistent_id((group.id, preset.id, "step-drag-preview-index"));
-                            let expand_drag_drop_index =
-                                |compact_index: usize, dragged_indices: &[usize]| {
-                                    let mut compact_cursor = 0usize;
-                                    for boundary in 0..=steps_len {
-                                        if compact_cursor == compact_index {
-                                            return boundary;
-                                        }
-                                        if boundary < steps_len
-                                            && !dragged_indices.contains(&boundary)
-                                        {
-                                            compact_cursor += 1;
-                                        }
-                                    }
-                                    steps_len
-                                };
                             let mut preview_drop_index = steps_len;
                             let mut visual_step_order: Vec<usize> = (0..steps_len).collect();
                             let mut active_dragged_indices: Vec<usize> = Vec::new();
                             let mut active_current_compact_index: Option<usize> = None;
-                            if let Some(payload) = drag_payload.as_ref() {
-                                active_dragged_indices = payload.indices.clone();
+                            if let Some(indices) = drag_payload
+                                .as_ref()
+                                .map(|p| p.indices.clone())
+                                .or_else(|| step_right_drag_indices_active.clone())
+                            {
+                                active_dragged_indices = indices;
                                 active_dragged_indices.sort_unstable();
                                 active_dragged_indices.dedup();
-                                let compact_steps_len =
-                                    steps_len.saturating_sub(active_dragged_indices.len());
-                                let default_compact_index = active_dragged_indices
-                                    .first()
-                                    .copied()
-                                    .map(|first_dragged| {
-                                        first_dragged
-                                            .saturating_sub(
-                                                active_dragged_indices
-                                                    .iter()
-                                                    .filter(|index| **index < first_dragged)
-                                                    .count(),
-                                            )
-                                    })
-                                    .unwrap_or(0)
-                                    .min(compact_steps_len);
-                                let stored_compact_index = ui.memory(|mem| {
-                                    mem.data
-                                        .get_temp::<usize>(drag_preview_index_id)
-                                        .unwrap_or(default_compact_index)
-                                });
-                                let current_compact_index =
-                                    stored_compact_index.min(compact_steps_len);
-                                active_current_compact_index = Some(current_compact_index);
-                                let mut compact_order = (0..steps_len)
-                                    .filter(|index| !active_dragged_indices.contains(index))
-                                    .collect::<Vec<_>>();
-                                for (offset, dragged_index) in
-                                    active_dragged_indices.iter().copied().enumerate()
-                                {
-                                    compact_order.insert(
-                                        (current_compact_index + offset).min(compact_order.len()),
-                                        dragged_index,
+                                let stored = if step_right_drag_indices_active.is_some() {
+                                    right_drag_state.as_ref().and_then(|s| s.preview_compact_index)
+                                } else {
+                                    ui.memory(|mem| mem.data.get_temp::<usize>(drag_preview_index_id))
+                                };
+                                let (order, cur_compact, drop_idx) =
+                                    Self::compute_compact_visual_order(
+                                        steps_len,
+                                        &active_dragged_indices,
+                                        stored,
                                     );
-                                }
-                                preview_drop_index = expand_drag_drop_index(
-                                    current_compact_index,
-                                    &active_dragged_indices,
-                                );
-                                visual_step_order = compact_order;
+                                active_current_compact_index = Some(cur_compact);
+                                preview_drop_index = drop_idx;
+                                visual_step_order = order;
                             } else {
                                 let had_drag = ui.memory(|mem| mem.data.get_temp::<usize>(drag_preview_index_id).is_some());
                                 if had_drag {
@@ -14517,25 +14758,17 @@ if supports_move_mouse || show_detection_tuning {
                                         egui::Sense::hover(),
                                     );
                                     step_rects[step_index] = allocated_rect;
-                                    if drag_payload.is_some()
-                                        && next_compact_preview_index == steps_len
-                                        && pointer_y.is_some_and(|pointer_y| {
-                                            pointer_y < allocated_rect.bottom()
-                                        })
-                                    {
-                                        next_compact_preview_index = if step_is_being_dragged {
-                                            compact_cursor
-                                        } else {
-                                            let moving_up = active_current_compact_index
-                                                .is_some_and(|current| compact_cursor < current);
-                                            if moving_up {
-                                                compact_cursor
-                                            } else {
-                                                compact_cursor + 1
-                                            }
-                                        };
-                                    }
-                                    if !step_is_being_dragged {
+                                    if step_drag_active {
+                                        Self::advance_compact_preview_index(
+                                            &mut next_compact_preview_index,
+                                            steps_len,
+                                            pointer_y,
+                                            allocated_rect.bottom(),
+                                            step_is_being_dragged,
+                                            &mut compact_cursor,
+                                            active_current_compact_index,
+                                        );
+                                    } else if !step_is_being_dragged {
                                         compact_cursor += 1;
                                     }
                                     continue;
@@ -14619,6 +14852,7 @@ if supports_move_mouse || show_detection_tuning {
                                     preset_id: preset.id,
                                     indices: drag_indices,
                                 };
+                                let step_right_drag_indices = row_drag_payload.indices.clone();
                                 let border_stroke = if step_is_being_dragged {
                                     egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220))
                                 } else if is_active {
@@ -18332,8 +18566,24 @@ if supports_move_mouse || show_detection_tuning {
                                          }
                                      }
                                  }
-                                if row_response.secondary_clicked() {
+                                let was_step_right_drag_active =
+                                    step_right_drag_indices_active.is_some();
+                                if row_response.secondary_clicked() && !was_step_right_drag_active {
                                     remove_step = Some((preset.id, step_index));
+                                }
+                                if sec_pressed
+                                    && !right_drag_popup_open
+                                    && let Some(press_pos) = right_drag_ptr_pos
+                                    && row_response.rect.contains(press_pos)
+                                {
+                                    pending_right_drag_claim = Some((
+                                        MacroRightDragKind::Step {
+                                            group_id: group.id,
+                                            preset_id: preset.id,
+                                            indices: step_right_drag_indices,
+                                        },
+                                        press_pos,
+                                    ));
                                 }
                                 if is_selected {
                                     if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
@@ -18350,25 +18600,17 @@ if supports_move_mouse || show_detection_tuning {
                                     }
                                 }
                                 step_rects[step_index] = row_response.rect;
-                                if drag_payload.is_some()
-                                    && next_compact_preview_index == steps_len
-                                    && pointer_y.is_some_and(|pointer_y| {
-                                        pointer_y < row_response.rect.bottom()
-                                    })
-                                {
-                                    next_compact_preview_index = if step_is_being_dragged {
-                                        compact_cursor
-                                    } else {
-                                        let moving_up = active_current_compact_index
-                                            .is_some_and(|current| compact_cursor < current);
-                                        if moving_up {
-                                            compact_cursor
-                                        } else {
-                                            compact_cursor + 1
-                                        }
-                                    };
-                                }
-                                if !step_is_being_dragged {
+                                if step_drag_active {
+                                    Self::advance_compact_preview_index(
+                                        &mut next_compact_preview_index,
+                                        steps_len,
+                                        pointer_y,
+                                        row_response.rect.bottom(),
+                                        step_is_being_dragged,
+                                        &mut compact_cursor,
+                                        active_current_compact_index,
+                                    );
+                                } else if !step_is_being_dragged {
                                     compact_cursor += 1;
                                 }
                             }
@@ -18415,16 +18657,23 @@ if supports_move_mouse || show_detection_tuning {
                                     }
                                 }
                             }
-                            if drag_payload.is_some() {
+                            if step_drag_active {
                                 let compact_steps_len =
                                     steps_len.saturating_sub(active_dragged_indices.len());
                                 let resolved_compact_index =
                                     next_compact_preview_index.min(compact_steps_len);
-                                ui.memory_mut(|mem| {
-                                    mem.data
-                                        .insert_temp(drag_preview_index_id, resolved_compact_index);
-                                });
-                                preview_drop_index = expand_drag_drop_index(
+                                if step_right_drag_indices_active.is_some() {
+                                    if let Some(state) = right_drag_state.as_mut() {
+                                        state.preview_compact_index = Some(resolved_compact_index);
+                                    }
+                                } else {
+                                    ui.memory_mut(|mem| {
+                                        mem.data
+                                            .insert_temp(drag_preview_index_id, resolved_compact_index);
+                                    });
+                                }
+                                preview_drop_index = Self::expand_compact_drag_drop_index(
+                                    steps_len,
                                     resolved_compact_index,
                                     &active_dragged_indices,
                                 );
@@ -18473,14 +18722,76 @@ if supports_move_mouse || show_detection_tuning {
                                     payload.indices.clone(),
                                     preview_drop_index,
                                 ));
+                            } else if let Some(indices) = step_right_drag_indices_active
+                                && sec_released
+                            {
+                                move_step_to = Some((preset.id, indices, preview_drop_index));
                             }
                         });
                                     });
                                     ui.add_space(4.0);
                                 }
                             });
+                            if dragged_visible_preset_pos.is_some() {
+                                Self::advance_compact_preview_index(
+                                    &mut next_preset_compact_preview,
+                                    total_visible_presets,
+                                    right_drag_pointer_y,
+                                    preset_card_response.rect.bottom(),
+                                    preset_is_being_dragged,
+                                    &mut preset_compact_cursor,
+                                    preset_active_current_compact,
+                                );
+                            }
+                            if sec_pressed
+                                && !right_drag_popup_open
+                                && pending_right_drag_claim.is_none()
+                                && let Some(press_pos) = right_drag_ptr_pos
+                                && preset_card_response.rect.contains(press_pos)
+                            {
+                                pending_right_drag_claim = Some((
+                                    MacroRightDragKind::Preset {
+                                        group_id: group.id,
+                                        preset_id: preset_id_for_drag,
+                                    },
+                                    press_pos,
+                                ));
+                            }
                             self.vision_manual_color = geometry_manual_color;
                             self.vision_manual_color_hex = geometry_manual_color_hex.clone();
+                        }
+                        if let Some(drag_vis_pos) = dragged_visible_preset_pos {
+                            let compact_len = total_visible_presets.saturating_sub(1);
+                            let resolved_compact = next_preset_compact_preview.min(compact_len);
+                            if let Some(state) = right_drag_state.as_mut() {
+                                state.preview_compact_index = Some(resolved_compact);
+                            }
+                            let drop_vis_pos = Self::expand_compact_drag_drop_index(
+                                total_visible_presets,
+                                resolved_compact,
+                                &[drag_vis_pos],
+                            );
+                            if sec_released {
+                                let from_vec_idx = render_preset_indices[drag_vis_pos];
+                                let to_vec_idx = if drop_vis_pos < total_visible_presets {
+                                    render_preset_indices[drop_vis_pos]
+                                } else {
+                                    render_preset_indices
+                                        .last()
+                                        .map(|i| i + 1)
+                                        .unwrap_or(group.presets.len())
+                                };
+                                move_preset_to = Some((from_vec_idx, to_vec_idx));
+                            }
+                        }
+                        if let Some((from_vec_idx, to_vec_idx)) = move_preset_to {
+                            if Self::reorder_vec_by_indices(
+                                &mut group.presets,
+                                &[from_vec_idx],
+                                to_vec_idx,
+                            ) {
+                                live_sync = true;
+                            }
                         }
                         if let Some((preset_id, step_index)) = insert_step_after {
                             if let Some(target_preset) = group
@@ -18526,26 +18837,11 @@ if supports_move_mouse || show_detection_tuning {
                                 .iter_mut()
                                 .find(|preset| preset.id == preset_id)
                             {
-                                let mut indices = dragged_indices
-                                    .into_iter()
-                                    .filter(|index| *index < target_preset.steps.len())
-                                    .collect::<Vec<_>>();
-                                indices.sort_unstable();
-                                indices.dedup();
-                                if !indices.is_empty() {
-                                    let mut moved_steps = Vec::with_capacity(indices.len());
-                                    for index in indices.iter().rev().copied() {
-                                        moved_steps.push(target_preset.steps.remove(index));
-                                    }
-                                    moved_steps.reverse();
-                                    let removed_before_target =
-                                        indices.iter().filter(|index| **index < to_index).count();
-                                    let insert_at = to_index
-                                        .saturating_sub(removed_before_target)
-                                        .min(target_preset.steps.len());
-                                    for (offset, step) in moved_steps.into_iter().enumerate() {
-                                        target_preset.steps.insert(insert_at + offset, step);
-                                    }
+                                if Self::reorder_vec_by_indices(
+                                    &mut target_preset.steps,
+                                    &dragged_indices,
+                                    to_index,
+                                ) {
                                     live_sync = true;
                                 }
                             }
@@ -18570,6 +18866,28 @@ if supports_move_mouse || show_detection_tuning {
                             });
                         });
                     });
+                    if dragged_visible_group_pos.is_some() {
+                        Self::advance_compact_preview_index(
+                            &mut next_group_compact_preview,
+                            visible_group_indices.len(),
+                            right_drag_pointer_y,
+                            group_card_response.rect.bottom(),
+                            group_is_being_dragged,
+                            &mut group_compact_cursor,
+                            group_active_current_compact,
+                        );
+                    }
+                    if sec_pressed
+                        && !right_drag_popup_open
+                        && pending_right_drag_claim.is_none()
+                        && let Some(press_pos) = right_drag_ptr_pos
+                        && group_card_response.rect.contains(press_pos)
+                    {
+                        pending_right_drag_claim = Some((
+                            MacroRightDragKind::Group { group_id },
+                            press_pos,
+                        ));
+                    }
                     if let Some((group_id, preset_id, step_index, name, command, use_powershell)) =
                         pending_custom_preset_save.take()
                         && let Some(saved_id) = self.upsert_custom_preset_from_step_draft_values(
@@ -19016,6 +19334,53 @@ if supports_move_mouse || show_detection_tuning {
         }
     }
 
+        if let Some(drag_vis_pos) = dragged_visible_group_pos {
+            let total_vis = visible_group_indices.len();
+            let compact_len = total_vis.saturating_sub(1);
+            let resolved_compact = next_group_compact_preview.min(compact_len);
+            if let Some(state) = right_drag_state.as_mut() {
+                state.preview_compact_index = Some(resolved_compact);
+            }
+            let drop_vis_pos =
+                Self::expand_compact_drag_drop_index(total_vis, resolved_compact, &[drag_vis_pos]);
+            if sec_released {
+                let from_vec_idx = visible_group_indices[drag_vis_pos];
+                let to_vec_idx = if drop_vis_pos < total_vis {
+                    visible_group_indices[drop_vis_pos]
+                } else {
+                    visible_group_indices
+                        .last()
+                        .map(|i| i + 1)
+                        .unwrap_or(self.state.macro_groups.len())
+                };
+                move_group_to_indices = Some((from_vec_idx, to_vec_idx));
+            }
+        }
+        if let Some((from_vec_idx, to_vec_idx)) = move_group_to_indices {
+            if Self::reorder_vec_by_indices(&mut self.state.macro_groups, &[from_vec_idx], to_vec_idx) {
+                macro_presets_persist_requested = true;
+            }
+        }
+        if sec_released || !sec_down {
+            ui.ctx().data_mut(|d| d.remove::<MacroRightDragState>(right_drag_id));
+        } else if let Some((kind, origin)) = pending_right_drag_claim {
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(
+                    right_drag_id,
+                    MacroRightDragState {
+                        kind,
+                        origin,
+                        active: false,
+                        preview_compact_index: None,
+                    },
+                );
+            });
+        } else if let Some(state) = right_drag_state {
+            ui.ctx().data_mut(|d| d.insert_temp(right_drag_id, state));
+        } else {
+            ui.ctx().data_mut(|d| d.remove::<MacroRightDragState>(right_drag_id));
+        }
+
         if let Some(group_id) = deferred_paste_groups_after {
             self.paste_macro_groups_after(group_id);
         }
@@ -19097,7 +19462,13 @@ if supports_move_mouse || show_detection_tuning {
         if let Some(group_id) = ui.ctx().data_mut(|data| {
             data.remove_temp::<u32>(egui::Id::new("pending_macro_group_share_import_after"))
         }) {
-            self.import_macro_group_from_clipboard(None, Some(group_id));
+            let folder_id = self
+                .state
+                .macro_groups
+                .iter()
+                .find(|group| group.id == group_id)
+                .and_then(|group| group.folder_id);
+            self.import_macro_group_from_clipboard(folder_id, Some(group_id));
         }
         if let Some(folder_id) = enter_folder_id {
             self.set_active_macro_folder_view(Some(folder_id));
@@ -26809,6 +27180,31 @@ movups [rcx+00000088],xmm0
         CrosshairApp::collect_vars_from_step(&step, &mut vars2);
         assert_eq!(vars2.len(), 1);
         assert!(vars2.contains("custom_val"));
+    }
+
+    #[test]
+    fn right_drag_visual_order_and_reorder_helpers() {
+        // Reordering single group/preset item from index 2 -> compact slot 0 (move up)
+        let (order, cur_compact, drop_idx) =
+            CrosshairApp::compute_compact_visual_order(4, &[2], Some(0));
+        assert_eq!(order, vec![2, 0, 1, 3]);
+        assert_eq!(cur_compact, 0);
+        assert_eq!(drop_idx, 0);
+
+        let mut items = vec!["A", "B", "C", "D"];
+        assert!(CrosshairApp::reorder_vec_by_indices(&mut items, &[2], drop_idx));
+        assert_eq!(items, vec!["C", "A", "B", "D"]);
+
+        // Reordering down from index 0 -> compact slot 2 (after C and D? compact items [1,2,3], slot 2 -> boundary 3)
+        let (order2, cur_compact2, drop_idx2) =
+            CrosshairApp::compute_compact_visual_order(4, &[0], Some(2));
+        assert_eq!(order2, vec![1, 2, 0, 3]);
+        assert_eq!(cur_compact2, 2);
+        assert_eq!(drop_idx2, 3);
+
+        let mut items2 = vec!["A", "B", "C", "D"];
+        assert!(CrosshairApp::reorder_vec_by_indices(&mut items2, &[0], drop_idx2));
+        assert_eq!(items2, vec!["B", "C", "A", "D"]);
     }
 }
 

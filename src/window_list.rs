@@ -779,32 +779,34 @@ mod windows_impl {
         clean_target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
-        let trimmed_title = title.trim();
-        let trimmed_target = clean_target.trim();
+        let title_owned = clean_invisible_chars(title);
+        let clean_target_owned = clean_invisible_chars(clean_target);
+        let trimmed_title = title_owned.trim();
+        let trimmed_target = clean_target_owned.trim();
         if trimmed_title.is_empty() || trimmed_target.is_empty() {
             return false;
         }
 
-        let is_specific_selector = looks_like_window_selector(clean_target);
-        let base = selector_base_title(clean_target);
+        let is_specific_selector = looks_like_window_selector(trimmed_target);
+        let base = selector_base_title(trimmed_target);
 
         let mut matches = if match_duplicate_window_titles {
-            title == base || (!selector.is_empty() && selector == clean_target)
+            trimmed_title == base || (!selector.is_empty() && selector == trimmed_target)
         } else if is_specific_selector {
-            !selector.is_empty() && selector == clean_target
+            !selector.is_empty() && selector == trimmed_target
         } else {
-            title == clean_target
-                || title.eq_ignore_ascii_case(clean_target)
-                || (!selector.is_empty() && selector == clean_target)
+            trimmed_title == trimmed_target
+                || trimmed_title.eq_ignore_ascii_case(trimmed_target)
+                || (!selector.is_empty() && selector == trimmed_target)
         };
 
         if !matches && !is_specific_selector {
-            matches = matches_browser_suffix(clean_target, title);
+            matches = matches_browser_suffix(trimmed_target, trimmed_title);
         }
 
         if !matches && !is_specific_selector {
-            if let Some((prefix, rest)) = title.split_at_checked(clean_target.len()) {
-                if prefix.eq_ignore_ascii_case(clean_target)
+            if let Some((prefix, rest)) = trimmed_title.split_at_checked(trimmed_target.len()) {
+                if prefix.eq_ignore_ascii_case(trimmed_target)
                     && (rest.starts_with(" - ")
                         || rest.starts_with(" — ")
                         || rest.starts_with(" (")
@@ -816,8 +818,8 @@ mod windows_impl {
         }
 
         if !matches && !is_specific_selector {
-            let simplified_cand = simplify_window_title(title);
-            let simplified_target = simplify_window_title(clean_target);
+            let simplified_cand = simplify_window_title(trimmed_title);
+            let simplified_target = simplify_window_title(trimmed_target);
             if !simplified_cand.is_empty()
                 && is_known_app_simplified_title(&simplified_cand)
                 && simplified_cand.eq_ignore_ascii_case(&simplified_target)
@@ -993,8 +995,20 @@ mod windows_impl {
         )
     }
 
-    fn looks_like_window_selector(target: &str) -> bool {
+    pub fn looks_like_window_selector(target: &str) -> bool {
         target.ends_with(')') && target.contains(" (0x")
+    }
+
+    pub fn is_specific_selector_hwnd_alive(target: &str) -> bool {
+        let clean = strip_rule_suffix(target);
+        if let Some(prefix) = clean.strip_suffix(')')
+            && let Some((_, hex)) = prefix.rsplit_once(" (0x")
+            && let Ok(val) = usize::from_str_radix(hex, 16)
+        {
+            let hwnd = HWND(val as *mut _);
+            return exact_selector_window_matches(hwnd, clean);
+        }
+        false
     }
 
     pub fn selector_base_title(target: &str) -> &str {
@@ -2528,6 +2542,24 @@ mod tests {
                 130, 140, 150, 255,
             ]
         );
+    }
+
+    #[test]
+    fn test_window_matches_candidate_title_cleans_invisible_chars() {
+        assert!(window_matches_candidate_title(
+            "Android\u{200B} 2",
+            "Android 2 (0x100)",
+            "Android 2",
+            false,
+        ));
+        assert!(window_matches_candidate_title(
+            "Android 2",
+            "Android 2 (0x100)",
+            "Android\u{FEFF} 2",
+            false,
+        ));
+        assert!(looks_like_window_selector("Android 2 (0x1A2B)"));
+        assert!(!looks_like_window_selector("Android 2"));
     }
 }
 

@@ -121,8 +121,24 @@ impl CrosshairApp {
         enabled: bool,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> (R, egui::Response) {
+        Self::show_preset_card_with_drag(ui, enabled, false, add_contents)
+    }
+
+    pub(crate) fn show_preset_card_with_drag<R>(
+        ui: &mut egui::Ui,
+        enabled: bool,
+        is_dragged: bool,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
-        let res = Self::preset_frame(ui, enabled).show(ui, |ui| {
+        let frame = if is_dragged {
+            egui::Frame::group(ui.style())
+                .fill(Color32::from_rgba_unmultiplied(120, 235, 190, 95))
+                .stroke(egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220)))
+        } else {
+            Self::preset_frame(ui, enabled)
+        };
+        let res = frame.show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             let previous = ui.visuals().override_text_color;
             if dark_mode {
@@ -134,7 +150,9 @@ impl CrosshairApp {
             output
         });
 
-        Self::paint_card_hover(ui, &res.response, dark_mode);
+        if !is_dragged {
+            Self::paint_card_hover(ui, &res.response, dark_mode);
+        }
         (res.inner, res.response)
     }
 
@@ -170,30 +188,54 @@ impl CrosshairApp {
         window_focus_trigger: bool,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
+        Self::show_macro_preset_card_with_drag(
+            ui,
+            group_enabled,
+            preset_enabled,
+            window_focus_trigger,
+            false,
+            add_contents,
+        )
+        .0
+    }
+
+    pub(crate) fn show_macro_preset_card_with_drag<R>(
+        ui: &mut egui::Ui,
+        group_enabled: bool,
+        preset_enabled: bool,
+        window_focus_trigger: bool,
+        is_dragged: bool,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
-        let (fill, stroke_color) = if group_enabled {
+        let (fill, stroke) = if is_dragged {
+            (
+                Color32::from_rgba_unmultiplied(120, 235, 190, 95),
+                egui::Stroke::new(2.5, Color32::from_rgb(170, 255, 220)),
+            )
+        } else if group_enabled {
             if preset_enabled {
                 if window_focus_trigger {
                     if dark_mode {
                         (
                             Color32::from_rgba_premultiplied(32, 76, 106, 132),
-                            Color32::from_rgb(116, 204, 255),
+                            egui::Stroke::new(1.0, Color32::from_rgb(116, 204, 255)),
                         )
                     } else {
                         (
                             Color32::from_rgb(218, 236, 248),
-                            Color32::from_rgb(76, 146, 204),
+                            egui::Stroke::new(1.0, Color32::from_rgb(76, 146, 204)),
                         )
                     }
                 } else if dark_mode {
                     (
                         Color32::from_rgba_premultiplied(32, 92, 52, 120),
-                        Color32::from_rgb(108, 224, 148),
+                        egui::Stroke::new(1.0, Color32::from_rgb(108, 224, 148)),
                     )
                 } else {
                     (
                         Color32::from_rgb(198, 232, 210),
-                        Color32::from_rgb(112, 204, 142),
+                        egui::Stroke::new(1.0, Color32::from_rgb(112, 204, 142)),
                     )
                 }
             } else {
@@ -203,11 +245,14 @@ impl CrosshairApp {
                     } else {
                         Color32::from_rgb(250, 251, 252)
                     },
-                    if dark_mode {
-                        ui.visuals().widgets.noninteractive.bg_stroke.color
-                    } else {
-                        Color32::from_rgb(214, 222, 230)
-                    },
+                    egui::Stroke::new(
+                        1.0,
+                        if dark_mode {
+                            ui.visuals().widgets.noninteractive.bg_stroke.color
+                        } else {
+                            Color32::from_rgb(214, 222, 230)
+                        },
+                    ),
                 )
             }
         } else if preset_enabled {
@@ -215,23 +260,23 @@ impl CrosshairApp {
                 if dark_mode {
                     (
                         Color32::from_rgba_premultiplied(22, 54, 78, 72),
-                        Color32::from_rgb(78, 132, 176),
+                        egui::Stroke::new(1.0, Color32::from_rgb(78, 132, 176)),
                     )
                 } else {
                     (
                         Color32::from_rgb(232, 240, 247),
-                        Color32::from_rgb(118, 152, 184),
+                        egui::Stroke::new(1.0, Color32::from_rgb(118, 152, 184)),
                     )
                 }
             } else if dark_mode {
                 (
                     Color32::from_rgba_premultiplied(25, 65, 40, 60),
-                    Color32::from_rgb(60, 120, 85),
+                    egui::Stroke::new(1.0, Color32::from_rgb(60, 120, 85)),
                 )
             } else {
                 (
                     Color32::from_rgb(236, 242, 238),
-                    Color32::from_rgb(180, 198, 188),
+                    egui::Stroke::new(1.0, Color32::from_rgb(180, 198, 188)),
                 )
             }
         } else {
@@ -241,16 +286,19 @@ impl CrosshairApp {
                 } else {
                     Color32::from_rgb(250, 251, 252)
                 },
-                if dark_mode {
-                    ui.visuals().widgets.noninteractive.bg_stroke.color
-                } else {
-                    Color32::from_rgb(214, 222, 230)
-                },
+                egui::Stroke::new(
+                    1.0,
+                    if dark_mode {
+                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                    } else {
+                        Color32::from_rgb(214, 222, 230)
+                    },
+                ),
             )
         };
         let res = egui::Frame::group(ui.style())
             .fill(fill)
-            .stroke(egui::Stroke::new(1.0, stroke_color))
+            .stroke(stroke)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 let previous = ui.visuals().override_text_color;
@@ -263,8 +311,10 @@ impl CrosshairApp {
                 output
             });
 
-        Self::paint_card_hover(ui, &res.response, dark_mode);
-        res.inner
+        if !is_dragged {
+            Self::paint_card_hover(ui, &res.response, dark_mode);
+        }
+        (res.inner, res.response)
     }
 
     pub(crate) fn hover_if(response: egui::Response, enabled: bool, text: &str) -> egui::Response {
