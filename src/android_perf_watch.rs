@@ -46,6 +46,11 @@ pub struct CapturedAndroidInstrMeta {
 static CAPTURED_META: OnceLock<Mutex<HashMap<usize, CapturedAndroidInstrMeta>>> = OnceLock::new();
 static CAPTURED_GUEST_VALUES: OnceLock<Mutex<HashMap<usize, [u8; 8]>>> = OnceLock::new();
 static CAPTURED_HEAP_DELTA: OnceLock<Mutex<Option<isize>>> = OnceLock::new();
+static DEPLOYED_TARGETS: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+
+fn deployed_targets() -> &'static Mutex<std::collections::HashSet<String>> {
+    DEPLOYED_TARGETS.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
 
 fn meta_map() -> &'static Mutex<HashMap<usize, CapturedAndroidInstrMeta>> {
     CAPTURED_META.get_or_init(|| Mutex::new(HashMap::new()))
@@ -147,6 +152,9 @@ pub fn ensure_adb_root(adb: &Path, target: &str) {
 }
 
 pub fn ensure_mn_watch_deployed(adb: &Path, target: &str) -> Result<String, String> {
+    if deployed_targets().lock().contains(target) {
+        return Ok(REMOTE_MN_WATCH.to_string());
+    }
     ensure_adb_root(adb, target);
     let size_cmd = format!(
         "stat -c %s {REMOTE_MN_WATCH} 2>/dev/null || wc -c < {REMOTE_MN_WATCH} 2>/dev/null || echo 0"
@@ -171,7 +179,79 @@ pub fn ensure_mn_watch_deployed(adb: &Path, target: &str) -> Result<String, Stri
         );
     }
 
+    deployed_targets().lock().insert(target.to_string());
     Ok(REMOTE_MN_WATCH.to_string())
+}
+
+pub(crate) fn aob_signature_byte_len(aob_signature: &str) -> usize {
+    aob_signature.split_whitespace().filter(|t| !t.is_empty()).count()
+}
+
+pub(crate) fn aob_matches_bytes(aob_signature: &str, bytes: &[u8]) -> bool {
+    let tokens: Vec<&str> = aob_signature
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .collect();
+    if tokens.is_empty() || bytes.len() < tokens.len() {
+        return false;
+    }
+    tokens.iter().zip(bytes.iter()).all(|(tok, &b)| {
+        if *tok == "?" || *tok == "??" || *tok == "**" {
+            return true;
+        }
+        u8::from_str_radix(tok, 16).is_ok_and(|expected| expected == b)
+    })
+}
+
+/// Reads guest process bytes via `mn_watch read` (`process_vm_readv` / `/proc/<pid>/mem`).
+pub fn read_guest_memory_bytes(
+    adb_path: &Path,
+    adb_target: &str,
+    android_pid: u32,
+    gva: usize,
+    len: usize,
+) -> Option<Vec<u8>> {
+    if len == 0 || gva == 0 {
+        return None;
+    }
+    ensure_mn_watch_deployed(adb_path, adb_target).ok()?;
+    let cmd = format!("{REMOTE_MN_WATCH} read {android_pid} 0x{gva:x} {len}");
+    let out = match adb_shell_root(adb_path, adb_target, &cmd) {
+        Ok(o) => o,
+        Err(_) => {
+            deployed_targets().lock().remove(adb_target);
+            return None;
+        }
+    };
+    if out.contains("not found") || out.contains("No such file") {
+        deployed_targets().lock().remove(adb_target);
+        return None;
+    }
+    out.lines()
+        .find_map(|l| l.trim().strip_prefix("BYTES "))
+        .and_then(parse_hex_bytes)
+        .filter(|b| b.len() >= len)
+}
+
+/// Translates an Android guest virtual address (GVA) to a readable Windows host address (HVA)
+/// using either the live heap delta or Android Bridge ELF delta when possible.
+pub fn resolve_guest_to_host_if_readable(
+    host_pid: u32,
+    gva: usize,
+    bridge_delta: Option<isize>,
+) -> Option<usize> {
+    for d in [lookup_heap_delta(), bridge_delta].into_iter().flatten() {
+        if d == 0 {
+            continue;
+        }
+        if let Some(hva) = gva.checked_add_signed(d)
+            && hva > 0x10000
+            && read_memory_bytes(host_pid, hva, 4).is_ok()
+        {
+            return Some(hva);
+        }
+    }
+    None
 }
 
 fn parse_hex_u64(s: &str) -> Option<u64> {
@@ -784,21 +864,31 @@ impl AndroidPerfCodeAccessWatch {
                 return;
             }
 
-            // 1. Resolve live inst_gva (via direct read if valid, or via AOB scan in rwx/rx guest memory)
+            // 1. Resolve live inst_gva (verify exact cached address against AOB first, then fall back to AOB scan)
             let is_houdini_jit = module_name == "[houdini_jit]" || module_name == "[dynamic]";
             let mut inst_gva = 0usize;
-            if !is_houdini_jit && initial_inst_gva > 0x10000 {
-                let r_cmd = format!("{REMOTE_MN_WATCH} read {android_pid} 0x{initial_inst_gva:x} 32");
-                if let Ok(out) = adb_shell_root(&adb_path, &adb_target, &r_cmd) {
-                    if let Some(hex) = out.lines().find_map(|l| l.trim().strip_prefix("BYTES ")) {
-                        if let Some(bytes) = parse_hex_bytes(hex) {
-                            let mut dec = Decoder::with_ip(64, &bytes, initial_inst_gva as u64, DecoderOptions::NONE);
-                            let instr = dec.decode();
-                            if !instr.is_invalid()
-                                && (0..instr.op_count()).any(|k| instr.op_kind(k) == OpKind::Memory)
-                            {
-                                inst_gva = initial_inst_gva;
-                            }
+            if initial_inst_gva > 0x10000 {
+                let aob_ok = if !aob_signature.is_empty() {
+                    let aob_len = aob_signature_byte_len(&aob_signature);
+                    if let Some(aob_start) = initial_inst_gva.checked_sub(aob_target_offset) {
+                        read_guest_memory_bytes(&adb_path, &adb_target, android_pid, aob_start, aob_len)
+                            .is_some_and(|b| aob_matches_bytes(&aob_signature, &b))
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                };
+                if aob_ok {
+                    if let Some(bytes) =
+                        read_guest_memory_bytes(&adb_path, &adb_target, android_pid, initial_inst_gva, 32)
+                    {
+                        let mut dec = Decoder::with_ip(64, &bytes, initial_inst_gva as u64, DecoderOptions::NONE);
+                        let instr = dec.decode();
+                        if !instr.is_invalid()
+                            && (0..instr.op_count()).any(|k| instr.op_kind(k) == OpKind::Memory)
+                        {
+                            inst_gva = initial_inst_gva;
                         }
                     }
                 }
@@ -1035,5 +1125,14 @@ mod tests {
         assert_eq!(register_to_perf_idx(Register::R8), Some(9));
         assert_eq!(register_to_perf_idx(Register::R13), Some(14));
         assert_eq!(register_to_perf_idx(Register::R15), Some(16));
+    }
+
+    #[test]
+    fn test_aob_matches_bytes() {
+        let bytes = [0xC5, 0xFA, 0x6F, 0x0C, 0x1A, 0x90];
+        assert!(aob_matches_bytes("C5 FA 6F 0C ?? 90", &bytes));
+        assert!(!aob_matches_bytes("C5 FA 6F 0D ?? 90", &bytes));
+        assert!(!aob_matches_bytes("C5 FA 6F 0C 1A 90 00", &bytes));
+        assert_eq!(aob_signature_byte_len("C5 FA ?? 0C"), 4);
     }
 }

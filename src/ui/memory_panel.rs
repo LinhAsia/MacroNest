@@ -7000,6 +7000,17 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         self.memory_panel.android_bridge.status = format!("Scan complete: found {count} active emulator ports");
     }
 
+    fn sync_overlay_android_bridge(&self) {
+        #[cfg(windows)]
+        crate::overlay::set_android_bridge_context(crate::overlay::AndroidBridgeMacroContext {
+            is_connected: self.memory_panel.android_bridge.is_connected,
+            adb_path: self.memory_panel.android_bridge.adb_path.clone(),
+            selected_target: self.memory_panel.android_bridge.selected_target.clone(),
+            selected_pid: self.memory_panel.android_bridge.selected_pid,
+            delta: self.memory_panel.android_bridge.delta,
+        });
+    }
+
     fn android_connect(&mut self) {
         let adb = match &self.memory_panel.android_bridge.adb_path {
             Some(p) => p.clone(),
@@ -7061,6 +7072,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         self.memory_panel.android_bridge.host_base_address = None;
         self.memory_panel.android_bridge.delta = None;
         self.memory_panel.android_bridge.status = "Disconnected".to_string();
+        self.sync_overlay_android_bridge();
     }
 
     fn android_refresh_processes(&mut self) {
@@ -7101,6 +7113,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         self.android_load_maps(pid);
                     }
                 }
+                self.sync_overlay_android_bridge();
             }
             Err(err) => {
                 self.memory_panel.android_bridge.status = format!("Failed to list processes: {err}");
@@ -7247,6 +7260,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 self.sync_android_module_to_scan_modules();
             }
         }
+        self.sync_overlay_android_bridge();
     }
 
     fn sync_android_module_to_scan_modules(&mut self) {

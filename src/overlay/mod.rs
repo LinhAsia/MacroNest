@@ -282,8 +282,38 @@ mod windows_overlay {
     static MEMORY_TRIGGER_EVENTS: Lazy<Mutex<Vec<HotkeyBinding>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
 
+    #[derive(Clone, Default)]
+    pub(crate) struct AndroidBridgeMacroContext {
+        pub is_connected: bool,
+        pub adb_path: Option<std::path::PathBuf>,
+        pub selected_target: String,
+        pub selected_pid: Option<u32>,
+        pub delta: Option<isize>,
+    }
+
+    static ANDROID_BRIDGE_CONTEXT: Lazy<Mutex<AndroidBridgeMacroContext>> =
+        Lazy::new(|| Mutex::new(AndroidBridgeMacroContext::default()));
+
+    pub(crate) fn set_android_bridge_context(ctx: AndroidBridgeMacroContext) {
+        *ANDROID_BRIDGE_CONTEXT.lock() = ctx;
+    }
+
+    enum ActiveInstructionScanHandle {
+        Windows(crate::memory_debugger::debugger::AccessWatch),
+        AndroidPerf(crate::android_perf_watch::AndroidPerfCodeAccessWatch),
+    }
+
+    impl ActiveInstructionScanHandle {
+        fn stop(&mut self) {
+            match self {
+                Self::Windows(w) => w.stop(),
+                Self::AndroidPerf(w) => w.stop(),
+            }
+        }
+    }
+
     struct ActiveInstructionScanState {
-        stop_handle: Option<crate::memory_debugger::debugger::AccessWatch>,
+        stop_handle: Option<ActiveInstructionScanHandle>,
         stop_flag: Arc<AtomicBool>,
     }
 
@@ -33726,6 +33756,74 @@ mod windows_overlay {
         parse_memory_address(&text).map(|address| (pid, address))
     }
 
+    fn read_macro_memory_value(
+        pid: u32,
+        address: usize,
+        value_type: crate::model::MemoryValueType,
+    ) -> Option<String> {
+        if let Ok(v) = crate::process_memory::read_value(pid, address, value_type) {
+            return Some(v);
+        }
+        let (android_pid, adb_path, adb_target, delta) =
+            ensure_android_bridge_context_for_macro(pid, false)?;
+        if let Some(hva) = crate::android_perf_watch::resolve_guest_to_host_if_readable(pid, address, delta) {
+            if let Ok(v) = crate::process_memory::read_value(pid, hva, value_type) {
+                return Some(v);
+            }
+        }
+        let width = crate::process_memory::value_type_byte_width(value_type);
+        let bytes = crate::android_perf_watch::read_guest_memory_bytes(
+            &adb_path,
+            &adb_target,
+            android_pid,
+            address,
+            width,
+        )?;
+        crate::process_memory::decode_value_from_bytes(&bytes, value_type)
+    }
+
+    fn read_macro_memory_bytes_raw(pid: u32, address: usize, width: usize) -> Option<Vec<u8>> {
+        if let Ok(orig) = crate::process_memory::read_memory_bytes(pid, address, width) {
+            return Some(orig);
+        }
+        let (android_pid, adb_path, adb_target, delta) =
+            ensure_android_bridge_context_for_macro(pid, false)?;
+        if let Some(hva) = crate::android_perf_watch::resolve_guest_to_host_if_readable(pid, address, delta) {
+            if let Ok(orig) = crate::process_memory::read_memory_bytes(pid, hva, width) {
+                return Some(orig);
+            }
+        }
+        crate::android_perf_watch::read_guest_memory_bytes(
+            &adb_path,
+            &adb_target,
+            android_pid,
+            address,
+            width,
+        )
+    }
+
+    fn write_macro_memory_bytes(pid: u32, address: usize, bytes: &[u8]) {
+        if crate::process_memory::write_code_bytes(pid, address, bytes).is_ok() {
+            return;
+        }
+        if let Some((android_pid, adb_path, adb_target, delta)) =
+            ensure_android_bridge_context_for_macro(pid, false)
+        {
+            if let Some(hva) = crate::android_perf_watch::resolve_guest_to_host_if_readable(pid, address, delta) {
+                if crate::process_memory::write_code_bytes(pid, hva, bytes).is_ok() {
+                    return;
+                }
+            }
+            let _ = crate::android_bridge::write_android_memory_bytes(
+                &adb_path,
+                &adb_target,
+                android_pid,
+                address,
+                bytes,
+            );
+        }
+    }
+
     fn execute_read_memory_action_step(step: &MacroStep) {
         let target_var = step.if_variable_name.trim();
         if target_var.is_empty() {
@@ -33736,7 +33834,7 @@ mod windows_overlay {
         let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
         let value =
             resolve_memory_action_target(target_pid, &raw_key, true).and_then(|(pid, address)| {
-                crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
+                read_macro_memory_value(pid, address, step.memory_value_type)
             });
         if let Some(value) = value {
             if let Ok(value) = value.parse::<f64>() {
@@ -33839,12 +33937,12 @@ mod windows_overlay {
                 let mut patches = ACTIVE_MEMORY_PATCHES.lock();
                 let list = patches.entry(id).or_default();
                 if !list.iter().any(|(p, a, _)| *p == pid && *a == address) {
-                    if let Ok(orig) = crate::process_memory::read_memory_bytes(pid, address, bytes.len()) {
+                    if let Some(orig) = read_macro_memory_bytes_raw(pid, address, bytes.len()) {
                         list.push((pid, address, orig));
                     }
                 }
             }
-            let _ = crate::process_memory::write_code_bytes(pid, address, &bytes);
+            write_macro_memory_bytes(pid, address, &bytes);
             return;
         }
 
@@ -33945,7 +34043,7 @@ mod windows_overlay {
             let mut patches = ACTIVE_MEMORY_PATCHES.lock();
             let list = patches.entry(id).or_default();
             if !list.iter().any(|(p, a, _)| *p == pid && *a == address) {
-                if let Ok(orig) = crate::process_memory::read_memory_bytes(pid, address, width) {
+                if let Some(orig) = read_macro_memory_bytes_raw(pid, address, width) {
                     list.push((pid, address, orig));
                 }
             }
@@ -33953,7 +34051,7 @@ mod windows_overlay {
 
         let width = value.value_type().width();
         if crate::process_memory::write_scan_value(pid, address, value).is_err() {
-            let _ = crate::process_memory::write_code_bytes(pid, address, &value.bytes()[..width]);
+            write_macro_memory_bytes(pid, address, &value.bytes()[..width]);
         }
     }
 
@@ -34174,33 +34272,199 @@ mod windows_overlay {
         }
     }
 
-    fn resolve_instruction_address(pid: u32, key: &str) -> Option<usize> {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(crate) struct ResolvedInstructionTarget {
+        pub address: usize,
+        pub module_name: String,
+        pub aob_signature: String,
+        pub aob_target_offset: usize,
+        pub is_android: bool,
+    }
+
+    pub(crate) fn is_emulator_process_name(name: &str) -> bool {
+        let lower = name.to_ascii_lowercase();
+        [
+            "mumunxdevice",
+            "mumunxmain",
+            "mumuplayer",
+            "hd-player",
+            "dnplayer",
+            "nox",
+            "memu",
+        ]
+        .iter()
+        .any(|emu| lower.contains(emu))
+    }
+
+    fn is_emulator_host_pid(pid: u32) -> bool {
+        if pid == 0 {
+            return false;
+        }
+        crate::memory_debugger::debugger::list_processes()
+            .ok()
+            .is_some_and(|list| {
+                list.into_iter()
+                    .any(|(p, exe)| p == pid && is_emulator_process_name(&exe))
+            })
+    }
+
+    pub(crate) fn is_android_code_module(module: &str, host_is_emulator: bool) -> bool {
+        let m = module.trim();
+        m.eq_ignore_ascii_case("[houdini_jit]")
+            || m.to_ascii_lowercase().starts_with("android::")
+            || (host_is_emulator && m.eq_ignore_ascii_case("[dynamic]"))
+    }
+
+    fn ensure_android_bridge_context_for_macro(
+        host_pid: u32,
+        force_android: bool,
+    ) -> Option<(u32, std::path::PathBuf, String, Option<isize>)> {
+        let ctx = ANDROID_BRIDGE_CONTEXT.lock().clone();
+        if ctx.is_connected
+            && let (Some(android_pid), Some(adb_path)) = (ctx.selected_pid, ctx.adb_path.clone())
+            && !ctx.selected_target.is_empty()
+        {
+            if !force_android {
+                return Some((android_pid, adb_path, ctx.selected_target, ctx.delta));
+            }
+            // Verify Android game PID is still alive (user may have restarted the game cleanly).
+            let alive = crate::android_perf_watch::read_guest_memory_bytes(
+                &adb_path,
+                &ctx.selected_target,
+                android_pid,
+                0x400000,
+                1,
+            )
+            .is_some()
+                || crate::android_bridge::list_android_processes(&adb_path, &ctx.selected_target)
+                    .ok()
+                    .is_some_and(|procs| procs.iter().any(|p| p.pid == android_pid));
+            if alive {
+                return Some((android_pid, adb_path, ctx.selected_target, ctx.delta));
+            }
+        }
+
+        if !force_android && !ctx.is_connected && !is_emulator_host_pid(host_pid) {
+            return None;
+        }
+
+        let adb_path = ctx
+            .adb_path
+            .or_else(crate::android_bridge::find_adb_executable)?;
+        let target = if !ctx.selected_target.is_empty() {
+            ctx.selected_target
+        } else {
+            let emus = crate::android_bridge::probe_running_emulators();
+            emus.first()?.target.clone()
+        };
+        let _ = crate::android_bridge::adb_connect(&adb_path, &target);
+        crate::android_perf_watch::ensure_adb_root(&adb_path, &target);
+        let procs = crate::android_bridge::list_android_processes(&adb_path, &target).ok()?;
+        let android_pid = procs
+            .iter()
+            .find(|p| p.is_user_app)
+            .or_else(|| procs.first())?
+            .pid;
+
+        *ANDROID_BRIDGE_CONTEXT.lock() = AndroidBridgeMacroContext {
+            is_connected: true,
+            adb_path: Some(adb_path.clone()),
+            selected_target: target.clone(),
+            selected_pid: Some(android_pid),
+            delta: ctx.delta,
+        };
+        Some((android_pid, adb_path, target, ctx.delta))
+    }
+
+    fn resolve_android_module_gva(
+        adb_path: &std::path::Path,
+        adb_target: &str,
+        android_pid: u32,
+        module: &str,
+        offset: usize,
+    ) -> usize {
+        if let Some(mod_name) = module
+            .trim()
+            .strip_prefix("Android::")
+            .or_else(|| module.trim().strip_prefix("android::"))
+        {
+            if let Ok(mods) = crate::android_bridge::get_android_memory_maps(adb_path, adb_target, android_pid) {
+                if let Some(m) = mods
+                    .iter()
+                    .find(|m| m.name.eq_ignore_ascii_case(mod_name.trim()))
+                {
+                    return m.base_address.saturating_add(offset);
+                }
+            }
+        }
+        offset
+    }
+
+    pub(crate) fn resolve_instruction_target(pid: u32, key: &str) -> Option<ResolvedInstructionTarget> {
         let key = key.trim().trim_matches('"').trim_matches('\'');
+        let bridge_connected = ANDROID_BRIDGE_CONTEXT.lock().is_connected;
+        let host_is_emu = bridge_connected || is_emulator_host_pid(pid);
+
         if let Some(alias) = key.strip_prefix('@') {
             let alias = alias.trim();
             if let Some(code) = MEMORY_CODE_ENTRIES
                 .lock()
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(alias))
+                .cloned()
             {
-                if let Ok(addr) =
-                    crate::memory_debugger::debugger::resolve_module_offset(pid, &code.module, code.offset)
+                if is_android_code_module(&code.module, host_is_emu) {
+                    return Some(ResolvedInstructionTarget {
+                        address: code.offset,
+                        module_name: code.module,
+                        aob_signature: code.aob_signature,
+                        aob_target_offset: code.aob_target_offset,
+                        is_android: true,
+                    });
+                }
+                if pid != 0
+                    && let Ok(addr) =
+                        crate::memory_debugger::debugger::resolve_module_offset(pid, &code.module, code.offset)
                 {
-                    return Some(addr);
+                    return Some(ResolvedInstructionTarget {
+                        address: addr,
+                        module_name: code.module,
+                        aob_signature: code.aob_signature,
+                        aob_target_offset: code.aob_target_offset,
+                        is_android: host_is_emu,
+                    });
                 }
             }
             if let Some(entry) = MEMORY_POINTER_ENTRIES
                 .lock()
                 .iter()
                 .find(|p| p.name.eq_ignore_ascii_case(alias))
+                .cloned()
             {
                 if !entry.code_module.is_empty() {
-                    if let Ok(addr) = crate::memory_debugger::debugger::resolve_module_offset(
-                        pid,
-                        &entry.code_module,
-                        entry.code_offset,
-                    ) {
-                        return Some(addr);
+                    if is_android_code_module(&entry.code_module, host_is_emu) {
+                        return Some(ResolvedInstructionTarget {
+                            address: entry.code_offset,
+                            module_name: entry.code_module,
+                            aob_signature: String::new(),
+                            aob_target_offset: 0,
+                            is_android: true,
+                        });
+                    }
+                    if pid != 0
+                        && let Ok(addr) = crate::memory_debugger::debugger::resolve_module_offset(
+                            pid,
+                            &entry.code_module,
+                            entry.code_offset,
+                        )
+                    {
+                        return Some(ResolvedInstructionTarget {
+                            address: addr,
+                            module_name: entry.code_module,
+                            aob_signature: String::new(),
+                            aob_target_offset: 0,
+                            is_android: host_is_emu,
+                        });
                     }
                 }
             }
@@ -34218,15 +34482,37 @@ mod windows_overlay {
                 )
                 .ok();
                 if let Some(offset) = offset {
-                    if let Ok(addr) =
-                        crate::memory_debugger::debugger::resolve_module_offset(pid, module, offset)
+                    if is_android_code_module(module, host_is_emu) {
+                        return Some(ResolvedInstructionTarget {
+                            address: offset,
+                            module_name: module.to_owned(),
+                            aob_signature: String::new(),
+                            aob_target_offset: 0,
+                            is_android: true,
+                        });
+                    }
+                    if pid != 0
+                        && let Ok(addr) =
+                            crate::memory_debugger::debugger::resolve_module_offset(pid, module, offset)
                     {
-                        return Some(addr);
+                        return Some(ResolvedInstructionTarget {
+                            address: addr,
+                            module_name: module.to_owned(),
+                            aob_signature: String::new(),
+                            aob_target_offset: 0,
+                            is_android: host_is_emu,
+                        });
                     }
                 }
             }
         }
-        parse_memory_address(key)
+        parse_memory_address(key).map(|addr| ResolvedInstructionTarget {
+            address: addr,
+            module_name: String::new(),
+            aob_signature: String::new(),
+            aob_target_offset: 0,
+            is_android: host_is_emu,
+        })
     }
 
     pub(crate) fn execute_stop_instruction_scan_action_step() {
@@ -34239,15 +34525,62 @@ mod windows_overlay {
         }
     }
 
+    fn collect_scan_instruction_events(
+        rx: &std::sync::mpsc::Receiver<crate::memory_debugger::debugger::WatchEvent>,
+        var_name: &str,
+        target_count: usize,
+        timeout_ms: u64,
+        poll_interval: Duration,
+        should_stop: &impl Fn() -> bool,
+    ) {
+        let start = Instant::now();
+        let mut collected = Vec::with_capacity(target_count.min(128));
+        let timeout = if timeout_ms > 0 {
+            Some(Duration::from_millis(timeout_ms))
+        } else {
+            None
+        };
+
+        while !should_stop() && collected.len() < target_count {
+            if let Some(t) = timeout {
+                if start.elapsed() >= t {
+                    break;
+                }
+            }
+            match rx.recv_timeout(poll_interval) {
+                Ok(crate::memory_debugger::debugger::WatchEvent::AccessHit {
+                    data_address,
+                    ..
+                }) => {
+                    if !collected.contains(&data_address) {
+                        collected.push(data_address);
+                        store_scanned_instruction_addresses(var_name, &collected, target_count);
+                    }
+                }
+                Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
+                | Ok(crate::memory_debugger::debugger::WatchEvent::Stopped) => {
+                    break;
+                }
+                Ok(crate::memory_debugger::debugger::WatchEvent::Error(err)) => {
+                    eprintln!("Instruction scan error: {err}");
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn execute_scan_instruction_action_step(step: &MacroStep, preset_id: u32) {
         let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
-        let Some(pid) = target_pid else {
-            return;
-        };
         let raw_key = interpolate_variables(&step.key);
-        let Some(instruction_address) = resolve_instruction_address(pid, &raw_key) else {
+        let lookup_pid = target_pid.unwrap_or(0);
+        let Some(target) = resolve_instruction_target(lookup_pid, &raw_key) else {
             return;
         };
+        if !target.is_android && target_pid.is_none() {
+            return;
+        }
+        let pid = lookup_pid;
 
         let target_count = step.scan_instruction_target_count.max(1);
         let timeout_ms = step.scan_instruction_timeout_ms;
@@ -34256,62 +34589,70 @@ mod windows_overlay {
         execute_stop_instruction_scan_action_step();
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let watch = match crate::memory_debugger::debugger::AccessWatch::start_unique(
-            pid,
-            instruction_address,
-            crate::model::MemoryDebuggerArchitecture::Auto,
-            target_count,
-            move |event| {
-                let _ = tx.send(event);
-            },
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                eprintln!("Failed to start instruction scan: {e}");
+        let watch = if target.is_android {
+            let Some((android_pid, adb_path, adb_target, delta)) =
+                ensure_android_bridge_context_for_macro(pid, true)
+            else {
+                eprintln!("Failed to start Android instruction scan: ADB emulator target not found");
                 return;
+            };
+            let initial_inst_gva = if target.module_name.to_ascii_lowercase().starts_with("android::") {
+                resolve_android_module_gva(
+                    &adb_path,
+                    &adb_target,
+                    android_pid,
+                    &target.module_name,
+                    target.address,
+                )
+            } else if pid != 0
+                && let Some(d) = delta
+                && d != 0
+                && crate::process_memory::read_memory_bytes(pid, target.address, 4).is_ok()
+            {
+                (target.address as isize - d) as usize
+            } else {
+                target.address
+            };
+            ActiveInstructionScanHandle::AndroidPerf(
+                crate::android_perf_watch::AndroidPerfCodeAccessWatch::start(
+                    android_pid,
+                    adb_path,
+                    adb_target,
+                    initial_inst_gva,
+                    target.module_name,
+                    target.aob_signature,
+                    target.aob_target_offset,
+                    tx,
+                ),
+            )
+        } else {
+            match crate::memory_debugger::debugger::AccessWatch::start_unique(
+                pid,
+                target.address,
+                crate::model::MemoryDebuggerArchitecture::Auto,
+                target_count,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            ) {
+                Ok(w) => ActiveInstructionScanHandle::Windows(w),
+                Err(e) => {
+                    eprintln!("Failed to start instruction scan: {e}");
+                    return;
+                }
             }
         };
 
         if step.wait_for_completion {
-            let start = Instant::now();
-            let mut collected = Vec::with_capacity(target_count.min(128));
-            let timeout = if timeout_ms > 0 {
-                Some(Duration::from_millis(timeout_ms))
-            } else {
-                None
-            };
             let mut watch = watch;
-
-            while collected.len() < target_count {
-                if macro_stop_requested(preset_id, false) {
-                    break;
-                }
-                if let Some(t) = timeout {
-                    if start.elapsed() >= t {
-                        break;
-                    }
-                }
-                match rx.recv_timeout(Duration::from_millis(50)) {
-                    Ok(crate::memory_debugger::debugger::WatchEvent::AccessHit {
-                        data_address,
-                        ..
-                    }) => {
-                        if !collected.contains(&data_address) {
-                            collected.push(data_address);
-                            store_scanned_instruction_addresses(&var_name, &collected, target_count);
-                        }
-                    }
-                    Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
-                    | Ok(crate::memory_debugger::debugger::WatchEvent::Stopped) => {
-                        break;
-                    }
-                    Ok(crate::memory_debugger::debugger::WatchEvent::Error(err)) => {
-                        eprintln!("Instruction scan error: {err}");
-                        break;
-                    }
-                    _ => {}
-                }
-            }
+            collect_scan_instruction_events(
+                &rx,
+                &var_name,
+                target_count,
+                timeout_ms,
+                Duration::from_millis(50),
+                &|| macro_stop_requested(preset_id, false),
+            );
             watch.stop();
         } else {
             let stop_flag = Arc::new(AtomicBool::new(false));
@@ -34327,41 +34668,14 @@ mod windows_overlay {
             }
 
             std::thread::spawn(move || {
-                let start = Instant::now();
-                let mut collected = Vec::with_capacity(target_count.min(128));
-                let timeout = if timeout_ms > 0 {
-                    Some(Duration::from_millis(timeout_ms))
-                } else {
-                    None
-                };
-
-                while !stop_flag_clone.load(Ordering::SeqCst) && collected.len() < target_count {
-                    if let Some(t) = timeout {
-                        if start.elapsed() >= t {
-                            break;
-                        }
-                    }
-                    match rx.recv_timeout(Duration::from_millis(100)) {
-                        Ok(crate::memory_debugger::debugger::WatchEvent::AccessHit {
-                            data_address,
-                            ..
-                        }) => {
-                            if !collected.contains(&data_address) {
-                                collected.push(data_address);
-                                store_scanned_instruction_addresses(&var_name_clone, &collected, target_count);
-                            }
-                        }
-                        Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
-                        | Ok(crate::memory_debugger::debugger::WatchEvent::Stopped) => {
-                            break;
-                        }
-                        Ok(crate::memory_debugger::debugger::WatchEvent::Error(err)) => {
-                            eprintln!("Background instruction scan error: {err}");
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
+                collect_scan_instruction_events(
+                    &rx,
+                    &var_name_clone,
+                    target_count,
+                    timeout_ms,
+                    Duration::from_millis(100),
+                    &|| stop_flag_clone.load(Ordering::SeqCst),
+                );
 
                 let mut guard = ACTIVE_INSTRUCTION_SCAN.lock();
                 if let Some(state) = guard.as_mut() {
@@ -42850,6 +43164,63 @@ mod tests {
         apply_macros_master_enabled(true, None);
         assert!(HOOK_STATE.lock().macros_master_enabled);
         assert!(!SUPPRESSED_MACRO_HOTKEYS.lock().contains(&9999));
+    }
+
+    #[test]
+    fn test_resolve_instruction_target_android_code_entries() {
+        let _guard = super::windows_overlay::tests::TEST_MUTEX.lock().unwrap();
+        use super::windows_overlay::{
+            AndroidBridgeMacroContext, is_android_code_module, resolve_instruction_target,
+            set_android_bridge_context, set_memory_code_entries,
+        };
+        use crate::model::MemoryCodeEntry;
+
+        set_android_bridge_context(AndroidBridgeMacroContext::default());
+        set_memory_code_entries(&[
+            MemoryCodeEntry {
+                name: "COC FISH MAIN".to_string(),
+                module: "[houdini_jit]".to_string(),
+                offset: 0x4000_6246_E319,
+                instruction: "vmovdqu xmm1,[rdx+r11]".to_string(),
+                writes: false,
+                aob_signature: "C5 FA 6F 0C 1A".to_string(),
+                aob_target_offset: 0,
+                ..Default::default()
+            },
+            MemoryCodeEntry {
+                name: "IL2CPP HOOK".to_string(),
+                module: "Android::libunity.so".to_string(),
+                offset: 0x635718,
+                instruction: "mov eax,[rax]".to_string(),
+                writes: false,
+                aob_signature: "8B 00 48 83".to_string(),
+                aob_target_offset: 2,
+                ..Default::default()
+            },
+        ]);
+
+        let jit = resolve_instruction_target(0, "@COC FISH MAIN")
+            .expect("should resolve [houdini_jit] code entry without Windows module lookup");
+        assert!(jit.is_android);
+        assert_eq!(jit.address, 0x4000_6246_E319);
+        assert_eq!(jit.module_name, "[houdini_jit]");
+        assert_eq!(jit.aob_signature, "C5 FA 6F 0C 1A");
+
+        let so = resolve_instruction_target(0, "@IL2CPP HOOK")
+            .expect("should resolve Android::libunity.so code entry");
+        assert!(so.is_android);
+        assert_eq!(so.address, 0x635718);
+        assert_eq!(so.aob_target_offset, 2);
+
+        let direct = resolve_instruction_target(0, "[houdini_jit]+400061B0F4BA")
+            .expect("should resolve direct [houdini_jit]+offset");
+        assert!(direct.is_android);
+        assert_eq!(direct.address, 0x4000_61B0_F4BA);
+
+        assert!(!is_android_code_module("[dynamic]", false));
+        assert!(is_android_code_module("[dynamic]", true));
+
+        set_memory_code_entries(&[]);
     }
 }
 

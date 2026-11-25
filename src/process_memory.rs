@@ -5814,14 +5814,34 @@ fn claim_result_slots(total: &AtomicUsize, requested: usize, limit: usize) -> us
     limit.saturating_sub(previous).min(requested)
 }
 
-pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::Result<String> {
-    let mut bytes = [0u8; 8];
-    let width = match value_type {
+pub fn value_type_byte_width(value_type: MemoryValueType) -> usize {
+    match value_type {
         MemoryValueType::I8 | MemoryValueType::Bytes | MemoryValueType::AutoAssembler => 1,
         MemoryValueType::I16 => 2,
         MemoryValueType::I32 | MemoryValueType::F32 => 4,
         MemoryValueType::I64 | MemoryValueType::F64 => 8,
-    };
+    }
+}
+
+pub fn decode_value_from_bytes(bytes: &[u8], value_type: MemoryValueType) -> Option<String> {
+    let width = value_type_byte_width(value_type);
+    if bytes.len() < width {
+        return None;
+    }
+    Some(match value_type {
+        MemoryValueType::I8 => i8::from_le_bytes(bytes[..1].try_into().ok()?).to_string(),
+        MemoryValueType::Bytes | MemoryValueType::AutoAssembler => format!("{:02X}", bytes[0]),
+        MemoryValueType::I16 => i16::from_le_bytes(bytes[..2].try_into().ok()?).to_string(),
+        MemoryValueType::I32 => i32::from_le_bytes(bytes[..4].try_into().ok()?).to_string(),
+        MemoryValueType::F32 => f32::from_le_bytes(bytes[..4].try_into().ok()?).to_string(),
+        MemoryValueType::I64 => i64::from_le_bytes(bytes[..8].try_into().ok()?).to_string(),
+        MemoryValueType::F64 => f64::from_le_bytes(bytes[..8].try_into().ok()?).to_string(),
+    })
+}
+
+pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::Result<String> {
+    let mut bytes = [0u8; 8];
+    let width = value_type_byte_width(value_type);
     let read = with_cached_read_process(pid, |process| process.read(address, &mut bytes[..width]))?;
     if read != width {
         return Err(io::Error::new(
@@ -5830,15 +5850,8 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
         ));
     }
 
-    Ok(match value_type {
-        MemoryValueType::I8 => i8::from_le_bytes(bytes[..1].try_into().unwrap()).to_string(),
-        MemoryValueType::Bytes => format!("{:02X}", bytes[0]),
-        MemoryValueType::AutoAssembler => format!("{:02X}", bytes[0]),
-        MemoryValueType::I16 => i16::from_le_bytes(bytes[..2].try_into().unwrap()).to_string(),
-        MemoryValueType::I32 => i32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
-        MemoryValueType::F32 => f32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
-        MemoryValueType::I64 => i64::from_le_bytes(bytes).to_string(),
-        MemoryValueType::F64 => f64::from_le_bytes(bytes).to_string(),
+    decode_value_from_bytes(&bytes[..width], value_type).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "invalid memory value bytes")
     })
 }
 
