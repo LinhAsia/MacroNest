@@ -30,6 +30,7 @@ const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 const ELFCLASS64: u8 = 2;
 const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 0x3E;
+const EM_AARCH64: u16 = 0xB7;
 const PT_LOAD: u32 = 1;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
@@ -45,6 +46,15 @@ pub struct DiscoveredElfModule {
 /// Scans `pid` memory at 4KB page boundaries for x86_64 ELF64 shared libraries (`\x7fELF\x02\x01\x01`).
 /// Used as a self-contained fallback when ADB / Android Bridge modules are unavailable.
 pub fn discover_x64_elfs_in_process_memory(pid: u32) -> Vec<DiscoveredElfModule> {
+    discover_elfs_by_machine(pid, EM_X86_64, 256 * 1024, 256)
+}
+
+fn discover_elfs_by_machine(
+    pid: u32,
+    want_machine: u16,
+    min_span: usize,
+    max_scan_hits: usize,
+) -> Vec<DiscoveredElfModule> {
     let options = MemoryScanOptions {
         writable: false,
         executable: true,
@@ -59,14 +69,13 @@ pub fn discover_x64_elfs_in_process_memory(pid: u32) -> Vec<DiscoveredElfModule>
         vm_allocation_base: None,
     };
     let progress = Arc::new(AtomicUsize::new(0));
-    let addrs = scan_aob_memory_addresses(
-        pid,
-        "7F 45 4C 46 02 01 01",
-        256,
-        options,
-        progress,
-    )
-    .unwrap_or_default();
+    let m_lo = (want_machine & 0xFF) as u8;
+    let m_hi = (want_machine >> 8) as u8;
+    let pat = format!(
+        "7F 45 4C 46 02 01 01 00 00 00 00 00 00 00 00 00 ?? 00 {m_lo:02X} {m_hi:02X}"
+    );
+    let addrs = scan_aob_memory_addresses(pid, &pat, max_scan_hits, options, progress)
+        .unwrap_or_default();
 
     let mut out = Vec::new();
     for base_hva in addrs {
@@ -81,7 +90,7 @@ pub fn discover_x64_elfs_in_process_memory(pid: u32) -> Vec<DiscoveredElfModule>
         }
         let e_type = u16::from_le_bytes([hdr[16], hdr[17]]);
         let e_machine = u16::from_le_bytes([hdr[18], hdr[19]]);
-        if e_machine != EM_X86_64 || (e_type != ET_DYN && e_type != 2) {
+        if e_machine != want_machine || (e_type != ET_DYN && e_type != 2) {
             continue;
         }
         let e_phoff = u64::from_le_bytes(hdr[32..40].try_into().unwrap_or_default()) as usize;
@@ -112,9 +121,10 @@ pub fn discover_x64_elfs_in_process_memory(pid: u32) -> Vec<DiscoveredElfModule>
             continue;
         }
         let span = max_end.saturating_sub(min_vaddr) as usize;
-        if span >= 256 * 1024 {
+        if span >= min_span {
+            let prefix = if want_machine == EM_AARCH64 { "arm64_elf" } else { "elf" };
             out.push(DiscoveredElfModule {
-                name: format!("elf_0x{:X}.so", base_hva),
+                name: format!("{prefix}_0x{:X}.so", base_hva),
                 base_gva: base_hva,
                 base_hva,
                 size: span,
@@ -971,6 +981,7 @@ pub struct CandidateScanOutcome {
     pub used_elfs: Vec<DiscoveredElfModule>,
     pub cand_offsets: Vec<u32>,
     pub mod_count: usize,
+    pub arm64_game_module: Option<String>,
 }
 
 fn pointer_into_modules(ptr_val: usize, mods: &[(String, usize, usize, usize)], delta: isize) -> bool {
@@ -1118,13 +1129,34 @@ pub fn scan_verified_xref_candidates(
     all_regions: &[AndroidMemoryRegion],
     host_modules: &[(String, usize, usize)],
 ) -> CandidateScanOutcome {
+    // Check if the game's primary .so is ARM64 (emulated via libhoudini/ndk_translation JIT)
+    let mut arm64_game_module: Option<String> = modules
+        .iter()
+        .find(|m| {
+            is_game_module_name(&m.name)
+                && (m.pathname.contains("/arm64")
+                    || m.pathname.contains("/armeabi")
+                    || (delta != 0
+                        && read_memory_bytes(
+                            pid,
+                            (m.base_address as isize).wrapping_add(delta) as usize,
+                            20,
+                        )
+                        .is_ok_and(|h| {
+                            h.len() >= 20
+                                && h[0..4] == ELF_MAGIC
+                                && u16::from_le_bytes([h[18], h[19]]) == EM_AARCH64
+                        })))
+        })
+        .map(|m| m.name.clone());
+
     let mut candidate_mods: Vec<(String, usize, usize, usize)> = Vec::new();
     for m in modules {
         let hva_base = (m.base_address as isize).wrapping_add(delta) as usize;
         candidate_mods.push((m.name.clone(), m.base_address, hva_base, m.size));
     }
 
-    // Sort first so top game modules are validated for readable 4KB-aligned ELF headers
+    // Sort first so top game modules are validated for readable 4KB-aligned x86_64 ELF headers
     candidate_mods.sort_by_key(|(name, _, _, sz)| {
         let l = name.to_lowercase();
         if l.contains("il2cpp") {
@@ -1140,14 +1172,18 @@ pub fn scan_verified_xref_candidates(
         }
     });
 
-    let has_valid_elf_mapping = candidate_mods.iter().take(6).any(|(_, _, hva_base, _)| {
+    let has_valid_x64_elf = candidate_mods.iter().take(6).any(|(_, _, hva_base, _)| {
         (*hva_base & 0xFFF) == 0
-            && read_memory_bytes(pid, *hva_base, 8)
-                .is_ok_and(|h| h.len() >= 7 && h[0..4] == ELF_MAGIC && h[4] == ELFCLASS64)
+            && read_memory_bytes(pid, *hva_base, 20).is_ok_and(|h| {
+                h.len() >= 20
+                    && h[0..4] == ELF_MAGIC
+                    && h[4] == ELFCLASS64
+                    && u16::from_le_bytes([h[18], h[19]]) == EM_X86_64
+            })
     });
 
     let mut used_elfs = Vec::new();
-    if candidate_mods.is_empty() || !has_valid_elf_mapping {
+    if candidate_mods.is_empty() || !has_valid_x64_elf {
         used_elfs = discover_x64_elfs_in_process_memory(pid);
         if !used_elfs.is_empty() {
             candidate_mods.clear();
@@ -1169,6 +1205,25 @@ pub fn scan_verified_xref_candidates(
     let has_game_mod = candidate_mods
         .iter()
         .any(|(n, _, _, _)| is_game_module_name(n));
+    if arm64_game_module.is_none()
+        && !has_game_mod
+        && !used_elfs.iter().any(|e| e.size >= 16 * 1024 * 1024)
+    {
+        let arm64_elfs = discover_elfs_by_machine(pid, EM_AARCH64, 4 * 1024 * 1024, 32);
+        if let Some(largest) = arm64_elfs.into_iter().next() {
+            arm64_game_module = Some(largest.name);
+        }
+    }
+
+    if arm64_game_module.is_some() && !has_game_mod {
+        return CandidateScanOutcome {
+            candidates: Vec::new(),
+            used_elfs,
+            cand_offsets: Vec::new(),
+            mod_count: probe_mods.len(),
+            arm64_game_module,
+        };
+    }
     let scan_mods: Vec<(String, usize, usize, usize)> = if has_game_mod {
         candidate_mods
             .into_iter()
@@ -1382,6 +1437,7 @@ pub fn scan_verified_xref_candidates(
         used_elfs,
         cand_offsets,
         mod_count,
+        arm64_game_module,
     }
 }
 
@@ -1752,18 +1808,25 @@ impl EmulatorInstructionWatch {
                 }
 
                 let armed = active_hooks.len();
-                let hint = if mod_count == 0 {
-                    " | No ELF/x64 modules found in target"
-                } else if total_cands == 0 {
-                    " | 0 matching instructions for probed offsets"
-                } else if armed == 0 {
-                    " | 0 hooks armed (no usable code/data cave near target)"
+                let status_msg = if let Some(ref arm64_mod) = outcome.arm64_game_module {
+                    format!(
+                        "ARM64 game ({arm64_mod}) uses libhoudini JIT — x86_64 instruction hooks require an x86_64 APK; value changes still tracked below"
+                    )
                 } else {
-                    ""
+                    let hint = if mod_count == 0 {
+                        " | No ELF/x64 modules found in target"
+                    } else if total_cands == 0 {
+                        " | 0 matching instructions for probed offsets"
+                    } else if armed == 0 {
+                        " | 0 hooks armed (no usable code/data cave near target)"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "Hooks: {armed}/{total_cands} | Mods: {mod_count} | Offsets: [{off_preview}] | Caves: {exec_avail}B/{data_avail}B | Mode: {mode_label}{hint}"
+                    )
                 };
-                let _ = tx.send(WatchEvent::Status(format!(
-                    "Hooks: {armed}/{total_cands} | Mods: {mod_count} | Offsets: [{off_preview}] | Caves: {exec_avail}B/{data_avail}B | Mode: {mode_label}{hint}"
-                )));
+                let _ = tx.send(WatchEvent::Status(status_msg));
             }
 
             // 2. Poll target memory changes + real-time hook counters
