@@ -17695,15 +17695,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             return;
         };
         dialog.values.clear();
-        let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
         for &(address, _) in &dialog.addresses {
-            let effective_addr = if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
-                address
-            } else if delta != 0 {
-                (address as isize + delta) as usize
-            } else {
-                address
-            };
+            let effective_addr = self.resolve_saved_effective_address(address);
             if let Some(enc) = dialog.text_encoding {
                 if let Ok(text) = read_text_memory(pid, effective_addr, dialog.text_byte_len.max(1), enc) {
                     dialog.values.insert(address, text);
@@ -22192,6 +22185,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     }
 
     fn resolve_saved_effective_address(&self, address: usize) -> usize {
+        if address == 0 {
+            return 0;
+        }
         if let Some(pid) = self.memory_panel.process_pid {
             if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
                 return address;
@@ -24025,7 +24021,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             self.memory_panel.saved_background_refresh_cursor = (cursor + 16) % total_saved;
         }
 
-        let delta = self.memory_panel.android_bridge.delta;
         for index in to_refresh {
             let Some(saved_info) = self.memory_panel.saved.get(index).cloned() else {
                 continue;
@@ -24039,18 +24034,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             } else {
                 (None, saved_info.address)
             };
-            let effective_address = if crate::process_memory::read_memory_bytes(pid, address, 4).is_ok() {
-                address
-            } else if let Some(d) = delta {
-                let hva = (address as isize + d) as usize;
-                if crate::process_memory::read_memory_bytes(pid, hva, 4).is_ok() {
-                    hva
-                } else {
-                    address
-                }
-            } else {
-                address
-            };
+            let effective_address = self.resolve_saved_effective_address(address);
 
             let (current_val, current_text) = if effective_address == 0 {
                 (None, None)
@@ -24058,7 +24042,15 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 let byte_len = saved_info.text_byte_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
                 (None, read_text_memory(pid, effective_address, byte_len, encoding).ok())
             } else {
-                (read_scan_value(pid, effective_address, saved_info.value_type).ok(), None)
+                let live_val = read_scan_value(pid, effective_address, saved_info.value_type)
+                    .ok()
+                    .or_else(|| {
+                        saved_info.pointer.is_none().then(|| {
+                            crate::android_perf_watch::lookup_captured_guest_bytes(address)
+                                .and_then(|b| saved_info.value_type.decode(&b))
+                        })?
+                    });
+                (live_val, None)
             };
 
             if let Some(saved) = self.memory_panel.saved.get_mut(index) {
