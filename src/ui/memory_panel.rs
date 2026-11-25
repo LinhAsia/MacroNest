@@ -769,44 +769,11 @@ struct ModuleListDialog {
 }
 
 #[cfg(windows)]
-pub struct EmulatorMemoryWatchSession {
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<std::thread::JoinHandle<()>>,
-    _hw_watch: Option<WriteWatch>,
-}
-
-#[cfg(windows)]
-impl EmulatorMemoryWatchSession {
-    pub fn stop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::Release);
-        if let Some(mut hw) = self._hw_watch.take() {
-            hw.stop();
-        }
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-#[cfg(windows)]
-pub(super) struct ActiveCodeCaptureSession {
-    pub code_index: usize,
-    #[allow(dead_code)]
-    pub instruction_address: usize,
-    pub code_name: String,
-    pub delta: isize,
-    pub value_type: ScanValueType,
-    pub rx: Receiver<WatchEvent>,
-    #[allow(dead_code)]
-    pub watch: AccessWatch,
-    pub started_at: Instant,
-}
-
-#[cfg(windows)]
 enum ActiveInstructionWatch {
     Accesses(AddressAccessWatch),
     Writes(WriteWatch),
-    Emulator(EmulatorMemoryWatchSession),
+    Emulator(crate::emulator_watch::EmulatorInstructionWatch),
+    EmulatorAccess(crate::emulator_watch::EmulatorCodeAccessHook),
     Execute(AccessWatch),
 }
 
@@ -817,6 +784,7 @@ impl ActiveInstructionWatch {
             Self::Accesses(watch) => watch.stop(),
             Self::Writes(watch) => watch.stop(),
             Self::Emulator(watch) => watch.stop(),
+            Self::EmulatorAccess(watch) => watch.stop(),
             Self::Execute(watch) => watch.stop(),
         }
     }
@@ -1286,8 +1254,6 @@ pub(crate) struct MemoryPanelState {
     code_access_last_size: Option<egui::Vec2>,
     #[cfg(windows)]
     code_compare_dialog: Option<CodeCompareDialog>,
-    #[cfg(windows)]
-    pub(super) active_code_capture: Option<ActiveCodeCaptureSession>,
     aob_compare_dialog: Option<AobCompareDialog>,
     pub(super) show_proximity_finder: bool,
     proximity_finder_dialog: ProximityFinderDialog,
@@ -1445,8 +1411,6 @@ impl Default for MemoryPanelState {
             code_access_last_size: None,
             #[cfg(windows)]
             code_compare_dialog: None,
-            #[cfg(windows)]
-            active_code_capture: None,
             aob_compare_dialog: None,
             show_proximity_finder: false,
             proximity_finder_dialog: ProximityFinderDialog::default(),
@@ -7818,8 +7782,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         self.poll_code_entry_relocate();
         #[cfg(windows)]
         self.poll_code_entry_relocate_all();
-        #[cfg(windows)]
-        self.poll_active_code_capture();
         let mut corrected_actions = false;
         #[cfg(windows)]
         let debugger_active = self
@@ -7883,7 +7845,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             RegenerateAob(usize),
             ToggleHighlight(usize),
             AddTargetToAddressList(usize),
-            CaptureLiveValue(usize),
         }
 
         let mut pending_action = None;
@@ -8104,8 +8065,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                         )
                                     };
 
-                                let action_w = 92.0 * s;
-                                let live_w = 82.0 * s;
+                                let action_w = 98.0 * s;
                                 let copy_aob_w = 64.0 * s;
                                 let relocate_w = 60.0 * s;
                                 let rename_w = 54.0 * s;
@@ -8125,42 +8085,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 if action_response.clicked() {
                                     btn_clicked = true;
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
-                                }
-
-                                #[cfg(windows)]
-                                let is_capturing = self.memory_panel.active_code_capture.as_ref().map_or(false, |c| c.code_index == index);
-                                #[cfg(not(windows))]
-                                let is_capturing = false;
-
-                                if is_capturing {
-                                    ui.ctx().request_repaint();
-                                }
-
-                                let live_label = if is_capturing {
-                                    "Waiting..."
-                                } else if is_vietnamese {
-                                    "Lấy giá trị"
-                                } else {
-                                    "Get Value"
-                                };
-                                let live_response = ui.add_sized(
-                                    [live_w, btn_h],
-                                    egui::Button::new(
-                                        RichText::new(live_label)
-                                            .color(if is_capturing { Color32::from_rgb(255, 193, 7) } else { Color32::from_rgb(0, 230, 118) })
-                                            .strong()
-                                    ).small(),
-                                )
-                                .on_hover_text(
-                                    if is_vietnamese {
-                                        "Tự động bắt lại địa chỉ động và cập nhật giá trị hiện tại vào Address List khi vào lại game!"
-                                    } else {
-                                        "Capture the new dynamic address and update live value into Address List after game restart!"
-                                    }
-                                );
-                                if live_response.clicked() {
-                                    btn_clicked = true;
-                                    pending_action = Some(CodeAction::CaptureLiveValue(index));
                                 }
                                 let copy_aob_enabled = !entry.aob_signature.is_empty();
                                 let copy_aob_tooltip = if entry.aob_target_offset > 0 {
@@ -8218,7 +8142,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 let mut combined_res = star_response
                                     .union(instruction_response)
                                     .union(action_response)
-                                    .union(live_response)
                                     .union(copy_aob_response)
                                     .union(relocate_response)
                                     .union(rename_response)
@@ -8346,16 +8269,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             };
                             if ui.button(disasm_label).clicked() {
                                 pending_action = Some(CodeAction::OpenDisassembler(index));
-                                ui.close_menu();
-                            }
-
-                            let live_cap_label = if is_vietnamese {
-                                "Lấy địa chỉ & giá trị mới vào Address List (Capture Live Address)"
-                            } else {
-                                "Capture Live Address & Value to Address List"
-                            };
-                            if ui.button(live_cap_label).clicked() {
-                                pending_action = Some(CodeAction::CaptureLiveValue(index));
                                 ui.close_menu();
                             }
 
@@ -8489,10 +8402,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 }
 
         match pending_action {
-            Some(CodeAction::CaptureLiveValue(index)) => {
-                #[cfg(windows)]
-                self.capture_code_entry_live_address(index);
-            }
             Some(CodeAction::AddTargetToAddressList(target)) => {
                 self.add_code_access_address(target, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
                 self.memory_panel.status = format!("[OK] Added Target Address {} to Address list", format_prefixed_memory_address(target));
@@ -9133,176 +9042,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
     }
 
     #[cfg(windows)]
-    fn capture_code_entry_live_address(&mut self, code_index: usize) {
-        let Some(entry) = self.state.memory_code_list.get(code_index).cloned() else { return; };
-        let is_vietnamese = self.state.ui_language == UiLanguage::Vietnamese;
-        if self.memory_panel.process_pid.is_none() {
-            self.memory_panel.status = if is_vietnamese {
-                "Vui lòng chọn process (hoặc khởi động game/giả lập) trước".to_owned()
-            } else {
-                "Select a process first (or launch game/emulator)".to_owned()
-            };
-            return;
-        }
-        let pid = self.memory_panel.process_pid.unwrap();
-
-        let instruction_address = match self.resolve_code_entry_address(pid, &entry.module, entry.offset) {
-            Ok(addr) => addr,
-            Err(err) => {
-                self.memory_panel.status = if is_vietnamese {
-                    format!("Không thể định vị code cho '{}': {err}. Đảm bảo game đang chạy!", entry.name)
-                } else {
-                    format!("Unable to resolve code address for '{}': {err}. Make sure game is running!", entry.name)
-                };
-                return;
-            }
-        };
-
-        let (tx, rx) = mpsc::channel();
-        let code_name = entry.name.clone();
-        let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
-        let value_type = self.memory_panel.value_type;
-
-        let started = AccessWatch::start_once(
-            pid,
-            instruction_address,
-            self.state.memory_debugger_architecture,
-            move |event| {
-                let _ = tx.send(event);
-            },
-        );
-
-        match started {
-            Ok(active_watch) => {
-                self.memory_panel.status = if is_vietnamese {
-                    format!("Đang đợi instruction '{}' (0x{:X}) thực thi… Hãy di chuyển nhân vật hoặc thao tác trong game!", code_name, instruction_address)
-                } else {
-                    format!("Arming capture on '{}' at 0x{:X}… Interact with game/character to trigger!", code_name, instruction_address)
-                };
-                self.memory_panel.active_code_capture = Some(ActiveCodeCaptureSession {
-                    code_index,
-                    instruction_address,
-                    code_name,
-                    delta,
-                    value_type,
-                    rx,
-                    watch: active_watch,
-                    started_at: Instant::now(),
-                });
-            }
-            Err(err) => {
-                self.memory_panel.status = format!("Unable to start capture debugger: {err}");
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    fn poll_active_code_capture(&mut self) {
-        let is_vietnamese = self.state.ui_language == UiLanguage::Vietnamese;
-        let mut finished = false;
-        let mut captured_data_addr = None;
-        let mut error_msg = None;
-
-        if let Some(capture) = &mut self.memory_panel.active_code_capture {
-            while let Ok(event) = capture.rx.try_recv() {
-                match event {
-                    WatchEvent::AccessHit { data_address, .. } => {
-                        captured_data_addr = Some((data_address, capture.code_index, capture.code_name.clone(), capture.delta, capture.value_type));
-                        finished = true;
-                        break;
-                    }
-                    WatchEvent::Error(err) => {
-                        error_msg = Some(format!("Capture debugger error: {err}"));
-                        finished = true;
-                        break;
-                    }
-                    WatchEvent::Stopped | WatchEvent::CaptureLimitReached(_) => {
-                        finished = true;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            if !finished && capture.started_at.elapsed() > Duration::from_secs(30) {
-                let name = capture.code_name.clone();
-                error_msg = Some(if is_vietnamese {
-                    format!("Hết thời gian chờ bắt địa chỉ cho '{name}' (không có hit trong 30s)")
-                } else {
-                    format!("Capture timed out for '{name}' (no hits within 30s)")
-                });
-                finished = true;
-            }
-        }
-
-        if let Some(msg) = error_msg {
-            self.memory_panel.status = msg;
-        }
-
-        if let Some((hva_or_data_addr, code_index, code_name, delta, value_type)) = captured_data_addr {
-            if let Some(pid) = self.memory_panel.process_pid {
-                let display_addr = if delta != 0 {
-                    (hva_or_data_addr as isize - delta) as usize
-                } else {
-                    hva_or_data_addr
-                };
-                let effective_read_addr = if crate::process_memory::read_memory_bytes(pid, display_addr, 4).is_ok() {
-                    display_addr
-                } else {
-                    hva_or_data_addr
-                };
-
-                let val_opt = read_scan_value(pid, effective_read_addr, value_type).ok();
-                let val_str = val_opt.map(|v| format_scan_value(v, self.memory_panel.hex)).unwrap_or_else(|| "?".to_string());
-
-                let desc = format!("[Live] {}", code_name);
-                if let Some(existing) = self.memory_panel.saved.iter_mut().find(|s| s.address == display_addr) {
-                    existing.current = val_opt;
-                    existing.description = desc;
-                } else {
-                    self.memory_panel.saved.push(SavedMemoryAddress {
-                        address: display_addr,
-                        value_type,
-                        current: val_opt,
-                        text_encoding: None,
-                        text_byte_len: 0,
-                        current_text: None,
-                        description: desc,
-                        group: String::new(),
-                        hexadecimal: false,
-                        pointer: None,
-                        frozen: None,
-                        saved_to_library: false,
-                        aob_sample_1: None,
-                        aob_pattern: None,
-                    });
-                }
-
-                if let Some(entry) = self.state.memory_code_list.get_mut(code_index) {
-                    entry.target_address = Some(display_addr);
-                }
-                self.persist();
-
-                self.memory_panel.status = if is_vietnamese {
-                    format!(
-                        "[OK] Đã bắt thành công địa chỉ live 0x{:X} (Giá trị: {}) từ instruction '{}'! Đã cập nhật vào Address List.",
-                        display_addr, val_str, code_name
-                    )
-                } else {
-                    format!(
-                        "[OK] Successfully captured live address 0x{:X} (Value: {}) from instruction '{}'! Added to Address List.",
-                        display_addr, val_str, code_name
-                    )
-                };
-            }
-        }
-
-        if finished {
-            self.memory_panel.active_code_capture = None;
-        }
-    }
-
-    #[cfg(windows)]
     fn replace_code_entry_with_nop(&mut self, code_index: usize) {
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process first".to_owned();
@@ -9595,25 +9334,33 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         });
     }
 
-    fn is_memory_displacement_match(asm: &str, field_offset: u32) -> bool {
-        let lower = asm.to_ascii_lowercase();
-        let Some(start_bracket) = lower.find('[') else { return false; };
-        let Some(end_bracket) = lower[start_bracket..].find(']') else { return false; };
-        let mem_content = &lower[start_bracket + 1..start_bracket + end_bracket];
-        let off_hex = format!("{:x}", field_offset);
-        let off_hex_h = format!("{:x}h", field_offset);
-        let off_hex_0x = format!("0x{:x}", field_offset);
-        let off_dec = format!("{}", field_offset);
-
-        mem_content.contains(&off_hex_h)
-            || mem_content.contains(&off_hex_0x)
-            || mem_content.split(['+', '-', '*', ' ']).any(|token| token.trim() == off_hex || token.trim() == off_dec)
+    #[cfg(windows)]
+    fn ensure_android_bridge_synced(&mut self) {
+        if !self.memory_panel.is_emulator_target() {
+            return;
+        }
+        if !self.memory_panel.android_bridge.is_connected {
+            if self.memory_panel.android_bridge.discovered_devices.is_empty() {
+                self.android_scan_emulators();
+            }
+            if !self.memory_panel.android_bridge.discovered_devices.is_empty() {
+                self.android_connect();
+            }
+        } else {
+            self.android_refresh_processes();
+            if self.memory_panel.android_bridge.delta.is_none()
+                && self.memory_panel.android_bridge.guest_module_base.is_some()
+            {
+                self.android_auto_sync_delta();
+            }
+        }
     }
 
     #[cfg(windows)]
     fn start_emulator_memory_watch(
         pid: u32,
         watch_targets: Vec<(usize, usize)>, // (display_address, hva)
+        writes_only: bool,
         tx: mpsc::Sender<WatchEvent>,
         modules: Vec<crate::android_bridge::AndroidMemoryModule>,
         all_regions: Vec<crate::android_bridge::AndroidMemoryRegion>,
@@ -9621,240 +9368,19 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         emu_name: Option<String>,
         delta: isize,
         host_modules: Vec<(String, usize, usize)>,
-    ) -> EmulatorMemoryWatchSession {
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let stop_clone = std::sync::Arc::clone(&stop);
-
-        let hw_watch = if let Some(&(_, hva)) = watch_targets.first() {
-            let tx_hw = tx.clone();
-            WriteWatch::start_many(
-                pid,
-                &[hva],
-                crate::model::MemoryDebuggerArchitecture::Auto,
-                move |event| {
-                    let _ = tx_hw.send(event);
-                },
-            ).ok()
-        } else {
-            None
-        };
-
-        // Background XREF analysis to find real code instructions referencing this offset or address
-        let tx_xref = tx.clone();
-        let modules_for_xref = modules.clone();
-        let watch_targets_xref = watch_targets.clone();
-        let stop_xref = std::sync::Arc::clone(&stop);
-        let _ = std::thread::spawn(move || {
-            let mut candidate_mods: Vec<(String, usize, usize, usize)> = Vec::new(); // (name, base_gva, hva_base, size)
-            for m in &modules_for_xref {
-                let hva_base = (m.base_address as isize).wrapping_add(delta) as usize;
-                candidate_mods.push((m.name.clone(), m.base_address, hva_base, m.size));
-            }
-            if candidate_mods.is_empty() {
-                for (name, base, size) in &host_modules {
-                    candidate_mods.push((name.clone(), *base, *base, *size));
-                }
-            }
-
-            candidate_mods.sort_by_key(|(name, _, _, _)| {
-                let l = name.to_lowercase();
-                if l.contains("il2cpp") { 0 }
-                else if l.contains("unity") { 1 }
-                else if l.contains("neox") || l.contains("game") || l.contains("main") { 2 }
-                else if l.ends_with(".so") || l.ends_with(".dll") { 3 }
-                else { 4 }
-            });
-
-            let mut seen_instructions: HashSet<usize> = HashSet::new();
-            let mut num_found = 0;
-            let chunk_size = 64 * 1024;
-
-            for (mod_name, base_gva, hva_base, mod_size) in candidate_mods {
-                if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 10 {
-                    break;
-                }
-                let scan_len = mod_size.min(128 * 1024 * 1024);
-                if scan_len < 16 {
-                    continue;
-                }
-
-                for &(display_addr, _) in &watch_targets_xref {
-                    if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 10 {
-                        break;
-                    }
-
-                    let mut cand_offsets = Vec::new();
-                    let off_fff = (display_addr & 0xFFF) as u32;
-                    if off_fff > 0 { cand_offsets.push(off_fff); }
-                    let off_1fff = (display_addr & 0x1FFF) as u32;
-                    if off_1fff > 0 && !cand_offsets.contains(&off_1fff) { cand_offsets.push(off_1fff); }
-                    let off_7fff = (display_addr & 0x7FFF) as u32;
-                    if off_7fff > 0 && !cand_offsets.contains(&off_7fff) { cand_offsets.push(off_7fff); }
-                    let off_ffff = (display_addr & 0xFFFF) as u32;
-                    if off_ffff > 0 && !cand_offsets.contains(&off_ffff) { cand_offsets.push(off_ffff); }
-
-                    for field_offset in cand_offsets {
-                        if stop_xref.load(std::sync::atomic::Ordering::Relaxed) || num_found >= 10 {
-                            break;
-                        }
-                        let needle = field_offset.to_le_bytes();
-
-                        let mut offset = 0;
-                        while offset + 4 <= scan_len && num_found < 10 {
-                            if stop_xref.load(std::sync::atomic::Ordering::Relaxed) {
-                                break;
-                            }
-                            let current_chunk = chunk_size.min(scan_len - offset);
-                            let chunk_addr = hva_base + offset;
-                            if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, chunk_addr, current_chunk) {
-                                for i in 0..bytes.len().saturating_sub(3) {
-                                    if bytes[i..i + 4] == needle {
-                                        let match_hva = chunk_addr + i;
-                                        let mut matched_inst = None;
-                                        for backtrack in 1..=12 {
-                                            let test_start = match_hva.saturating_sub(backtrack);
-                                            if let Ok(lines) = crate::memory_debugger::debugger::disassemble_from(
-                                                pid,
-                                                test_start,
-                                                crate::model::MemoryDebuggerArchitecture::Auto,
-                                                4,
-                                            ) {
-                                                for (inst_addr, _bytes_hex, asm_text) in lines {
-                                                    if inst_addr <= match_hva && match_hva < inst_addr + 15 {
-                                                        if Self::is_memory_displacement_match(&asm_text, field_offset) {
-                                                            matched_inst = Some((inst_addr, asm_text));
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            if matched_inst.is_some() {
-                                                break;
-                                            }
-                                        }
-
-                                        if let Some((inst_addr, asm_text)) = matched_inst {
-                                            if seen_instructions.insert(inst_addr) {
-                                                let inst_gva = if delta != 0 {
-                                                    (inst_addr as isize - delta) as usize
-                                                } else {
-                                                    inst_addr
-                                                };
-                                                let mod_off = inst_gva.saturating_sub(base_gva);
-                                                let mod_desc = format!("{mod_name}+0x{mod_off:X}");
-                                                let _ = tx_xref.send(WatchEvent::AddressHit {
-                                                    instruction_address: inst_addr,
-                                                    instruction: format!("{asm_text}  ({mod_desc})"),
-                                                    details: format!(
-                                                        "Referencing Instruction Found in Game Module!\nModule: {mod_name}\nInstruction: {asm_text}\nCode Address: {mod_desc} (HVA: 0x{inst_addr:X})\nTarget Field Offset: 0x{field_offset:X}\nClick 'Show disassembler' or 'Add to code list' to patch/hook this code!",
-                                                    ),
-                                                });
-                                                num_found += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            offset += current_chunk;
-                        }
-                    }
-                }
-            }
-        });
-
-        let handle = std::thread::spawn(move || {
-            let mut prev_values: HashMap<usize, Vec<u8>> = HashMap::new();
-            let mut mutation_counts: HashMap<usize, usize> = HashMap::new();
-            for &(_, hva) in &watch_targets {
-                if let Ok(bytes) = crate::process_memory::read_memory_bytes(pid, hva, 8) {
-                    prev_values.insert(hva, bytes);
-                }
-            }
-
-            let _ = tx.send(WatchEvent::Started {
-                armed_threads: 1,
-                total_threads: 1,
-            });
-
-            while !stop_clone.load(std::sync::atomic::Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(15));
-                for &(display_addr, hva) in &watch_targets {
-                    let Ok(cur_bytes) = crate::process_memory::read_memory_bytes(pid, hva, 8) else {
-                        continue;
-                    };
-                    let changed = match prev_values.get(&hva) {
-                        Some(prev) => prev != &cur_bytes,
-                        None => true,
-                    };
-                    if changed {
-                        let prev = prev_values.get(&hva).cloned().unwrap_or_else(|| cur_bytes.clone());
-                        prev_values.insert(hva, cur_bytes.clone());
-
-                        let prev_u32 = u32::from_le_bytes(prev[..4].try_into().unwrap_or_default());
-                        let cur_u32 = u32::from_le_bytes(cur_bytes[..4].try_into().unwrap_or_default());
-                        let prev_f32 = f32::from_le_bytes(prev[..4].try_into().unwrap_or_default());
-                        let cur_f32 = f32::from_le_bytes(cur_bytes[..4].try_into().unwrap_or_default());
-
-                        let diff_i64 = cur_u32 as i64 - prev_u32 as i64;
-                        let is_float_likely = (cur_f32 - prev_f32).abs() > 0.0001
-                            && cur_f32.is_finite()
-                            && prev_f32.is_finite()
-                            && cur_f32.abs() < 1e7
-                            && prev_f32.abs() < 1e7;
-
-                        let summary = if is_float_likely {
-                            format!("Write: {:.2} -> {:.2} (Diff: {:.2})", prev_f32, cur_f32, cur_f32 - prev_f32)
-                        } else {
-                            format!("Write: {} -> {} (Diff: {diff_i64:+})", prev_u32, cur_u32)
-                        };
-
-                        let is_valid_gva = display_addr <= 0x0000_7FFF_FFFF_FFFF;
-                        let mod_desc = if is_android && is_valid_gva {
-                            modules.iter().find(|m| display_addr >= m.base_address && display_addr < m.end_address)
-                                .map(|m| format!("{}+0x{:X}", m.name, display_addr - m.base_address))
-                                .or_else(|| {
-                                    all_regions.iter().find(|r| display_addr >= r.start && display_addr < r.end)
-                                        .map(|r| format!("{}+0x{:X}", r.pathname, display_addr - r.start))
-                                })
-                                .unwrap_or_else(|| format!("GVA: 0x{display_addr:08X}"))
-                        } else if is_android {
-                            "Heap / Dynamic Guest Memory".to_string()
-                        } else {
-                            format!("Emulator Memory ({})", emu_name.as_deref().unwrap_or("VM"))
-                        };
-
-                        let raw_hex = cur_bytes[..4].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
-                        let target_desc = if is_android && is_valid_gva {
-                            format!("Target GVA: 0x{display_addr:08X} (Host HVA: 0x{hva:08X})")
-                        } else if is_android {
-                            format!("Host HVA: 0x{hva:08X} (Android Guest Heap)")
-                        } else {
-                            format!("Host HVA: 0x{hva:08X} (Emulator RAM)")
-                        };
-                        let details = format!(
-                            "{target_desc}\nModule: {mod_desc}\nOld Value: {prev_u32} (0x{prev_u32:X}, f32: {prev_f32:.2})\nNew Value: {cur_u32} (0x{cur_u32:X}, f32: {cur_f32:.2})\nRaw Bytes: {raw_hex}"
-                        );
-
-                        let count_entry = mutation_counts.entry(hva).or_insert(0);
-                        *count_entry += 1;
-                        let count = *count_entry;
-
-                        let _ = tx.send(WatchEvent::ValueMutation {
-                            target_address: hva,
-                            summary,
-                            details,
-                            count,
-                        });
-                    }
-                }
-            }
-            let _ = tx.send(WatchEvent::Stopped);
-        });
-        EmulatorMemoryWatchSession {
-            stop,
-            handle: Some(handle),
-            _hw_watch: hw_watch,
-        }
+    ) -> crate::emulator_watch::EmulatorInstructionWatch {
+        crate::emulator_watch::EmulatorInstructionWatch::start(
+            pid,
+            watch_targets,
+            writes_only,
+            tx,
+            modules,
+            all_regions,
+            is_android,
+            emu_name,
+            delta,
+            host_modules,
+        )
     }
 
     #[cfg(windows)]
@@ -9871,6 +9397,10 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         let Some(entry) = self.state.memory_code_list.get(code_index).cloned() else {
             return;
         };
+        let is_emulator_target = self.memory_panel.is_emulator_target();
+        if is_emulator_target {
+            self.ensure_android_bridge_synced();
+        }
         let instruction_address = match self.resolve_code_entry_address(pid, &entry.module, entry.offset) {
             Ok(address) => address,
             Err(error) => {
@@ -9922,16 +9452,18 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
             let emu_name = self.memory_panel.detected_emulator_name();
+            let writes_only = !entry.instruction.starts_with("Read:");
 
             let session = Self::start_emulator_memory_watch(
                 pid,
                 vec![(watch_addr, hva)],
+                writes_only,
                 tx,
                 modules,
                 all_regions,
                 is_android,
                 emu_name.clone(),
-                self.memory_panel.android_bridge.delta.unwrap_or(0),
+                delta,
                 self.memory_panel.scan_modules.clone(),
             );
 
@@ -10028,20 +9560,43 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         };
         self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
-        let started = AccessWatch::start(
-            pid,
-            instruction_address,
-            self.state.memory_debugger_architecture,
-            move |event| {
-                let _ = tx.send(event);
-            },
-        );
-        let (active, status) = match started {
-            Ok(active) => (
-                Some(ActiveInstructionWatch::Execute(active)),
-                warning_note.unwrap_or_else(|| "Attaching debugger…".to_owned()),
-            ),
-            Err(error) => (None, format!("Unable to start debugger: {error}")),
+        let (active, status) = if is_emulator_target {
+            let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+            let modules = self.memory_panel.android_bridge.modules.clone();
+            let all_regions = self.memory_panel.android_bridge.all_regions.clone();
+            match crate::emulator_watch::EmulatorCodeAccessHook::start(
+                pid,
+                instruction_address,
+                delta,
+                modules,
+                all_regions,
+                tx,
+            ) {
+                Ok(hook) => (
+                    Some(ActiveInstructionWatch::EmulatorAccess(hook)),
+                    warning_note.unwrap_or_else(|| {
+                        "Emulator Watcher running — capturing real-time accessed addresses"
+                            .to_owned()
+                    }),
+                ),
+                Err(error) => (None, format!("Unable to start emulator code hook: {error}")),
+            }
+        } else {
+            let started = AccessWatch::start(
+                pid,
+                instruction_address,
+                self.state.memory_debugger_architecture,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            );
+            match started {
+                Ok(active) => (
+                    Some(ActiveInstructionWatch::Execute(active)),
+                    warning_note.unwrap_or_else(|| "Attaching debugger…".to_owned()),
+                ),
+                Err(error) => (None, format!("Unable to start debugger: {error}")),
+            }
         };
         self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
             code_index,
@@ -15238,14 +14793,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 .any(|&emu| lower.contains(emu))
         };
         let is_emulator_target = is_android || is_emu_process;
-        if is_emu_process && !self.memory_panel.android_bridge.is_connected {
-            if self.memory_panel.android_bridge.discovered_devices.is_empty() {
-                self.android_scan_emulators();
-            }
-            if !self.memory_panel.android_bridge.discovered_devices.is_empty() {
-                self.android_connect();
-            }
+        if is_emulator_target {
+            self.ensure_android_bridge_synced();
         }
+        let is_android = self.memory_panel.android_bridge.is_connected
+            && self.memory_panel.android_bridge.selected_pid.is_some();
         if is_android && self.memory_panel.process_pid.is_none() {
             let procs = list_process_details().unwrap_or_default();
             let emu_names = ["mumunxdevice", "mumunxmain", "hd-player", "dnplayer", "nox", "memu", "mumuplayer"];
@@ -15298,6 +14850,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let session = Self::start_emulator_memory_watch(
                 pid,
                 watch_targets,
+                !reads_and_writes,
                 tx_watch,
                 modules,
                 all_regions,
@@ -15402,7 +14955,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     total_threads,
                 } => {
                     dialog.status = if matches!(dialog.active, Some(ActiveInstructionWatch::Emulator(_))) {
-                        "Emulator Watcher running — monitoring guest RAM & analyzing code references".to_owned()
+                        "Emulator Watcher running — real-time runtime instruction hooks active".to_owned()
                     } else {
                         format!("Debugger running — {armed_threads}/{total_threads} thread(s) armed")
                     };
@@ -15663,6 +15216,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 .any(|&emu| lower.contains(emu))
         };
         let is_emulator_target = is_android || is_emu_process;
+        if is_emulator_target {
+            self.ensure_android_bridge_synced();
+        }
+        let is_android = self.memory_panel.android_bridge.is_connected
+            && self.memory_panel.android_bridge.selected_pid.is_some();
         let emu_name = self.memory_panel.detected_emulator_name();
         let (tx, rx) = mpsc::channel();
         let tx_watch = tx.clone();
@@ -15688,6 +15246,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let session = Self::start_emulator_memory_watch(
                 pid,
                 watch_targets,
+                dialog.writes_only,
                 tx_watch,
                 modules,
                 all_regions,
@@ -17061,8 +16620,12 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     armed_threads,
                     total_threads,
                 } => {
-                    dialog.status = if matches!(dialog.active, Some(ActiveInstructionWatch::Emulator(_))) {
-                        "Emulator Watcher running — monitoring guest RAM & analyzing code references".to_owned()
+                    dialog.status = if matches!(
+                        dialog.active,
+                        Some(ActiveInstructionWatch::Emulator(_))
+                            | Some(ActiveInstructionWatch::EmulatorAccess(_))
+                    ) {
+                        "Emulator Watcher running — capturing real-time accessed addresses".to_owned()
                     } else {
                         format!("Debugger running — {armed_threads}/{total_threads} thread(s) armed")
                     };
@@ -17420,10 +16983,14 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             dialog.status = "Select a process".to_owned();
             return;
         };
+        let is_emulator_target = self.memory_panel.is_emulator_target();
+        if is_emulator_target {
+            self.ensure_android_bridge_synced();
+        }
         let is_android = self.memory_panel.android_bridge.is_connected
             && self.memory_panel.android_bridge.selected_pid.is_some();
-        let entry = self.state.memory_code_list.get(dialog.code_index);
-        let is_data_watch = entry.map_or(false, |e| {
+        let entry = self.state.memory_code_list.get(dialog.code_index).cloned();
+        let is_data_watch = entry.as_ref().map_or(false, |e| {
             e.instruction.starts_with("Write:") || e.instruction.starts_with("Read:")
         });
         if is_data_watch {
@@ -17440,10 +17007,14 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             let modules = self.memory_panel.android_bridge.modules.clone();
             let all_regions = self.memory_panel.android_bridge.all_regions.clone();
             let emu_name = self.memory_panel.detected_emulator_name();
+            let writes_only = !entry
+                .as_ref()
+                .map_or(false, |e| e.instruction.starts_with("Read:"));
 
             let session = Self::start_emulator_memory_watch(
                 pid,
                 vec![(inst_addr, hva)],
+                writes_only,
                 tx,
                 modules,
                 all_regions,
@@ -17465,7 +17036,37 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             };
             return;
         }
+        if let Some(ref e) = entry {
+            if let Ok(resolved) = self.resolve_code_entry_address(pid, &e.module, e.offset) {
+                dialog.instruction_address = resolved;
+            }
+        }
         let (tx, rx) = mpsc::channel();
+        if is_emulator_target {
+            let delta = self.memory_panel.android_bridge.delta.unwrap_or(0);
+            let modules = self.memory_panel.android_bridge.modules.clone();
+            let all_regions = self.memory_panel.android_bridge.all_regions.clone();
+            match crate::emulator_watch::EmulatorCodeAccessHook::start(
+                pid,
+                dialog.instruction_address,
+                delta,
+                modules,
+                all_regions,
+                tx,
+            ) {
+                Ok(hook) => {
+                    dialog.rx = rx;
+                    dialog.active = Some(ActiveInstructionWatch::EmulatorAccess(hook));
+                    dialog.status =
+                        "Emulator Watcher running — capturing real-time accessed addresses"
+                            .to_owned();
+                }
+                Err(error) => {
+                    dialog.status = format!("Unable to start emulator code hook: {error}");
+                }
+            }
+            return;
+        }
         let notify = move |event| {
             let _ = tx.send(event);
         };
@@ -17993,13 +17594,14 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             return false;
         }
         let pid = self.memory_panel.process_pid;
+        let effective_addr = self.resolve_saved_effective_address(address);
         let current = if text_encoding.is_none() {
-            pid.and_then(|pid| read_scan_value(pid, address, value_type).ok())
+            pid.and_then(|pid| read_scan_value(pid, effective_addr, value_type).ok())
         } else {
             None
         };
         let current_text = if let Some(enc) = text_encoding {
-            pid.and_then(|pid| read_text_memory(pid, address, text_byte_len.max(1), enc).ok())
+            pid.and_then(|pid| read_text_memory(pid, effective_addr, text_byte_len.max(1), enc).ok())
         } else {
             None
         };

@@ -11,6 +11,8 @@ mod hotkey;
 mod lang;
 mod macro_code;
 #[cfg(windows)]
+mod emulator_watch;
+#[cfg(windows)]
 mod memory_debugger;
 mod model;
 mod ocr;
