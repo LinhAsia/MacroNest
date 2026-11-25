@@ -594,7 +594,6 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
                 | MacroAction::StartEspScan
                 | MacroAction::StopEspScan
                 | MacroAction::ReadEspTarget
-                | MacroAction::Esp3DAimLock
         );
     }
     if field.starts_with("ocr_") {
@@ -631,9 +630,6 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
                 | MacroAction::BackgroundMouseMove
                 | MacroAction::BackgroundKey
         );
-    }
-    if field.starts_with("follow_3d_") {
-        return action == MacroAction::Follow3DTarget;
     }
     true
 }

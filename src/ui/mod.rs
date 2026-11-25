@@ -1833,8 +1833,7 @@ impl CrosshairApp {
             | MacroAction::DisableEspPreset
             | MacroAction::StartEspScan
             | MacroAction::StopEspScan
-            | MacroAction::ReadEspTarget
-            | MacroAction::Esp3DAimLock => {
+            | MacroAction::ReadEspTarget => {
                 if let Some(preset_id) = step.esp_preset_id
                     && let Some(preset) = self
                         .state
@@ -2566,8 +2565,7 @@ impl CrosshairApp {
             | MacroAction::DisableEspPreset
             | MacroAction::StartEspScan
             | MacroAction::StopEspScan
-            | MacroAction::ReadEspTarget
-            | MacroAction::Esp3DAimLock => {
+            | MacroAction::ReadEspTarget => {
                 if let Some(old_id) = step.esp_preset_id
                     && let Some(new_id) = maps.esp_presets.get(&old_id)
                 {
@@ -10576,7 +10574,6 @@ impl CrosshairApp {
             MacroAction::StartEspScan => "StartESPScan",
             MacroAction::StopEspScan => "StopESPScan",
             MacroAction::ReadEspTarget => "ReadESPTarget",
-            MacroAction::Esp3DAimLock => "Esp3DAimLock",
 
             MacroAction::FunnyMemeReply => "MemeReply",
             MacroAction::AiResponse => "AiResponse",
@@ -10584,7 +10581,6 @@ impl CrosshairApp {
             MacroAction::BackgroundClick => "BackgroundClick",
             MacroAction::BackgroundMouseMove => "BackgroundMouseMove",
             MacroAction::BackgroundKey => "BackgroundKey",
-            MacroAction::Follow3DTarget => "Follow3DTarget",
             _ => "Legacy (Deprecated)",
         }
     }
@@ -10940,10 +10936,6 @@ impl CrosshairApp {
                 "macro_action_tooltip.read_esp_target",
                 "Read the selected ESP preset's latest projected target data into macro variables.",
             ),
-            MacroAction::Esp3DAimLock => (
-                "macro_action_tooltip.esp_3d_aim_lock",
-                "Move mouse towards target 3D angle calculated from ESP.",
-            ),
             MacroAction::StartTimerPreset => (
                 "macro_action_tooltip.start_timer_preset",
                 "Start or restart a timer preset.",
@@ -10980,10 +10972,6 @@ impl CrosshairApp {
             MacroAction::BackgroundKey => (
                 "macro_action_tooltip.background_key",
                 "Send key press or text directly to a background window without stealing focus or interrupting your work.",
-            ),
-            MacroAction::Follow3DTarget => (
-                "macro_action_tooltip.follow_3d_target",
-                "Automatically follow a 3D target using background WASD keys based on memory coordinates.",
             ),
             _ => ("macro_action_tooltip.legacy", "Legacy (Deprecated)"),
         };
@@ -11089,7 +11077,6 @@ impl CrosshairApp {
             MacroAction::StartEspScan => 0xe8b6,
             MacroAction::StopEspScan => 0xe047,
             MacroAction::ReadEspTarget => 0xe8b6,
-            MacroAction::Esp3DAimLock => 0xe876,
 
             MacroAction::FunnyMemeReply => 0xe420,
             MacroAction::AiResponse => 0xeb8e,
@@ -11097,7 +11084,6 @@ impl CrosshairApp {
             MacroAction::BackgroundClick => 0xe323,
             MacroAction::BackgroundMouseMove => 0xe89f,
             MacroAction::BackgroundKey => 0xe312,
-            MacroAction::Follow3DTarget => 0xe566,
             _ => 0xe8b5,
         };
         char::from_u32(codepoint).unwrap_or('?')
@@ -11277,7 +11263,6 @@ impl CrosshairApp {
                 ("macro_action_short_label.stop_esp_scan", "Stop Scan")
             }
             MacroAction::ReadEspTarget => ("macro_action_short_label.read_esp_target", "ESP Data"),
-            MacroAction::Esp3DAimLock => ("macro_action_short_label.esp_3d_aim_lock", "3D Lock"),
             MacroAction::FunnyMemeReply => ("macro_action_short_label.funny_meme_reply", "Meme"),
             MacroAction::AiResponse => ("macro_action_short_label.ai_response", "AI"),
             MacroAction::OcrSearch => ("macro_action_short_label.ocr_search", "OCR"),
@@ -11290,9 +11275,6 @@ impl CrosshairApp {
             }
             MacroAction::BackgroundKey => {
                 ("macro_action_short_label.background_key", "BgKey")
-            }
-            MacroAction::Follow3DTarget => {
-                ("macro_action_short_label.follow_3d_target", "Follow3D")
             }
             _ => ("macro_action_short_label.legacy", "Legacy"),
         };
@@ -11534,7 +11516,6 @@ impl CrosshairApp {
                 | MacroAction::BackgroundClick
                 | MacroAction::BackgroundMouseMove
                 | MacroAction::BackgroundKey
-                | MacroAction::Follow3DTarget
                 | MacroAction::FunnyMemeReply
                 | MacroAction::AiResponse
                 | MacroAction::DisableCrosshair

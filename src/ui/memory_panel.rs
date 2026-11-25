@@ -6233,8 +6233,8 @@ impl CrosshairApp {
         ui.add_space(4.0);
         ui.label(
             RichText::new(self.tr(
-                "Quickly update base addresses across all Macros, Follow3D, ESP, and Memory lists after game updates.",
-                "Thay thế hàng loạt địa chỉ base cho toàn bộ Macro, Follow3D, ESP và Memory list sau khi game update.",
+                "Quickly update base addresses across all Macros, ESP, and Memory lists after game updates.",
+                "Thay thế hàng loạt địa chỉ base cho toàn bộ Macro, ESP và Memory list sau khi game update.",
             ))
             .weak(),
         );
@@ -7379,16 +7379,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction) {
             record(&step.key);
         }
-        record(&step.follow_3d_spec.leader_x);
-        record(&step.follow_3d_spec.leader_y);
-        record(&step.follow_3d_spec.leader_z);
-        record(&step.follow_3d_spec.follower_x);
-        record(&step.follow_3d_spec.follower_y);
-        record(&step.follow_3d_spec.follower_z);
-        record(&step.follow_3d_spec.camera_pitch);
-        record(&step.follow_3d_spec.camera_yaw);
-        record(&step.follow_3d_spec.camera_forward_a);
-        record(&step.follow_3d_spec.camera_forward_b);
     }
 
     pub fn count_pointer_base_matches(&self, old_base: &str) -> usize {
@@ -7546,16 +7536,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 count += 1;
             }
         }
-        if matches_pointer_base(&step.follow_3d_spec.leader_x, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.leader_y, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.leader_z, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.follower_x, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.follower_y, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.follower_z, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.camera_pitch, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.camera_yaw, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.camera_forward_a, old_base, old_hex) { count += 1; }
-        if matches_pointer_base(&step.follow_3d_spec.camera_forward_b, old_base, old_hex) { count += 1; }
         count
     }
 
@@ -7779,16 +7759,6 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 count += 1;
             }
         }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.leader_x, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.leader_y, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.leader_z, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.follower_x, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.follower_y, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.follower_z, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_pitch, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_yaw, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_forward_a, old_base, new_base, old_hex, new_hex) { count += 1; }
-        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_forward_b, old_base, new_base, old_hex, new_hex) { count += 1; }
         count
     }
 
@@ -28463,13 +28433,10 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
         assert!(matches_pointer_base("neox_engine.dll+8B68EC8 [468, 150]", "8B68EC8", Some(0x8B68EC8)));
         assert!(!matches_pointer_base("neox_engine.dll+9999999 [468, 150]", "8B68EC8", Some(0x8B68EC8)));
 
-        // Test MacroStep replacement with Follow3D
+        // Test MacroStep replacement
         let mut step = MacroStep::default();
         step.action = MacroAction::ReadMemory;
         step.key = "neox_engine.dll+8B68EC8 [468, 150]".to_string();
-        step.follow_3d_spec.leader_x = "neox_engine.dll+8B68EC8 [10]".to_string();
-        step.follow_3d_spec.leader_y = "neox_engine.dll+8B68EC8 [14]".to_string();
-        step.follow_3d_spec.follower_x = "neox_engine.dll+8B68EC8 [20]".to_string();
         let replaced_count = CrosshairApp::replace_in_macro_step(
             &mut step,
             "neox_engine.dll+8B68EC8",
@@ -28477,11 +28444,8 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
             Some(0x8B68EC8),
             Some(0x9067700),
         );
-        assert_eq!(replaced_count, 4);
+        assert_eq!(replaced_count, 1);
         assert_eq!(step.key, "neox_engine.dll+9067700 [468, 150]");
-        assert_eq!(step.follow_3d_spec.leader_x, "neox_engine.dll+9067700 [10]");
-        assert_eq!(step.follow_3d_spec.leader_y, "neox_engine.dll+9067700 [14]");
-        assert_eq!(step.follow_3d_spec.follower_x, "neox_engine.dll+9067700 [20]");
     }
 
     #[test]

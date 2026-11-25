@@ -127,7 +127,6 @@ pub enum MacroAction {
     StartEspScan,
     StopEspScan,
     ReadEspTarget,
-    Esp3DAimLock,
     FunnyMemeReply,
     AiResponse,
     JumpToStep,
@@ -137,8 +136,6 @@ pub enum MacroAction {
     BackgroundMouseMove,
     #[serde(alias = "BackgroundKeyPress", alias = "BackgroundKeyboard")]
     BackgroundKey,
-    #[serde(alias = "Follow3D", alias = "AutoFollow3D")]
-    Follow3DTarget,
     #[serde(other)]
     Legacy,
 }
@@ -241,110 +238,6 @@ impl Default for ExtraCondition {
             mouse_axis: "X".to_string(),
             running_preset_id: None,
             running_preset_group_id: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum Follow3DMode {
-    #[default]
-    Start,
-    Stop,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum Follow3DOrientationMode {
-    #[default]
-    ForwardPairPitch,
-    Angles,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum Follow3DAngleUnit {
-    #[default]
-    Auto,
-    Degrees,
-    Radians,
-}
-
-fn default_follow_3d_stop_distance() -> f32 {
-    1.0
-}
-
-fn default_follow_3d_update_interval_ms() -> u32 {
-    30
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct Follow3DTargetSpec {
-    pub mode: Follow3DMode,
-
-    pub leader_window: Option<String>,
-    pub leader_x: String,
-    pub leader_y: String,
-    pub leader_z: String,
-
-    pub follower_window: Option<String>,
-    pub follower_x: String,
-    pub follower_y: String,
-    pub follower_z: String,
-
-    pub orientation_mode: Follow3DOrientationMode,
-    pub camera_pitch: String,
-    pub camera_yaw: String,
-    pub camera_forward_a: String,
-    pub camera_forward_b: String,
-
-    #[serde(default)]
-    pub angle_unit: Follow3DAngleUnit,
-
-    pub input_window: Option<String>,
-    #[serde(default = "default_follow_3d_stop_distance")]
-    pub stop_distance: f32,
-    #[serde(default = "default_follow_3d_update_interval_ms")]
-    pub update_interval_ms: u32,
-    pub value_type: MemoryValueType,
-
-    #[serde(default)]
-    pub invert_x: bool,
-    #[serde(default)]
-    pub invert_y: bool,
-    #[serde(default)]
-    pub swap_direction_pair: bool,
-    pub invert_forward: bool,
-    pub invert_strafe: bool,
-    pub swap_forward_strafe: bool,
-}
-
-impl Default for Follow3DTargetSpec {
-    fn default() -> Self {
-        Self {
-            mode: Follow3DMode::Start,
-            leader_window: None,
-            leader_x: String::new(),
-            leader_y: String::new(),
-            leader_z: String::new(),
-            follower_window: None,
-            follower_x: String::new(),
-            follower_y: String::new(),
-            follower_z: String::new(),
-            orientation_mode: Follow3DOrientationMode::ForwardPairPitch,
-            camera_pitch: String::new(),
-            camera_yaw: String::new(),
-            camera_forward_a: String::new(),
-            camera_forward_b: String::new(),
-            angle_unit: Follow3DAngleUnit::Auto,
-            input_window: None,
-            stop_distance: 1.0,
-            update_interval_ms: 30,
-            value_type: MemoryValueType::F32,
-            invert_x: false,
-            invert_y: false,
-            swap_direction_pair: false,
-            invert_forward: false,
-            invert_strafe: false,
-            swap_forward_strafe: false,
         }
     }
 }
@@ -586,10 +479,6 @@ pub struct MacroStep {
     pub esp_on_screen_var: String,
     #[serde(default)]
     pub esp_in_front_var: String,
-    #[serde(default = "default_esp_aim_smooth")]
-    pub esp_aim_smooth_speed: f64,
-    #[serde(default = "default_esp_aim_sens")]
-    pub esp_aim_sens_scale: f64,
     #[serde(default)]
     pub trigger_macro_group_id: Option<u32>,
     #[serde(default)]
@@ -610,10 +499,6 @@ pub struct MacroStep {
     pub scan_instruction_target_count: usize,
     #[serde(default = "default_scan_instruction_timeout_ms")]
     pub scan_instruction_timeout_ms: u64,
-    #[serde(default = "default_true")]
-    pub follow_3d_collapsed: bool,
-    #[serde(default)]
-    pub follow_3d_spec: Follow3DTargetSpec,
     #[serde(default)]
     pub data_table_id: Option<u32>,
     #[serde(default)]
@@ -642,13 +527,6 @@ fn default_background_key_mode() -> String {
 
 fn default_background_mouse_button() -> String {
     "Left".to_string()
-}
-
-fn default_esp_aim_smooth() -> f64 {
-    1.0
-}
-fn default_esp_aim_sens() -> f64 {
-    1.0
 }
 
 impl Default for MacroStep {
@@ -776,8 +654,6 @@ impl Default for MacroStep {
             esp_valid_var: "valid".to_string(),
             esp_on_screen_var: "on_screen".to_string(),
             esp_in_front_var: "in_front".to_string(),
-            esp_aim_smooth_speed: 1.0,
-            esp_aim_sens_scale: 1.0,
             trigger_macro_group_id: None,
             background_target_window: None,
             background_mouse_button: "Left".to_string(),
@@ -788,8 +664,6 @@ impl Default for MacroStep {
             background_send_wm_char: false,
             scan_instruction_target_count: 1,
             scan_instruction_timeout_ms: 5000,
-            follow_3d_collapsed: true,
-            follow_3d_spec: Follow3DTargetSpec::default(),
             data_table_id: None,
             data_table_target_state: DataTableTargetState::default(),
         }
@@ -1447,46 +1321,6 @@ mod tests {
         let alias_json2 = r#"{"action":"BackgroundKeyboard"}"#;
         let parsed2: ActionOnly = serde_json::from_str(alias_json2).expect("parse alias 2");
         assert_eq!(parsed2.action, MacroAction::BackgroundKey);
-    }
-
-    #[test]
-    fn test_follow_3d_target_serialization() {
-        let mut step = MacroStep::default();
-        step.action = MacroAction::Follow3DTarget;
-        step.follow_3d_spec.mode = Follow3DMode::Start;
-        step.follow_3d_spec.leader_window = Some("Game [Lowest]".to_string());
-        step.follow_3d_spec.leader_x = "0x12345".to_string();
-        step.follow_3d_spec.leader_z = "0x1234D".to_string();
-        step.follow_3d_spec.follower_window = Some("Game [The Unfocused One]".to_string());
-        step.follow_3d_spec.follower_x = "0x23456".to_string();
-        step.follow_3d_spec.follower_z = "0x2345E".to_string();
-        step.follow_3d_spec.orientation_mode = Follow3DOrientationMode::ForwardPairPitch;
-        step.follow_3d_spec.camera_forward_a = "0x34567".to_string();
-        step.follow_3d_spec.camera_forward_b = "0x3456B".to_string();
-        step.follow_3d_spec.stop_distance = 1.8;
-        step.follow_3d_spec.update_interval_ms = 25;
-
-        let json = serde_json::to_string(&step).expect("serialize follow 3d step");
-        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize follow 3d step");
-
-        assert_eq!(restored.action, MacroAction::Follow3DTarget);
-        assert_eq!(restored.follow_3d_spec.mode, Follow3DMode::Start);
-        assert_eq!(restored.follow_3d_spec.leader_window.as_deref(), Some("Game [Lowest]"));
-        assert_eq!(restored.follow_3d_spec.follower_window.as_deref(), Some("Game [The Unfocused One]"));
-        assert_eq!(restored.follow_3d_spec.stop_distance, 1.8);
-        assert_eq!(restored.follow_3d_spec.update_interval_ms, 25);
-
-        let alias1 = r#"{"action":"Follow3D"}"#;
-        #[derive(serde::Deserialize)]
-        struct ActionOnly {
-            action: MacroAction,
-        }
-        let parsed1: ActionOnly = serde_json::from_str(alias1).expect("parse alias 1");
-        assert_eq!(parsed1.action, MacroAction::Follow3DTarget);
-
-        let alias2 = r#"{"action":"AutoFollow3D"}"#;
-        let parsed2: ActionOnly = serde_json::from_str(alias2).expect("parse alias 2");
-        assert_eq!(parsed2.action, MacroAction::Follow3DTarget);
     }
 
     #[test]

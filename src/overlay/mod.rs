@@ -25790,7 +25790,6 @@ mod windows_overlay {
         }
 
         stop_vision_following_ids(&image_search_preset_ids);
-        stop_follow_3d_target_for_preset(Some(preset_id));
         hide_toolbox_for_owner(preset_id);
         HOOK_STATE.lock().stop_ignore_keys.remove(&preset_id);
         FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
@@ -26558,13 +26557,6 @@ mod windows_overlay {
             let pid = macro_memory_target_pid(Some(key));
             self.pids.insert(key.to_owned(), (Instant::now(), pid));
             pid
-        }
-
-        fn pid_for_opt(&mut self, target_window: Option<&str>) -> Option<u32> {
-            match target_window {
-                Some(w) if !w.trim().is_empty() => self.pid_for(w),
-                _ => macro_memory_target_pid(None),
-            }
         }
 
         fn resolve_address(
@@ -29783,7 +29775,6 @@ mod windows_overlay {
         } else {
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
         }
-        stop_follow_3d_target_for_preset(Some(preset_id));
 
         let mut geometry_changed = false;
         {
@@ -30252,12 +30243,6 @@ mod windows_overlay {
 
             MacroAction::StopInstructionScan => {
                 execute_stop_instruction_scan_action_step();
-            }
-
-            MacroAction::Follow3DTarget => {
-                if let Err(e) = execute_follow_3d_target(step, Some(preset_id), false) {
-                    eprintln!("Follow3DTarget execution error: {e}");
-                }
             }
 
             _ => {
@@ -31082,19 +31067,6 @@ mod windows_overlay {
 
                 MacroAction::ReadEspTarget => {
                     read_esp_target_snapshot(step);
-                }
-
-                MacroAction::Esp3DAimLock => {
-                    execute_esp_3d_aim_lock(step);
-                }
-
-                MacroAction::Follow3DTarget => {
-                    if let Err(e) = execute_follow_3d_target(step, Some(preset_id), false) {
-                        eprintln!("Follow3DTarget execution error: {e}");
-                        if step.toggle_enabled_on_run {
-                            let _ = toggle_macro_step_enabled(preset_id, absolute_index);
-                        }
-                    }
                 }
 
                 MacroAction::StopVisionWait => {
@@ -31943,16 +31915,6 @@ mod windows_overlay {
 
                 MacroAction::ReadEspTarget => {
                     read_esp_target_snapshot(step);
-                }
-
-                MacroAction::Esp3DAimLock => {
-                    execute_esp_3d_aim_lock(step);
-                }
-
-                MacroAction::Follow3DTarget => {
-                    if let Err(e) = execute_follow_3d_target(step, Some(preset_id), true) {
-                        eprintln!("Follow3DTarget execution error: {e}");
-                    }
                 }
 
                 MacroAction::StopVisionWait => {
@@ -32955,12 +32917,6 @@ mod windows_overlay {
             std::cell::RefCell::new(HashMap::new());
         static MACRO_MEMORY_TARGET_PID: std::cell::RefCell<Option<(String, Instant, Option<u32>)>> = const { std::cell::RefCell::new(None) };
         static ESP_TARGET_BOUNDS: std::cell::RefCell<Option<(String, Instant, Option<(i32, i32, i32, i32)>)>> = const { std::cell::RefCell::new(None) };
-    }
-
-    pub(crate) fn invalidate_macro_memory_target_pid() {
-        MACRO_MEMORY_TARGET_PID.with(|cached| {
-            *cached.borrow_mut() = None;
-        });
     }
 
     fn macro_memory_process_info(pid: u32, module: &str) -> Option<(usize, usize, usize)> {
@@ -35700,90 +35656,6 @@ mod windows_overlay {
         }
 
         #[test]
-        fn test_compute_follow_3d_keys() {
-            // Target is straight ahead (along positive Z, camera looking along +Z: fa=0, fb=1)
-            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0);
-            assert_eq!(keys, [true, false, false, false], "should press W when target is ahead");
-
-            // Target is far away ahead (100.0 units) -> should still press W!
-            let keys = compute_follow_3d_keys(0.0, 100.0, 0.0, 1.0, 1.0);
-            assert_eq!(keys, [true, false, false, false], "should press W when target is far ahead");
-
-            // Target is behind (along negative Z)
-            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0);
-            assert_eq!(keys, [false, false, true, false], "should press S when target is behind");
-
-            // Target is to the right (along positive X)
-            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0);
-            assert_eq!(keys, [false, false, false, true], "should press D when target is right");
-
-            // Target is to the left (along negative X)
-            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0);
-            assert_eq!(keys, [false, true, false, false], "should press A when target is left");
-
-            // Target is within stop distance
-            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0);
-            assert_eq!(keys, [false, false, false, false], "should not press any key when within stop distance");
-        }
-
-        #[test]
-        fn test_follow_3d_swap_direction_pair_alignment() {
-            // Test Case 1: Session 2 from live log (fa=0.68, fb=0.73, Target at dx=19.23, dy=18.14)
-            let mut fa = 0.68f32;
-            let mut fb = 0.73f32;
-            let (rot_fa, rot_fb) = (-fb, fa);
-            fa = rot_fa;
-            fb = rot_fb;
-            let keys = compute_follow_3d_keys(19.23, 18.14, fa, fb, 1.0);
-            assert!(keys[3], "should press D towards 43 deg target with rotated vector");
-            assert!(!keys[0], "should not press W towards 43 deg target with rotated vector");
-
-            // Test Case 2: Session at 11:35 from live log (fa=0.04, fb=-1.00, Target at dx=31.06, dy=12.10)
-            let (rot_fa2, rot_fb2) = (-(-1.00f32), 0.04f32);
-            let keys2 = compute_follow_3d_keys(31.06, 12.10, rot_fa2, rot_fb2, 1.0);
-            assert!(keys2[0], "should press W towards East target with rotated vector");
-            assert!(!keys2[1], "should not press A towards East target with rotated vector");
-
-            // Test Case 3: Stop distance safeguard when configured as 0.0
-            let keys_close = compute_follow_3d_keys(0.8, 0.6, rot_fa2, rot_fb2, 0.0);
-            assert_eq!(keys_close, [false; 4], "should stop cleanly within 1.5m when stop_dist is 0.0");
-        }
-
-        #[test]
-        fn test_follow_3d_key_repeat_cycle() {
-            let mut held = [false; 4];
-            let mut events = Vec::new();
-
-            let tick = |want_keys: [bool; 4], held: &mut [bool; 4], events: &mut Vec<(&'static str, usize, bool)>| {
-                for idx in 0..4 {
-                    if want_keys[idx] {
-                        let is_repeat = held[idx];
-                        held[idx] = true;
-                        events.push(("down", idx, is_repeat));
-                    } else if held[idx] {
-                        held[idx] = false;
-                        events.push(("up", idx, false));
-                    }
-                }
-            };
-
-            // Tick 1: Moving forward
-            tick([true, false, false, false], &mut held, &mut events);
-            assert_eq!(events.pop(), Some(("down", 0, false)), "first tick should be non-repeat key down");
-            assert!(held[0]);
-
-            // Tick 2: Still moving forward (main character pressed/released W)
-            tick([true, false, false, false], &mut held, &mut events);
-            assert_eq!(events.pop(), Some(("down", 0, true)), "subsequent tick should maintain repeat key down");
-            assert!(held[0]);
-
-            // Tick 3: Reached stop distance
-            tick([false, false, false, false], &mut held, &mut events);
-            assert_eq!(events.pop(), Some(("up", 0, false)), "stopping should release key");
-            assert!(!held[0]);
-        }
-
-        #[test]
         fn test_set_variable_round_expression_without_braces() {
             let _guard = TEST_MUTEX.lock().unwrap();
             RUNTIME_VARIABLES.lock().clear();
@@ -37028,7 +36900,6 @@ mod windows_overlay {
             MacroAction::BackgroundClick => return send_background_click(step),
             MacroAction::BackgroundMouseMove => return send_background_mouse_move(step),
             MacroAction::BackgroundKey => return send_background_key(step),
-            MacroAction::Follow3DTarget => return execute_follow_3d_target(step, None, false),
             MacroAction::TypeText => {
                 let text = interpolate_variables(&step.key);
                 return if step.type_text_paste {
@@ -38038,556 +37909,6 @@ mod windows_overlay {
                 let _ = AttachThreadInput(current_thread, target_thread, false);
             }
         }
-        Ok(())
-    }
-
-    struct Follow3DActiveSession {
-        stop_flag: Arc<AtomicBool>,
-        _owner_preset_id: Option<u32>,
-        _is_hold: bool,
-        input_hwnd: Arc<AtomicIsize>,
-        held_keys: Arc<Mutex<[bool; 4]>>, // [W, A, S, D]
-    }
-
-    static ACTIVE_FOLLOW_3D_SESSION: Lazy<Mutex<Option<Follow3DActiveSession>>> =
-        Lazy::new(|| Mutex::new(None));
-
-    fn post_bg_key_down(target: HWND, vk: u32, is_repeat: bool) {
-        unsafe {
-            let scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-            let prev_state = if is_repeat { 1u32 << 30 } else { 0u32 };
-            let lparam = LPARAM((1u32 | ((scan & 0xFF) << 16) | prev_state) as isize);
-            let _ = PostMessageW(Some(target), WM_KEYDOWN, WPARAM(vk as usize), lparam);
-        }
-    }
-
-    fn post_bg_key_up(target: HWND, vk: u32) {
-        unsafe {
-            let scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-            let lparam = LPARAM((1u32 | ((scan & 0xFF) << 16) | (1 << 30) | (1 << 31)) as isize);
-            let _ = PostMessageW(Some(target), WM_KEYUP, WPARAM(vk as usize), lparam);
-        }
-    }
-
-    fn log_follow_3d_debug(msg: &str) {
-        if let Ok(root) = crate::storage::AppPaths::default_root() {
-            let path = root.join("follow_3d_debug.log");
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                use std::io::Write;
-                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-                let _ = writeln!(file, "[{now}] {msg}");
-            }
-        }
-    }
-
-    pub(crate) fn stop_follow_3d_target_for_preset(preset_id: Option<u32>) {
-        let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
-        if let Some(session) = session_guard.as_ref() {
-            if let Some(pid) = preset_id {
-                if session._owner_preset_id.is_some() && session._owner_preset_id != Some(pid) {
-                    return;
-                }
-            }
-        }
-        if let Some(session) = session_guard.take() {
-            log_follow_3d_debug("STOP: session ended and keys released");
-            session.stop_flag.store(true, Ordering::SeqCst);
-            let target_hwnd = HWND(session.input_hwnd.load(Ordering::SeqCst) as *mut _);
-            if !target_hwnd.0.is_null() {
-                let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
-                let mut held = session.held_keys.lock();
-                for idx in 0..4 {
-                    if held[idx] {
-                        held[idx] = false;
-                        post_bg_key_up(target_hwnd, vk_keys[idx]);
-                    }
-                }
-            }
-        }
-    }
-
-    pub(crate) fn stop_follow_3d_target() {
-        stop_follow_3d_target_for_preset(None);
-    }
-
-    pub(crate) fn is_follow_3d_active() -> bool {
-        ACTIVE_FOLLOW_3D_SESSION.lock().is_some()
-    }
-
-    pub(crate) fn compute_follow_3d_keys(
-        dx: f32,
-        dy: f32,
-        fa: f32,
-        fb: f32,
-        stop_dist: f32,
-    ) -> [bool; 4] {
-        let dist = dx.hypot(dy);
-        let mut want_keys = [false; 4]; // [W, A, S, D]
-        let effective_stop = if stop_dist <= 0.05 {
-            1.5
-        } else {
-            stop_dist.max(0.2)
-        };
-        if dist > effective_stop {
-            let f_score = dx * fa + dy * fb;
-            let r_score = dx * fb - dy * fa;
-            let angle = r_score.atan2(f_score).to_degrees();
-
-            // Symmetrical 8-way sector partitioning (each direction has an exact 45 deg cone)
-            want_keys[0] = (-67.5..=67.5).contains(&angle);
-            want_keys[1] = (-157.5..=-22.5).contains(&angle);
-            want_keys[2] = angle > 112.5 || angle < -112.5;
-            want_keys[3] = (22.5..=157.5).contains(&angle);
-        }
-        want_keys
-    }
-
-    pub(crate) fn resolve_follow_3d_leader_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
-        let (target_base, is_focused_rule) = spec.leader_window.as_deref()
-            .map(|s| {
-                let (base, rule) = crate::window_list::parse_window_match_rule(s);
-                (base, matches!(rule, Some(crate::window_list::WindowMatchRule::Focused)))
-            })
-            .unwrap_or(("", true));
-
-        // If the selector requests [Focused] or has no window specified, prioritize the LIVE foreground window
-        if is_focused_rule || spec.leader_window.as_deref().unwrap_or("").trim().is_empty() {
-            let live = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-            if !live.0.is_null() {
-                let root = unsafe { windows::Win32::UI::WindowsAndMessaging::GetAncestor(live, windows::Win32::UI::WindowsAndMessaging::GA_ROOT) };
-                let candidate = if root.0.is_null() { live } else { root };
-                let mut pid = 0;
-                unsafe {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(candidate, Some(&mut pid));
-                }
-                if pid != std::process::id() && pid != 0 {
-                    if target_base.is_empty() {
-                        return Some(candidate);
-                    }
-                    if let Some(title) = crate::window_list::window_title(candidate) {
-                        if crate::window_list::window_matches_candidate_title(&title, "", target_base, false) {
-                            return Some(candidate);
-                        }
-                    }
-                }
-            }
-
-            // Fallback to cached foreground window if live was MacroNest itself or temporary popup
-            let cached = HWND(crate::overlay::FOREGROUND_WINDOW_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
-            if !cached.0.is_null() && unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(cached)).as_bool() } {
-                let mut pid = 0;
-                unsafe {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(cached, Some(&mut pid));
-                }
-                if pid != std::process::id() && pid != 0 {
-                    if target_base.is_empty() {
-                        return Some(cached);
-                    }
-                    if let Some(title) = crate::window_list::window_title(cached) {
-                        if crate::window_list::window_matches_candidate_title(&title, "", target_base, false) {
-                            return Some(cached);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(selector) = spec.leader_window.as_deref().filter(|s| !s.trim().is_empty()) {
-            crate::window_list::find_window_handle(Some(selector))
-        } else {
-            crate::window_list::find_window_handle(None)
-        }
-    }
-
-    pub(crate) fn resolve_follow_3d_follower_window(
-        spec: &crate::model::Follow3DTargetSpec,
-        leader_hwnd: Option<HWND>,
-    ) -> Option<HWND> {
-        let leader_hwnd = leader_hwnd.or_else(|| resolve_follow_3d_leader_window(spec));
-        let (follower_base, is_unfocused_rule) = spec.follower_window.as_deref()
-            .map(|s| {
-                let (base, rule) = crate::window_list::parse_window_match_rule(s);
-                (base, matches!(rule, Some(crate::window_list::WindowMatchRule::Unfocused)) || rule.is_none())
-            })
-            .unwrap_or(("", true));
-
-        // When follower is [Unfocused] (or default) and we know the leader window, pick the other game window
-        if is_unfocused_rule && let Some(l_hwnd) = leader_hwnd {
-            let leader_title_owned = crate::window_list::window_title(l_hwnd);
-            let base = if !follower_base.is_empty() {
-                follower_base
-            } else if let Some(ref title) = leader_title_owned {
-                crate::window_list::strip_rule_suffix(title)
-            } else {
-                ""
-            };
-            if !base.is_empty() {
-                let candidates = crate::window_list::find_all_windows_by_candidate(base, false);
-                if let Some(other) = candidates.into_iter().find(|&h| h != l_hwnd) {
-                    return Some(other);
-                }
-                let candidates_dup = crate::window_list::find_all_windows_by_candidate(base, true);
-                if let Some(other) = candidates_dup.into_iter().find(|&h| h != l_hwnd) {
-                    return Some(other);
-                }
-            }
-        }
-
-        if let Some(selector) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
-            let res = crate::window_list::find_window_handle(Some(selector));
-            if let Some(l_hwnd) = leader_hwnd {
-                if res == Some(l_hwnd) || res.is_none() {
-                    let (base, rule) = crate::window_list::parse_window_match_rule(selector);
-                    if matches!(rule, Some(crate::window_list::WindowMatchRule::Unfocused) | None) {
-                        let candidates = crate::window_list::find_all_windows_by_candidate(base, false);
-                        if let Some(other) = candidates.into_iter().find(|&h| h != l_hwnd) {
-                            return Some(other);
-                        }
-                        let candidates_dup = crate::window_list::find_all_windows_by_candidate(base, true);
-                        if let Some(other) = candidates_dup.into_iter().find(|&h| h != l_hwnd) {
-                            return Some(other);
-                        }
-                    }
-                }
-            }
-            if res.is_some() && res != leader_hwnd {
-                return res;
-            }
-        }
-
-        // Default when follower_window is not specified: unfocused counterpart of leader
-        if let Some(l_hwnd) = leader_hwnd
-            && let Some(title) = crate::window_list::window_title(l_hwnd)
-        {
-            let clean_title = crate::window_list::strip_rule_suffix(&title);
-            let unfocused_selector = format!("{clean_title} [The Unfocused One]");
-            if let Some(unfocused) = crate::window_list::find_window_handle(Some(&unfocused_selector)) {
-                if unfocused != l_hwnd {
-                    return Some(unfocused);
-                }
-            }
-            let candidates = crate::window_list::find_all_windows_by_candidate(clean_title, false);
-            if let Some(other) = candidates.into_iter().find(|&h| h != l_hwnd) {
-                return Some(other);
-            }
-            let candidates_dup = crate::window_list::find_all_windows_by_candidate(clean_title, true);
-            if let Some(other) = candidates_dup.into_iter().find(|&h| h != l_hwnd) {
-                return Some(other);
-            }
-        }
-
-        crate::window_list::find_window_handle(Some("[The Unfocused One]"))
-            .or_else(|| crate::window_list::find_window_handle(None))
-            .filter(|&h| Some(h) != leader_hwnd)
-    }
-
-    pub(crate) fn resolve_follow_3d_input_window(
-        spec: &crate::model::Follow3DTargetSpec,
-        follower_hwnd: HWND,
-    ) -> HWND {
-        if let Some(selector) = spec.input_window.as_deref().filter(|s| !s.trim().is_empty()) {
-            let (_, rule) = crate::window_list::parse_window_match_rule(selector);
-            if matches!(rule, Some(crate::window_list::WindowMatchRule::Unfocused))
-                || Some(selector) == spec.follower_window.as_deref()
-            {
-                return follower_hwnd;
-            }
-            let res = crate::window_list::find_window_handle(Some(selector)).unwrap_or(follower_hwnd);
-            if res.0.is_null() {
-                follower_hwnd
-            } else {
-                res
-            }
-        } else {
-            follower_hwnd
-        }
-    }
-
-    fn execute_follow_3d_target(
-        step: &MacroStep,
-        owner_preset_id: Option<u32>,
-        is_hold: bool,
-    ) -> Result<()> {
-        if step.follow_3d_spec.mode == crate::model::Follow3DMode::Stop {
-            stop_follow_3d_target();
-            return Ok(());
-        }
-
-        stop_follow_3d_target();
-
-        invalidate_macro_memory_target_pid();
-
-        let spec = step.follow_3d_spec.clone();
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let held_keys = Arc::new(Mutex::new([false; 4]));
-        let background_find_child = step.background_find_child;
-
-        // Roles are strictly resolved at the moment the macro is activated
-        let leader_hwnd = resolve_follow_3d_leader_window(&spec);
-        let follower_hwnd = resolve_follow_3d_follower_window(&spec, leader_hwnd);
-
-        let Some(leader_hwnd) = leader_hwnd else {
-            bail!("Follow3DTarget: Leader window could not be found");
-        };
-        if leader_hwnd.0.is_null() {
-            bail!("Follow3DTarget: Leader window handle is null");
-        }
-
-        let Some(follower_hwnd) = follower_hwnd else {
-            bail!("Follow3DTarget: Follower window could not be found");
-        };
-        if follower_hwnd.0.is_null() {
-            bail!("Follow3DTarget: Follower window handle is null");
-        }
-
-        if leader_hwnd == follower_hwnd {
-            let leader_name = spec.leader_window.as_deref().unwrap_or("Focused window");
-            let follower_name = spec.follower_window.as_deref().unwrap_or("Unfocused window (Default)");
-            bail!(
-                "Follow3DTarget: Cả Leader Target ('{}') và Follower Target ('{}') đều trỏ về cùng một cửa sổ (0x{:X})! Vui lòng chọn 1 mục tiêu là [The Focused One] và 1 mục tiêu là [The Unfocused One] (hoặc chọn 2 cửa sổ khác nhau).",
-                leader_name,
-                follower_name,
-                leader_hwnd.0 as usize
-            );
-        }
-
-        let input_hwnd = resolve_follow_3d_input_window(&spec, follower_hwnd);
-        let target_input = if background_find_child {
-            unsafe { find_background_input_child(input_hwnd) }
-        } else {
-            input_hwnd
-        };
-
-        let target_input_raw = target_input.0 as isize;
-        let shared_input_hwnd = Arc::new(AtomicIsize::new(target_input_raw));
-
-        let pid_leader = {
-            let mut pid = 0;
-            unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(leader_hwnd, Some(&mut pid));
-            }
-            (pid != 0).then_some(pid)
-        }
-        .or_else(|| {
-            let mut init_frame = EspReadFrame::default();
-            init_frame.pid_for_opt(spec.leader_window.as_deref())
-        });
-
-        let pid_follower = {
-            let mut pid = 0;
-            unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(follower_hwnd, Some(&mut pid));
-            }
-            (pid != 0).then_some(pid)
-        }
-        .or_else(|| {
-            let mut init_frame = EspReadFrame::default();
-            init_frame.pid_for_opt(spec.follower_window.as_deref())
-        });
-
-        let Some(pid_leader) = pid_leader else {
-            bail!("Follow3DTarget: Không thể xác định Process ID của Leader window!");
-        };
-        let Some(pid_follower) = pid_follower else {
-            bail!("Follow3DTarget: Không thể xác định Process ID của Follower window!");
-        };
-
-        if pid_leader == pid_follower {
-            bail!(
-                "Follow3DTarget: Leader và Follower cùng thuộc một Process ID ({})! Vui lòng chọn 2 cửa sổ thuộc 2 client game khác nhau.",
-                pid_leader
-            );
-        }
-
-        let start_msg = format!(
-            "START SESSION: Leader HWND=0x{:X} (PID={}), Follower HWND=0x{:X} (PID={}), Input HWND=0x{:X}, SwapAB={}",
-            leader_hwnd.0 as usize, pid_leader, follower_hwnd.0 as usize, pid_follower, target_input.0 as usize, spec.swap_direction_pair
-        );
-        eprintln!("[Follow3D] === {} ===", start_msg);
-        log_follow_3d_debug(&start_msg);
-
-        *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
-            stop_flag: stop_flag.clone(),
-            _owner_preset_id: owner_preset_id,
-            _is_hold: is_hold,
-            input_hwnd: shared_input_hwnd.clone(),
-            held_keys: held_keys.clone(),
-        });
-
-        let thread_stop = stop_flag.clone();
-        let thread_held = held_keys.clone();
-
-        thread::spawn(move || {
-            let mut frame = EspReadFrame::default();
-            let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
-            let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(5, 500));
-            let target_input = HWND(target_input_raw as *mut _);
-            let mut last_sample_log = Instant::now() - Duration::from_secs(1);
-            let mut last_key_repeat = Instant::now();
-
-            while !thread_stop.load(Ordering::SeqCst) {
-                if is_ui_in_foreground() {
-                    break;
-                }
-                // If this session is owned by a Hold macro, stop immediately if the hold key was released
-                if let Some(pid) = owner_preset_id {
-                    if is_hold {
-                        let is_still_held = HOOK_STATE.lock().active_hold_macros.contains_key(&pid);
-                        if !is_still_held {
-                            break;
-                        }
-                    }
-                    if STOP_REQUESTED_MACRO_PRESETS.lock().contains(&pid)
-                        || FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&pid)
-                    {
-                        break;
-                    }
-                }
-
-                frame.begin_sample();
-
-                let lx = frame.read_value(pid_leader, &spec.leader_x, spec.value_type).ok();
-                let ly = if !spec.leader_y.trim().is_empty() {
-                    frame.read_value(pid_leader, &spec.leader_y, spec.value_type).ok()
-                } else {
-                    frame.read_value(pid_leader, &spec.leader_z, spec.value_type).ok()
-                };
-
-                let fx = frame.read_value(pid_follower, &spec.follower_x, spec.value_type).ok();
-                let fy = if !spec.follower_y.trim().is_empty() {
-                    frame.read_value(pid_follower, &spec.follower_y, spec.value_type).ok()
-                } else {
-                    frame.read_value(pid_follower, &spec.follower_z, spec.value_type).ok()
-                };
-
-                let mut forward_opt: Option<(f32, f32)> = None;
-                match spec.orientation_mode {
-                    crate::model::Follow3DOrientationMode::ForwardPairPitch => {
-                        let fa = frame.read_value(pid_follower, &spec.camera_forward_a, spec.value_type).ok();
-                        let fb = frame.read_value(pid_follower, &spec.camera_forward_b, spec.value_type).ok();
-                        if let (Some(a), Some(b)) = (fa, fb) {
-                            if a.hypot(b) > 0.01 {
-                                forward_opt = Some((a, b));
-                            }
-                        }
-                    }
-                    crate::model::Follow3DOrientationMode::Angles => {
-                        if let Ok(yaw) = frame.read_value(pid_follower, &spec.camera_yaw, spec.value_type) {
-                            let is_radians = match spec.angle_unit {
-                                crate::model::Follow3DAngleUnit::Radians => true,
-                                crate::model::Follow3DAngleUnit::Degrees => false,
-                                crate::model::Follow3DAngleUnit::Auto => {
-                                    yaw.abs() <= std::f32::consts::PI * 2.05 && yaw != 0.0
-                                }
-                            };
-                            let rad = if is_radians {
-                                yaw
-                            } else {
-                                yaw.to_radians()
-                            };
-
-                            forward_opt = Some((rad.sin(), rad.cos()));
-                        }
-                    }
-                }
-
-                if let (Some(lx), Some(ly), Some(fx), Some(fy), Some((mut fa, mut fb))) =
-                    (lx, ly, fx, fy, forward_opt)
-                {
-                    if spec.swap_direction_pair {
-                        let (rot_fa, rot_fb) = (-fb, fa);
-                        fa = rot_fa;
-                        fb = rot_fb;
-                    }
-
-                    let mut dx = lx - fx;
-                    let mut dy = ly - fy;
-
-                    if spec.invert_x {
-                        dx = -dx;
-                    }
-                    if spec.invert_y {
-                        dy = -dy;
-                    }
-
-                    let mut want_keys = compute_follow_3d_keys(
-                        dx,
-                        dy,
-                        fa,
-                        fb,
-                        spec.stop_distance,
-                    );
-
-                    if spec.invert_forward {
-                        want_keys.swap(0, 2); // W <-> S
-                    }
-                    if spec.invert_strafe {
-                        want_keys.swap(1, 3); // A <-> D
-                    }
-                    if spec.swap_forward_strafe {
-                        want_keys.swap(0, 3); // W <-> D
-                        want_keys.swap(1, 2); // A <-> S
-                    }
-
-                    if last_sample_log.elapsed() >= Duration::from_millis(1000) {
-                        last_sample_log = Instant::now();
-                        let dist = dx.hypot(dy);
-                        let sample_msg = format!(
-                            "SAMPLE [Preset {:?}, SwapAB={}, InvFwd={}]: Leader=({:.2}, {:.2}), Follower=({:.2}, {:.2}), delta=({:.2}, {:.2}, dist={:.2}), forward=({:.2}, {:.2}) -> keys={:?}",
-                            owner_preset_id, spec.swap_direction_pair, spec.invert_forward, lx, ly, fx, fy, dx, dy, dist, fa, fb, want_keys
-                        );
-                        eprintln!("[Follow3D] {}", sample_msg);
-                        log_follow_3d_debug(&sample_msg);
-                    }
-
-                    let mut held = thread_held.lock();
-                    let should_repeat = last_key_repeat.elapsed() >= Duration::from_millis(50);
-                    if should_repeat {
-                        last_key_repeat = Instant::now();
-                    }
-                    for idx in 0..4 {
-                        let vk = vk_keys[idx];
-                        if want_keys[idx] {
-                            if !held[idx] {
-                                held[idx] = true;
-                                post_bg_key_down(target_input, vk, false);
-                            } else if should_repeat {
-                                post_bg_key_down(target_input, vk, true);
-                            }
-                        } else if held[idx] {
-                            held[idx] = false;
-                            post_bg_key_up(target_input, vk);
-                        }
-                    }
-                } else {
-                    // If coordinates cannot be read (e.g. game minimised/loading), release all keys to avoid stuck walking
-                    let mut held = thread_held.lock();
-                    for idx in 0..4 {
-                        if held[idx] {
-                            held[idx] = false;
-                            post_bg_key_up(target_input, vk_keys[idx]);
-                        }
-                    }
-                }
-
-                thread::sleep(interval);
-            }
-
-            let mut held = thread_held.lock();
-            for idx in 0..4 {
-                if held[idx] {
-                    held[idx] = false;
-                    post_bg_key_up(target_input, vk_keys[idx]);
-                }
-            }
-            let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
-            if let Some(session) = session_guard.as_ref() {
-                if Arc::ptr_eq(&session.stop_flag, &thread_stop) {
-                    *session_guard = None;
-                }
-            }
-        });
-
         Ok(())
     }
 
@@ -39900,7 +39221,6 @@ mod windows_overlay {
             stop_macro_preset_by_id(id);
         }
 
-        stop_follow_3d_target_for_preset(None);
         clear_geometry_overlay();
         SUPPRESSED_MACRO_HOTKEYS.lock().clear();
     }
@@ -42357,105 +41677,6 @@ mod windows_overlay {
         set_valid(true);
     }
 
-    fn execute_esp_3d_aim_lock(step: &crate::model::MacroStep) {
-        let Some(preset_id) = step.esp_preset_id else {
-            return;
-        };
-        let preset = {
-            let state = HOOK_STATE.lock();
-            state
-                .esp_presets
-                .iter()
-                .find(|p| p.id == preset_id)
-                .cloned()
-        };
-        let Some(preset) = preset else {
-            return;
-        };
-
-        let mut frame = EspReadFrame::default();
-        let Ok((target, camera, yaw, pitch)) = read_esp_inputs(&preset, &mut frame) else {
-            return;
-        };
-
-        let (screen_w, screen_h) = match esp_target_bounds(preset.target_window.as_str()) {
-            Some((_, _, w, h)) => (w as f32, h as f32),
-            None => (1920.0, 1080.0),
-        };
-        let aspect = (screen_w / screen_h.max(1.0)).clamp(0.1, 10.0);
-
-        let Some(projection) =
-            crate::model::project_esp(&preset, target, camera, yaw, pitch, aspect)
-        else {
-            return;
-        };
-
-        let half_w = screen_w * 0.5;
-        let half_h = screen_h * 0.5;
-
-        let (delta_px_x, delta_px_y) = if projection.in_front {
-            (
-                projection.normalized_x * half_w,
-                projection.normalized_y * half_h,
-            )
-        } else {
-            let dir = if projection.normalized_x >= 0.0 {
-                1.0
-            } else {
-                -1.0
-            };
-            (dir * half_w * 1.5, 0.0)
-        };
-
-        let sens = (step.esp_aim_sens_scale * 1.0).clamp(0.01, 20.0) as f32;
-        let smooth_speed = (step.esp_aim_smooth_speed.clamp(0.01, 1.0) * 0.25) as f32;
-
-        let move_float_x = delta_px_x * sens * smooth_speed + (step.vision_move_offset_x as f32);
-        let move_float_y = delta_px_y * sens * smooth_speed + (step.vision_move_offset_y as f32);
-
-        let (move_float_x, move_float_y) = match step.vision_move_axis_lock {
-            crate::model::VisionMoveAxisLock::HorizontalOnly => (move_float_x, 0.0),
-            crate::model::VisionMoveAxisLock::VerticalOnly => (0.0, move_float_y),
-            crate::model::VisionMoveAxisLock::None => (move_float_x, move_float_y),
-        };
-
-        static SUBPIXEL_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-        static SUBPIXEL_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-
-        let add_milli_x = (move_float_x * 1000.0) as i32;
-        let add_milli_y = (move_float_y * 1000.0) as i32;
-
-        let total_milli_x =
-            SUBPIXEL_X.fetch_add(add_milli_x, std::sync::atomic::Ordering::Relaxed) + add_milli_x;
-        let total_milli_y =
-            SUBPIXEL_Y.fetch_add(add_milli_y, std::sync::atomic::Ordering::Relaxed) + add_milli_y;
-
-        let send_x = total_milli_x / 1000;
-        let send_y = total_milli_y / 1000;
-
-        SUBPIXEL_X.fetch_sub(send_x * 1000, std::sync::atomic::Ordering::Relaxed);
-        SUBPIXEL_Y.fetch_sub(send_y * 1000, std::sync::atomic::Ordering::Relaxed);
-
-        if send_x != 0 || send_y != 0 {
-            let passes = (step.vision_move_passes.clamp(1, 10)) as i32;
-            let step_x = send_x / passes;
-            let step_y = send_y / passes;
-            let rem_x = send_x % passes;
-            let rem_y = send_y % passes;
-
-            for i in 0..passes {
-                let cur_x = step_x + if i == 0 { rem_x } else { 0 };
-                let cur_y = step_y + if i == 0 { rem_y } else { 0 };
-                if cur_x != 0 || cur_y != 0 {
-                    let _ = send_mouse_move_relative(cur_x, cur_y);
-                }
-                if passes > 1 && step.vision_move_delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(step.vision_move_delay_ms.min(10)));
-                }
-            }
-        }
-    }
-
     fn set_esp_preset_enabled(preset_id: u32, enabled: bool) {
         let ui_tx = {
             let mut state = HOOK_STATE.lock();
@@ -42838,9 +42059,6 @@ mod fallback {
     pub fn screen_draw_active() -> bool {
         false
     }
-    pub(crate) fn is_follow_3d_active() -> bool {
-        false
-    }
     pub fn screen_draw_undo() {}
     pub fn screen_draw_redo() {}
     pub fn take_latest_vision_capture_mouse_move() -> Option<(i32, i32)> {
@@ -42871,10 +42089,7 @@ mod fallback {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::windows_overlay::{
-        compute_follow_3d_keys, macro_enabled_map, macro_presets_outside_scope,
-        resolve_follow_3d_input_window,
-    };
+    use super::windows_overlay::{macro_enabled_map, macro_presets_outside_scope};
     use crate::model::{MacroGroup, MacroPreset};
 
     #[test]
@@ -42914,71 +42129,6 @@ mod tests {
             crate::overlay::MacroFolderScope::Folder(7),
         );
         assert_eq!(outside, vec![20]);
-    }
-
-    #[test]
-    fn test_compute_follow_3d_keys() {
-        // [W, A, S, D]
-        // Facing (0, 1) - along +Z
-        // Target straight ahead (0, 5) -> W only
-        let keys = compute_follow_3d_keys(0.0, 5.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [true, false, false, false]);
-
-        // Target straight behind (0, -5) -> S only
-        let keys = compute_follow_3d_keys(0.0, -5.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [false, false, true, false]);
-
-        // Target to the right (5, 0) -> D only (angle = 90 deg, W inactive as |90| > 80)
-        let keys = compute_follow_3d_keys(5.0, 0.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [false, false, false, true]);
-
-        // Target diagonally forward-right (3, 3) -> angle = 45 deg -> both W and D active
-        let keys = compute_follow_3d_keys(3.0, 3.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [true, false, false, true]);
-
-        // Target to the left (-5, 0) -> A only
-        let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [false, true, false, false]);
-
-        // Within stop distance (0.5 <= 1.0) -> all keys released
-        let keys = compute_follow_3d_keys(0.3, 0.4, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [false; 4]);
-
-        // Invert Y: if dy is negated (-5.0 instead of 5.0), presses S instead of W
-        let keys = compute_follow_3d_keys(0.0, -5.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [false, false, true, false]);
-
-        // Invert X: if dx is negated (-5.0 instead of 5.0), presses A instead of D
-        let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [false, true, false, false]);
-
-        // Direct diagonal pursuit: at 45 deg, drives diagonally in (W + D) directly toward target
-        let keys = compute_follow_3d_keys(0.92, 0.92, 0.0, 1.0, 0.5);
-        assert_eq!(keys, [true, false, false, true], "diagonal pursuit should drive directly toward target with W+D");
-    }
-
-    #[test]
-    fn test_resolve_follow_3d_input_window_default_and_custom() {
-        use crate::model::Follow3DTargetSpec;
-        use windows::Win32::Foundation::HWND;
-
-        let mut spec = Follow3DTargetSpec::default();
-        let fake_hwnd = HWND(0x2000 as *mut _);
-
-        // When input_window is None, resolves to follower_hwnd:
-        spec.input_window = None;
-        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
-
-        // When input_window is empty, resolves to follower_hwnd:
-        spec.input_window = Some("   ".to_string());
-        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
-
-        // When input_window specifies unfocused rule, resolves to follower_hwnd:
-        spec.input_window = Some("IdentityV [The Unfocused One]".to_string());
-        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
-
-        spec.input_window = Some("IdentityV [Unfocused]".to_string());
-        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
     }
 
     #[test]
