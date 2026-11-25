@@ -3290,8 +3290,8 @@ impl CrosshairApp {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(self.tr(
-                                "⚡ Filter mode active: Scanner buttons will filter the Address list below",
-                                "⚡ Chế độ lọc đang bật: Các nút scan sẽ lọc trực tiếp Address list bên dưới"
+                                "Filter mode active: Scanner buttons will filter the Address list below",
+                                "Chế độ lọc đang bật: Các nút scan sẽ lọc trực tiếp Address list bên dưới"
                             ))
                             .small()
                             .strong()
@@ -8137,11 +8137,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 }
 
                                 let live_label = if is_capturing {
-                                    "⚡ Waiting..."
+                                    "Waiting..."
                                 } else if is_vietnamese {
-                                    "⚡ Lấy giá trị"
+                                    "Lấy giá trị"
                                 } else {
-                                    "⚡ Get Value"
+                                    "Get Value"
                                 };
                                 let live_response = ui.add_sized(
                                     [live_w, btn_h],
@@ -8350,9 +8350,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             }
 
                             let live_cap_label = if is_vietnamese {
-                                "⚡ Lấy địa chỉ & giá trị mới vào Address List (Capture Live Address)"
+                                "Lấy địa chỉ & giá trị mới vào Address List (Capture Live Address)"
                             } else {
-                                "⚡ Capture Live Address & Value to Address List"
+                                "Capture Live Address & Value to Address List"
                             };
                             if ui.button(live_cap_label).clicked() {
                                 pending_action = Some(CodeAction::CaptureLiveValue(index));
@@ -9175,9 +9175,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         match started {
             Ok(active_watch) => {
                 self.memory_panel.status = if is_vietnamese {
-                    format!("⚡ Đang đợi instruction '{}' (0x{:X}) thực thi… Hãy di chuyển nhân vật hoặc thao tác trong game!", code_name, instruction_address)
+                    format!("Đang đợi instruction '{}' (0x{:X}) thực thi… Hãy di chuyển nhân vật hoặc thao tác trong game!", code_name, instruction_address)
                 } else {
-                    format!("⚡ Arming capture on '{}' at 0x{:X}… Interact with game/character to trigger!", code_name, instruction_address)
+                    format!("Arming capture on '{}' at 0x{:X}… Interact with game/character to trigger!", code_name, instruction_address)
                 };
                 self.memory_panel.active_code_capture = Some(ActiveCodeCaptureSession {
                     code_index,
@@ -22088,7 +22088,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 }
                                 if !tokens1.is_empty() {
                                     let btn = ui.small_button(
-                                        RichText::new(self.tr("⚡ Wildcard", "⚡ Wildcard"))
+                                        RichText::new(self.tr("Wildcard", "Wildcard"))
                                             .color(Color32::from_rgb(90, 205, 250))
                                     ).on_hover_text(self.tr(
                                         "Generate wildcard permutations from Sample 1",
@@ -22124,7 +22124,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 }
                                 if !tokens2.is_empty() {
                                     let btn = ui.small_button(
-                                        RichText::new(self.tr("⚡ Wildcard", "⚡ Wildcard"))
+                                        RichText::new(self.tr("Wildcard", "Wildcard"))
                                             .color(Color32::from_rgb(90, 205, 250))
                                     ).on_hover_text(self.tr(
                                         "Generate wildcard permutations from Sample 2",
@@ -22280,7 +22280,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             }
                             if !result_pattern.is_empty() {
                                 let btn = ui.button(
-                                    RichText::new(self.tr("⚡ Auto Wildcard", "⚡ Tự động Wildcard"))
+                                    RichText::new(self.tr("Auto Wildcard", "Tự động Wildcard"))
                                         .color(Color32::from_rgb(90, 205, 250))
                                 );
                                 if btn.clicked() {
