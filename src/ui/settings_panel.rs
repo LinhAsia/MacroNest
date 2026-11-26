@@ -724,6 +724,9 @@ impl CrosshairApp {
                 .clicked()
                 {
                     self.downloaded_tools_open = !self.downloaded_tools_open;
+                    if self.downloaded_tools_open {
+                        self.refresh_downloaded_tools_status();
+                    }
                 }
 
                 if self.downloaded_tools_open {
@@ -2580,6 +2583,23 @@ impl CrosshairApp {
         }
     }
 
+    pub(crate) fn refresh_downloaded_tools_status(&mut self) {
+        self.opencv_installed = self.paths.opencv_dll.exists();
+        self.ffmpeg_installed = self.paths.ffmpeg_exe.exists();
+        self.game_capture_installed = crate::game_capture::is_game_capture_available(&self.paths);
+        if self.game_capture_installed {
+            crate::game_capture::prewarm_d3d_device();
+        }
+        self.frida_installed = self.paths.frida_helper_exe.exists();
+        self.interception_package_downloaded = self.paths.interception_zip.exists()
+            || self.paths.interception_package_dir.exists()
+            || self.paths.interception_installer_exe.exists();
+        self.interception_driver_checked = false;
+        self.arduino_tools_downloaded = self.paths.avrdude_exe.exists()
+            && self.paths.avrdude_conf.exists()
+            && self.paths.arduino_firmware_hex.exists();
+    }
+
     pub(crate) fn switch_active_data_folder(
         &mut self,
         ctx: &egui::Context,
@@ -2590,6 +2610,7 @@ impl CrosshairApp {
 
         self.paths = new_paths.clone();
         let _ = self.paths.ensure_dirs_and_assets();
+        self.refresh_downloaded_tools_status();
 
         self.persist_tx = crate::ui::spawn_persist_worker(self.paths.clone(), self.ui_tx.clone());
 

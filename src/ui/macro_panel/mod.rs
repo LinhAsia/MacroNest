@@ -18621,6 +18621,129 @@ if supports_move_mouse || show_detection_tuning {
                 macro_presets_persist_requested = true;
             }
         }
+        let step_ghost_label = |gid: u32, pid: u32, indices: &[usize]| -> String {
+            if indices.len() > 1 {
+                format!("{} steps (#{}..)", indices.len(), indices[0] + 1)
+            } else if let Some(&idx) = indices.first() {
+                let action_label = self
+                    .state
+                    .macro_groups
+                    .iter()
+                    .find(|g| g.id == gid)
+                    .and_then(|g| g.presets.iter().find(|p| p.id == pid))
+                    .and_then(|p| p.steps.get(idx))
+                    .map(|s| Self::macro_action_label(s.action))
+                    .unwrap_or("Step");
+                format!("#{}  {action_label}", idx + 1)
+            } else {
+                "Step".to_owned()
+            }
+        };
+        let ghost_info: Option<(&'static str, String)> = if right_drag_active && sec_down {
+            right_drag_state.as_ref().map(|state| match &state.kind {
+                MacroRightDragKind::Folder { folder_id } => {
+                    let name = self
+                        .state
+                        .macro_folders
+                        .iter()
+                        .find(|f| f.id == *folder_id)
+                        .map(|f| f.name.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| format!("Folder #{folder_id}"));
+                    ("Folder", name)
+                }
+                MacroRightDragKind::Group { group_id } => {
+                    let name = self
+                        .state
+                        .macro_groups
+                        .iter()
+                        .find(|g| g.id == *group_id)
+                        .map(|g| g.name.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| format!("Group #{group_id}"));
+                    ("Group", name)
+                }
+                MacroRightDragKind::Preset { group_id, preset_id } => {
+                    let name = self
+                        .state
+                        .macro_groups
+                        .iter()
+                        .find(|g| g.id == *group_id)
+                        .and_then(|g| g.presets.iter().find(|p| p.id == *preset_id))
+                        .map(|p| Self::format_macro_trigger_ui(language, p))
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or_else(|| format!("Preset #{preset_id}"));
+                    ("Preset", name)
+                }
+                MacroRightDragKind::Step {
+                    group_id,
+                    preset_id,
+                    indices,
+                } => ("Step", step_ghost_label(*group_id, *preset_id, indices)),
+            })
+        } else if let Some(payload) = egui::DragAndDrop::payload::<MacroStepDragPayload>(ui.ctx()) {
+            Some(("Step", step_ghost_label(payload.group_id, payload.preset_id, &payload.indices)))
+        } else {
+            None
+        };
+        if let (Some((kind_tag, ghost_title)), Some(pos)) = (ghost_info, right_drag_ptr_pos) {
+            let is_dark = self.state.ui_theme == UiThemeMode::Dark;
+            let (bg, border, badge_bg, text_color) = if is_dark {
+                (
+                    Color32::from_rgb(42, 92, 74),
+                    Color32::from_rgb(150, 250, 210),
+                    Color32::from_rgb(28, 64, 52),
+                    Color32::from_rgb(240, 252, 246),
+                )
+            } else {
+                (
+                    Color32::from_rgb(206, 246, 228),
+                    Color32::from_rgb(44, 158, 112),
+                    Color32::from_rgb(174, 232, 206),
+                    Color32::from_rgb(20, 48, 36),
+                )
+            };
+            egui::Area::new(egui::Id::new("macro-reorder-ghost-card"))
+                .order(egui::Order::Tooltip)
+                .interactable(false)
+                .fixed_pos(pos + egui::vec2(14.0, 10.0))
+                .show(ui.ctx(), |ui| {
+                    Frame::popup(ui.style())
+                        .fill(bg)
+                        .stroke(egui::Stroke::new(2.0, border))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(10, 6))
+                        .show(ui, |ui| {
+                            ui.set_max_width(340.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                ui.label(Self::material_icon_text(0xe945, 16.0).color(border));
+                                Frame::new()
+                                    .fill(badge_bg)
+                                    .corner_radius(egui::CornerRadius::same(4))
+                                    .inner_margin(egui::Margin::symmetric(5, 2))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(kind_tag)
+                                                .small()
+                                                .strong()
+                                                .color(text_color),
+                                        );
+                                    });
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(ghost_title)
+                                            .strong()
+                                            .color(text_color),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                        });
+                });
+        }
         if sec_released || !sec_down {
             ui.ctx().data_mut(|d| d.remove::<MacroRightDragState>(right_drag_id));
         } else if let Some((kind, origin)) = pending_right_drag_claim {
