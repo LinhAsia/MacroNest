@@ -1867,6 +1867,26 @@ impl CrosshairApp {
                     }
                 }
             }
+            MacroAction::ScanInstruction
+            | MacroAction::ReadMemory
+            | MacroAction::WriteMemory
+            | MacroAction::AutoAssembler => {
+                Self::collect_matching_memory_codes_from_text(
+                    &self.state.memory_code_list,
+                    trimmed_key,
+                    resources,
+                    seen,
+                );
+                let write_val = step.memory_write_value.trim();
+                if !write_val.is_empty() {
+                    Self::collect_matching_memory_codes_from_text(
+                        &self.state.memory_code_list,
+                        write_val,
+                        resources,
+                        seen,
+                    );
+                }
+            }
             _ => {}
         }
 
@@ -1989,6 +2009,59 @@ impl CrosshairApp {
                 if matched && seen.custom_tables.insert(table.id) {
                     resources.custom_tables.push(table.clone());
                 }
+            }
+        }
+    }
+
+    fn text_contains_memory_alias(text: &str, alias: &str) -> bool {
+        let alias = alias.trim();
+        if alias.is_empty() {
+            return false;
+        }
+        let lower_text = text.to_ascii_lowercase();
+        let needle = format!("@{}", alias.to_ascii_lowercase());
+        let mut from = 0usize;
+        while let Some(pos) = lower_text[from..].find(&needle) {
+            let start = from + pos;
+            let end = start + needle.len();
+            let boundary_ok = lower_text[end..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_');
+            if boundary_ok {
+                return true;
+            }
+            from = start + 1;
+        }
+        false
+    }
+
+    fn collect_matching_memory_codes_from_text(
+        memory_code_list: &[crate::model::MemoryCodeEntry],
+        text: &str,
+        resources: &mut crate::macro_code::MacroShareResources,
+        seen: &mut MacroShareCollectSeen,
+    ) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        for code_entry in memory_code_list {
+            let code_name = code_entry.name.trim();
+            let matched_alias = !code_name.is_empty()
+                && (Self::trimmed_eq_ignore_ascii_case(trimmed, code_name)
+                    || Self::text_contains_memory_alias(trimmed, code_name));
+            let matched_mod = !code_entry.module.is_empty() && {
+                let mod_off = format!("{}+{:X}", code_entry.module, code_entry.offset);
+                let mod_off_0x = format!("{}+0x{:X}", code_entry.module, code_entry.offset);
+                trimmed.eq_ignore_ascii_case(&mod_off) || trimmed.eq_ignore_ascii_case(&mod_off_0x)
+            };
+            if (matched_alias || matched_mod)
+                && seen
+                    .memory_code_list
+                    .insert((code_entry.module.to_ascii_lowercase(), code_entry.offset))
+            {
+                resources.memory_code_list.push(code_entry.clone());
             }
         }
     }
@@ -2412,9 +2485,13 @@ impl CrosshairApp {
         }
 
         for entry in resources.memory_code_list {
-            if !self.state.memory_code_list.iter().any(|existing| {
+            if let Some(existing) = self.state.memory_code_list.iter_mut().find(|existing| {
                 existing.module.eq_ignore_ascii_case(&entry.module) && existing.offset == entry.offset
             }) {
+                if existing.name.trim().is_empty() && !entry.name.trim().is_empty() {
+                    existing.name = entry.name;
+                }
+            } else {
                 self.state.memory_code_list.push(entry);
             }
         }
@@ -19682,6 +19759,58 @@ mod tests {
 
         let text6 = "table_nearest_dist ( \"Space Table\" , x , y )";
         assert_eq!(CrosshairApp::extract_table_names_from_text(text6), vec!["Space Table"]);
+    }
+
+    #[test]
+    fn macro_share_collect_matches_scan_instruction_alias_and_module_offset() {
+        let codes = vec![
+            crate::model::MemoryCodeEntry {
+                name: "PLAYERSSS".to_owned(),
+                module: "game.dll".to_owned(),
+                offset: 0x1234,
+                instruction: "mov eax,[rcx+10]".to_owned(),
+                ..Default::default()
+            },
+            crate::model::MemoryCodeEntry {
+                name: "HP".to_owned(),
+                module: "game.dll".to_owned(),
+                offset: 0x5678,
+                instruction: "movss xmm0,[rbx]".to_owned(),
+                ..Default::default()
+            },
+        ];
+
+        let mut resources = crate::macro_code::MacroShareResources::default();
+        let mut seen = super::MacroShareCollectSeen::default();
+        CrosshairApp::collect_matching_memory_codes_from_text(
+            &codes,
+            "@PLAYERSSS",
+            &mut resources,
+            &mut seen,
+        );
+        assert_eq!(resources.memory_code_list.len(), 1);
+        assert_eq!(resources.memory_code_list[0].name, "PLAYERSSS");
+
+        // Boundary check: "@HP_MAX" must not match "HP"
+        let mut res2 = crate::macro_code::MacroShareResources::default();
+        let mut seen2 = super::MacroShareCollectSeen::default();
+        CrosshairApp::collect_matching_memory_codes_from_text(
+            &codes,
+            "@HP_MAX",
+            &mut res2,
+            &mut seen2,
+        );
+        assert!(res2.memory_code_list.is_empty());
+
+        // module+offset fallback
+        CrosshairApp::collect_matching_memory_codes_from_text(
+            &codes,
+            "game.dll+5678",
+            &mut res2,
+            &mut seen2,
+        );
+        assert_eq!(res2.memory_code_list.len(), 1);
+        assert_eq!(res2.memory_code_list[0].offset, 0x5678);
     }
 }
 
