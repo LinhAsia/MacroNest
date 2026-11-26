@@ -834,6 +834,21 @@ struct DisassemblerDialog {
     status: String,
     navigation_step: String,
     search: String,
+    is_arm64: bool,
+}
+
+#[derive(Default)]
+struct Il2CppInspectorState {
+    is_open: bool,
+    dump: Option<std::sync::Arc<crate::il2cpp_dumper::Il2CppDumpResult>>,
+    loading: bool,
+    status: String,
+    rx: Option<crossbeam_channel::Receiver<Result<crate::il2cpp_dumper::Il2CppDumpResult, String>>>,
+    progress: std::sync::Arc<parking_lot::Mutex<String>>,
+    search: String,
+    assembly_filter: String,
+    selected_class_idx: Option<usize>,
+    include_compiler_generated: bool,
 }
 
 #[cfg(windows)]
@@ -1278,6 +1293,7 @@ pub(crate) struct MemoryPanelState {
     pub(crate) batch_replace_status: String,
     pub(crate) batch_replace_filter: String,
     pub(crate) android_bridge: crate::android_bridge::AndroidBridgeState,
+    il2cpp_inspector: Il2CppInspectorState,
     pub(crate) hex_calc_open: bool,
     pub(crate) hex_calc_expr: String,
     pub(crate) hex_calc_val_a: String,
@@ -1435,6 +1451,7 @@ impl Default for MemoryPanelState {
             batch_replace_status: String::new(),
             batch_replace_filter: String::new(),
             android_bridge: crate::android_bridge::AndroidBridgeState::new(),
+            il2cpp_inspector: Il2CppInspectorState::default(),
             hex_calc_open: false,
             hex_calc_expr: String::new(),
             hex_calc_val_a: String::new(),
@@ -1867,6 +1884,13 @@ impl CrosshairApp {
                         self.memory_panel.android_bridge.is_open = true;
                         ui.close();
                     }
+                    if ui
+                        .button(self.tr("IL2CPP Inspector (Android)", "IL2CPP Inspector (Android)"))
+                        .clicked()
+                    {
+                        self.memory_panel.il2cpp_inspector.is_open = true;
+                        ui.close();
+                    }
                     #[cfg(windows)]
                     {
                         ui.separator();
@@ -2025,6 +2049,7 @@ impl CrosshairApp {
         }
         self.render_deep_pointer_dialog(ui.ctx());
         self.render_android_bridge_popup(ui.ctx());
+        self.render_il2cpp_inspector_popup(ui.ctx());
         let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
         if !self.render_detached_memory_popup(
             ui.ctx(),
@@ -2323,6 +2348,7 @@ impl CrosshairApp {
         }
         self.render_deep_pointer_dialog(ctx);
         self.render_android_bridge_popup(ctx);
+        self.render_il2cpp_inspector_popup(ctx);
         let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
         if !self.render_detached_memory_popup(
             ctx,
@@ -6711,6 +6737,365 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         }
     }
 
+    fn render_il2cpp_inspector_popup(&mut self, ctx: &egui::Context) {
+        self.poll_il2cpp_ram_dump(ctx);
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-il2cpp-inspector-host",
+            "IL2CPP Inspector (Android RAM)",
+            self.memory_panel.il2cpp_inspector.is_open,
+            Self::render_il2cpp_inspector_dialog,
+        ) {
+            self.memory_panel.il2cpp_inspector.is_open = false;
+        }
+    }
+
+    fn start_il2cpp_ram_dump(&mut self) {
+        if self.memory_panel.il2cpp_inspector.loading {
+            return;
+        }
+        let Some(adb) = self
+            .memory_panel
+            .android_bridge
+            .adb_path
+            .clone()
+            .or_else(crate::android_bridge::find_adb_executable)
+        else {
+            self.memory_panel.il2cpp_inspector.status =
+                "ADB executable not found. Open Android Bridge first.".to_owned();
+            return;
+        };
+        let target = if self.memory_panel.android_bridge.selected_target.is_empty() {
+            self.memory_panel.android_bridge.custom_target.clone()
+        } else {
+            self.memory_panel.android_bridge.selected_target.clone()
+        };
+        let Some(pid) = self.memory_panel.android_bridge.selected_pid else {
+            self.memory_panel.il2cpp_inspector.status =
+                "Select the Android game process in Android Emulator Bridge first.".to_owned();
+            return;
+        };
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let progress = std::sync::Arc::new(parking_lot::Mutex::new("Starting IL2CPP RAM dump...".to_owned()));
+        let progress_bg = std::sync::Arc::clone(&progress);
+        self.memory_panel.il2cpp_inspector.loading = true;
+        self.memory_panel.il2cpp_inspector.rx = Some(rx);
+        self.memory_panel.il2cpp_inspector.progress = progress;
+        self.memory_panel.il2cpp_inspector.status = format!("Dumping Android PID {pid}...");
+
+        std::thread::spawn(move || {
+            let res = crate::il2cpp_dumper::dump_live_android_il2cpp(&adb, &target, pid, |msg| {
+                *progress_bg.lock() = msg.to_owned();
+            });
+            let _ = tx.send(res);
+        });
+    }
+
+    fn poll_il2cpp_ram_dump(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.il2cpp_inspector.loading {
+            return;
+        }
+        let progress_msg = self.memory_panel.il2cpp_inspector.progress.lock().clone();
+        self.memory_panel.il2cpp_inspector.status = progress_msg;
+        ctx.request_repaint();
+
+        if let Some(rx) = self.memory_panel.il2cpp_inspector.rx.as_ref()
+            && let Ok(result) = rx.try_recv()
+        {
+            self.memory_panel.il2cpp_inspector.loading = false;
+            self.memory_panel.il2cpp_inspector.rx = None;
+            match result {
+                Ok(dump) => {
+                    let has_acs = dump
+                        .assemblies
+                        .iter()
+                        .any(|a| a.name.eq_ignore_ascii_case("Assembly-CSharp.dll"));
+                    if self.memory_panel.il2cpp_inspector.assembly_filter.is_empty() && has_acs {
+                        self.memory_panel.il2cpp_inspector.assembly_filter =
+                            "Assembly-CSharp.dll".to_owned();
+                    }
+                    self.memory_panel.il2cpp_inspector.selected_class_idx = None;
+                    self.memory_panel.il2cpp_inspector.status = format!(
+                        "Loaded {} classes across {} assemblies (metadata v{}, libil2cpp @ 0x{:X})",
+                        dump.classes.len(),
+                        dump.assemblies.len(),
+                        dump.metadata_version,
+                        dump.libil2cpp_base
+                    );
+                    self.memory_panel.il2cpp_inspector.dump = Some(std::sync::Arc::new(dump));
+                }
+                Err(err) => {
+                    self.memory_panel.il2cpp_inspector.status = format!("Dump failed: {err}");
+                }
+            }
+        }
+    }
+
+    fn render_il2cpp_inspector_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.memory_panel.il2cpp_inspector.is_open {
+            return;
+        }
+
+        let loading = self.memory_panel.il2cpp_inspector.loading;
+        let pid_label = self
+            .memory_panel
+            .android_bridge
+            .selected_pid
+            .map_or_else(|| "None".to_owned(), |p| format!("{p} ({})", self.memory_panel.android_bridge.selected_process_name));
+
+        let dump_btn_lbl = self.tr("Dump from Game RAM", "Dump từ RAM Game").to_owned();
+        let export_cs_lbl = self.tr("Export dump.cs", "Xuất dump.cs").to_owned();
+        let export_json_lbl = self.tr("Export JSON (MCP)", "Xuất JSON (MCP)").to_owned();
+        let save_meta_lbl = self.tr("Save metadata.dat", "Lưu metadata.dat").to_owned();
+        let dump_snapshot = self.memory_panel.il2cpp_inspector.dump.as_ref().cloned();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("Android PID: {pid_label}")).strong());
+            if ui
+                .add_enabled(!loading, Button::new(&dump_btn_lbl))
+                .clicked()
+            {
+                self.start_il2cpp_ram_dump();
+            }
+            if let Some(dump) = dump_snapshot.as_ref() {
+                if ui.button(&export_cs_lbl).clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("dump.cs")
+                        .add_filter("C# Dump", &["cs"])
+                        .save_file()
+                {
+                    let text = crate::il2cpp_dumper::format_dump_cs(dump);
+                    match std::fs::write(&path, text) {
+                        Ok(_) => self.memory_panel.il2cpp_inspector.status = format!("Saved {}", path.display()),
+                        Err(e) => self.memory_panel.il2cpp_inspector.status = format!("Save failed: {e}"),
+                    }
+                }
+                if ui.button(&export_json_lbl).clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("il2cpp_dump.json")
+                        .add_filter("JSON", &["json"])
+                        .save_file()
+                {
+                    match serde_json::to_string_pretty(dump.as_ref()) {
+                        Ok(json) => match std::fs::write(&path, json) {
+                            Ok(_) => self.memory_panel.il2cpp_inspector.status = format!("Saved {}", path.display()),
+                            Err(e) => self.memory_panel.il2cpp_inspector.status = format!("Save failed: {e}"),
+                        },
+                        Err(e) => self.memory_panel.il2cpp_inspector.status = format!("JSON error: {e}"),
+                    }
+                }
+                if ui.button(&save_meta_lbl).clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("global-metadata.dat")
+                        .add_filter("IL2CPP Metadata", &["dat"])
+                        .save_file()
+                {
+                    match std::fs::write(&path, &dump.raw_metadata) {
+                        Ok(_) => self.memory_panel.il2cpp_inspector.status = format!("Saved {}", path.display()),
+                        Err(e) => self.memory_panel.il2cpp_inspector.status = format!("Save failed: {e}"),
+                    }
+                }
+            }
+        });
+
+        let status_text = self.memory_panel.il2cpp_inspector.status.clone();
+        if !status_text.is_empty() {
+            let color = if status_text.starts_with("Dump failed") || status_text.contains("error") {
+                Color32::from_rgb(255, 120, 90)
+            } else if loading {
+                Color32::from_rgb(230, 180, 70)
+            } else {
+                Color32::from_rgb(100, 215, 145)
+            };
+            ui.label(RichText::new(status_text).color(color).small());
+        }
+        ui.separator();
+
+        let search_lbl = self.tr("Search:", "Tìm:").to_owned();
+        let compiler_lbl = self.tr("Compiler types (<>)", "Kiểu biên dịch (<>)").to_owned();
+        let empty_hint = self.tr(
+            "Connect Android Bridge, select the game PID, then click 'Dump from Game RAM' (works even on HTPX/packed games).",
+            "Kết nối Android Bridge, chọn PID game rồi bấm 'Dump từ RAM Game' (chạy được cả với game pack HTPX).",
+        ).to_owned();
+        let Some(dump) = self.memory_panel.il2cpp_inspector.dump.as_ref().cloned() else {
+            ui.label(RichText::new(empty_hint).weak());
+            return;
+        };
+
+        let mut asm_names = vec![String::new()];
+        for asm in &dump.assemblies {
+            asm_names.push(asm.name.clone());
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(&search_lbl);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.memory_panel.il2cpp_inspector.search)
+                    .hint_text("Tatari, Deploy, Board, Grid, Lua...")
+                    .desired_width(220.0),
+            );
+            if !self.memory_panel.il2cpp_inspector.search.is_empty() && ui.small_button("Clear").clicked() {
+                self.memory_panel.il2cpp_inspector.search.clear();
+            }
+            let current_asm_label = if self.memory_panel.il2cpp_inspector.assembly_filter.is_empty() {
+                "All Assemblies"
+            } else {
+                self.memory_panel.il2cpp_inspector.assembly_filter.as_str()
+            };
+            egui::ComboBox::from_id_salt("il2cpp_asm_filter")
+                .width(180.0)
+                .selected_text(current_asm_label)
+                .show_ui(ui, |ui| {
+                    for name in &asm_names {
+                        let label = if name.is_empty() { "All Assemblies" } else { name.as_str() };
+                        ui.selectable_value(
+                            &mut self.memory_panel.il2cpp_inspector.assembly_filter,
+                            name.clone(),
+                            label,
+                        );
+                    }
+                });
+            ui.checkbox(
+                &mut self.memory_panel.il2cpp_inspector.include_compiler_generated,
+                &compiler_lbl,
+            );
+        });
+
+        let query = self.memory_panel.il2cpp_inspector.search.trim().to_lowercase();
+        let asm_filter = self.memory_panel.il2cpp_inspector.assembly_filter.clone();
+        let show_compiler = self.memory_panel.il2cpp_inspector.include_compiler_generated;
+
+        let filtered_classes: Vec<usize> = dump
+            .classes
+            .iter()
+            .enumerate()
+            .filter(|(_, cls)| {
+                if !asm_filter.is_empty() && cls.assembly_name != asm_filter {
+                    return false;
+                }
+                if !show_compiler && cls.name.contains('<') {
+                    return false;
+                }
+                if query.is_empty() {
+                    return true;
+                }
+                cls.full_name().to_lowercase().contains(&query)
+                    || cls.methods.iter().any(|m| m.name.to_lowercase().contains(&query))
+                    || cls.fields.iter().any(|f| f.name.to_lowercase().contains(&query))
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        ui.label(
+            RichText::new(format!("Matching classes: {}", filtered_classes.len()))
+                .small()
+                .weak(),
+        );
+        ui.separator();
+
+        let mut disasm_target: Option<(usize, String)> = None;
+        let mut copy_text_req: Option<String> = None;
+
+        ui.columns(2, |cols| {
+            cols[0].push_id("il2cpp_class_col", |ui| {
+                ui.label(RichText::new("Classes").strong());
+                egui::ScrollArea::vertical()
+                    .id_salt("il2cpp_classes_scroll")
+                    .max_height(380.0)
+                    .auto_shrink([false, false])
+                    .show_rows(ui, 20.0, filtered_classes.len(), |ui, range| {
+                        for row in range {
+                            let cls_idx = filtered_classes[row];
+                            let cls = &dump.classes[cls_idx];
+                            let selected = self.memory_panel.il2cpp_inspector.selected_class_idx == Some(cls_idx);
+                            let label = format!(
+                                "{}  ({}m / {}f)",
+                                cls.full_name(),
+                                cls.methods.len(),
+                                cls.fields.len()
+                            );
+                            if ui.selectable_label(selected, label).clicked() {
+                                self.memory_panel.il2cpp_inspector.selected_class_idx = Some(cls_idx);
+                            }
+                        }
+                    });
+            });
+
+            cols[1].push_id("il2cpp_detail_col", |ui| {
+                if let Some(cls_idx) = self.memory_panel.il2cpp_inspector.selected_class_idx
+                    && let Some(cls) = dump.classes.get(cls_idx)
+                {
+                    ui.label(RichText::new(cls.full_name()).strong());
+                    ui.label(RichText::new(&cls.assembly_name).small().weak());
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .id_salt("il2cpp_detail_scroll")
+                        .max_height(360.0)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if !cls.methods.is_empty() {
+                                ui.label(RichText::new(format!("Methods ({})", cls.methods.len())).strong());
+                                for m in &cls.methods {
+                                    let highlight = !query.is_empty() && m.name.to_lowercase().contains(&query);
+                                    ui.horizontal(|ui| {
+                                        let rva_txt = if m.rva > 0 {
+                                            format!("0x{:X}", m.rva)
+                                        } else {
+                                            "0x0".to_owned()
+                                        };
+                                        ui.label(
+                                            RichText::new(&rva_txt)
+                                                .monospace()
+                                                .color(Color32::from_rgb(100, 210, 255)),
+                                        );
+                                        let sig = format!("{}({} args)", m.name, m.param_count);
+                                        let name_rt = if highlight {
+                                            RichText::new(sig).strong().color(Color32::from_rgb(255, 220, 100))
+                                        } else {
+                                            RichText::new(sig)
+                                        };
+                                        ui.label(name_rt);
+                                        if m.va > 0 {
+                                            if ui.small_button("Disasm").clicked() {
+                                                disasm_target = Some((
+                                                    m.va,
+                                                    format!("{}::{} (RVA 0x{:X})", cls.name, m.name, m.rva),
+                                                ));
+                                            }
+                                            if ui.small_button("Copy RVA").clicked() {
+                                                copy_text_req = Some(rva_txt);
+                                            }
+                                        }
+                                    });
+                                }
+                                ui.add_space(6.0);
+                            }
+                            if !cls.fields.is_empty() {
+                                ui.label(RichText::new(format!("Fields ({})", cls.fields.len())).strong());
+                                for f in &cls.fields {
+                                    ui.label(
+                                        RichText::new(format!("  {}  (token 0x{:X})", f.name, f.token))
+                                            .monospace()
+                                            .small(),
+                                    );
+                                }
+                            }
+                        });
+                } else {
+                    ui.label(RichText::new("Select a class on the left to view methods, RVAs & fields.").weak());
+                }
+            });
+        });
+
+        if let Some(txt) = copy_text_req {
+            ui.ctx().copy_text(txt.clone());
+            self.memory_panel.il2cpp_inspector.status = format!("Copied {txt}");
+        }
+        if let Some((va, label)) = disasm_target {
+            self.open_arm64_disassembler_at_guest_va(va, &label);
+        }
+    }
+
     fn render_android_bridge_dialog(&mut self, ui: &mut egui::Ui) {
         if !self.memory_panel.android_bridge.is_open {
             return;
@@ -6881,6 +7266,11 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 let reg_count = self.memory_panel.android_bridge.all_regions.len();
                 if reg_count > 0 {
                     ui.label(RichText::new(format!("({reg_count} RAM regions)")).color(Color32::from_rgb(80, 210, 120)).weak());
+                }
+                if self.memory_panel.android_bridge.selected_pid.is_some() {
+                    if ui.button(self.tr("IL2CPP Inspector", "IL2CPP Inspector")).clicked() {
+                        self.memory_panel.il2cpp_inspector.is_open = true;
+                    }
                 }
             });
 
@@ -9014,6 +9404,47 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             status,
             navigation_step: "10".to_owned(),
             search: String::new(),
+            is_arm64: false,
+        });
+    }
+
+    #[cfg(windows)]
+    fn open_arm64_disassembler_at_guest_va(&mut self, guest_va: usize, label: &str) {
+        let Some(guest_pid) = self.memory_panel.android_bridge.selected_pid else {
+            self.memory_panel.status = "Select an Android PID in Android Bridge first".to_owned();
+            return;
+        };
+        let adb = self
+            .memory_panel
+            .android_bridge
+            .adb_path
+            .clone()
+            .or_else(crate::android_bridge::find_adb_executable);
+        let Some(adb) = adb else {
+            self.memory_panel.status = "ADB executable not found".to_owned();
+            return;
+        };
+        let target = if self.memory_panel.android_bridge.selected_target.is_empty() {
+            self.memory_panel.android_bridge.custom_target.clone()
+        } else {
+            self.memory_panel.android_bridge.selected_target.clone()
+        };
+        let (lines, status) =
+            match crate::il2cpp_dumper::read_guest_mem_exact(&adb, &target, guest_pid, guest_va, 160)
+            {
+                Ok(bytes) => (
+                    crate::arm64_disasm::decode_arm64_block(&bytes, guest_va),
+                    format!("ARM64 ({label})"),
+                ),
+                Err(err) => (Vec::new(), format!("ARM64 read failed: {err}")),
+            };
+        self.memory_panel.disassembler_dialog = Some(DisassemblerDialog {
+            address: guest_va,
+            lines,
+            status,
+            navigation_step: "10".to_owned(),
+            search: String::new(),
+            is_arm64: true,
         });
     }
 
@@ -15311,6 +15742,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     status: "Ready".to_owned(),
                     navigation_step: "10".to_owned(),
                     search: String::new(),
+                    is_arm64: false,
                 },
                 Err(status) => DisassemblerDialog {
                     address: hit.address,
@@ -15318,6 +15750,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     status,
                     navigation_step: "10".to_owned(),
                     search: String::new(),
+                    is_arm64: false,
                 },
             });
         }
@@ -16188,7 +16621,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     });
                 ui.separator();
                 ui.label(RichText::new("Memory around instruction (Selectable Hex Dump)").strong());
-                if let Some(pid) = self.memory_panel.process_pid {
+                if !dialog.is_arm64
+                    && let Some(pid) = self.memory_panel.process_pid
+                {
                     let base = dialog.address.saturating_sub(64);
                     match read_memory_bytes(pid, base, 256) {
                         Ok(bytes) => {
@@ -16262,7 +16697,15 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             self.add_code_access_address(addr, self.memory_panel.value_type, self.memory_panel.text_encoding, 32);
         }
         if let Some(target_addr) = nav_address {
-            if let Some(pid) = pid {
+            let is_arm64 = self
+                .memory_panel
+                .disassembler_dialog
+                .as_ref()
+                .is_some_and(|d| d.is_arm64);
+            if is_arm64 {
+                let aligned = target_addr & !3usize;
+                self.open_arm64_disassembler_at_guest_va(aligned, "Guest ARM64");
+            } else if let Some(pid) = pid {
                 let mut loaded = None;
                 let mut last_error = None;
                 'address: for backtrack in 0..=15 {

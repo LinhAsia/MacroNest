@@ -30,6 +30,8 @@ mod video_recorder;
 mod window_list;
 mod game_capture;
 pub mod android_bridge;
+pub mod arm64_disasm;
+pub mod il2cpp_dumper;
 #[cfg(windows)]
 pub mod nvenc;
 #[cfg(windows)]
