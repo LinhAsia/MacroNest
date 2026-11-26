@@ -2220,6 +2220,8 @@ impl CrosshairApp {
                 (vec2(600.0, 420.0), vec2(460.0, 260.0))
             } else if id == "memory-auto-assemble-host" {
                 (vec2(680.0, 520.0), vec2(400.0, 260.0))
+            } else if id == "memory-il2cpp-inspector-host" {
+                (vec2(860.0, 560.0), vec2(520.0, 320.0))
             } else {
                 (vec2(640.0, 440.0), vec2(380.0, 240.0))
             };
@@ -6927,11 +6929,12 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             asm_names.push(asm.name.clone());
         }
 
+        let search_hint = self.tr("Class, method, field...", "Class, method, field...").to_owned();
         ui.horizontal(|ui| {
             ui.label(&search_lbl);
             ui.add(
                 egui::TextEdit::singleline(&mut self.memory_panel.il2cpp_inspector.search)
-                    .hint_text("Tatari, Deploy, Board, Grid, Lua...")
+                    .hint_text(&search_hint)
                     .desired_width(220.0),
             );
             if !self.memory_panel.il2cpp_inspector.search.is_empty() && ui.small_button("Clear").clicked() {
@@ -6999,11 +7002,13 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         ui.columns(2, |cols| {
             cols[0].push_id("il2cpp_class_col", |ui| {
                 ui.label(RichText::new("Classes").strong());
+                let classes_h = ui.available_height().max(180.0);
                 egui::ScrollArea::vertical()
                     .id_salt("il2cpp_classes_scroll")
-                    .max_height(380.0)
+                    .max_height(classes_h)
                     .auto_shrink([false, false])
                     .show_rows(ui, 20.0, filtered_classes.len(), |ui, range| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                         for row in range {
                             let cls_idx = filtered_classes[row];
                             let cls = &dump.classes[cls_idx];
@@ -7014,7 +7019,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 cls.methods.len(),
                                 cls.fields.len()
                             );
-                            if ui.selectable_label(selected, label).clicked() {
+                            if ui.selectable_label(selected, &label).on_hover_text(&label).clicked() {
                                 self.memory_panel.il2cpp_inspector.selected_class_idx = Some(cls_idx);
                             }
                         }
@@ -7028,45 +7033,63 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     ui.label(RichText::new(cls.full_name()).strong());
                     ui.label(RichText::new(&cls.assembly_name).small().weak());
                     ui.separator();
+                    let detail_h = ui.available_height().max(180.0);
                     egui::ScrollArea::vertical()
                         .id_salt("il2cpp_detail_scroll")
-                        .max_height(360.0)
+                        .max_height(detail_h)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             if !cls.methods.is_empty() {
                                 ui.label(RichText::new(format!("Methods ({})", cls.methods.len())).strong());
+                                let row_w = (ui.available_width() - 6.0).max(240.0);
                                 for m in &cls.methods {
                                     let highlight = !query.is_empty() && m.name.to_lowercase().contains(&query);
-                                    ui.horizontal(|ui| {
-                                        let rva_txt = if m.rva > 0 {
-                                            format!("0x{:X}", m.rva)
-                                        } else {
-                                            "0x0".to_owned()
-                                        };
-                                        ui.label(
-                                            RichText::new(&rva_txt)
-                                                .monospace()
-                                                .color(Color32::from_rgb(100, 210, 255)),
-                                        );
-                                        let sig = format!("{}({} args)", m.name, m.param_count);
-                                        let name_rt = if highlight {
-                                            RichText::new(sig).strong().color(Color32::from_rgb(255, 220, 100))
-                                        } else {
-                                            RichText::new(sig)
-                                        };
-                                        ui.label(name_rt);
-                                        if m.va > 0 {
-                                            if ui.small_button("Disasm").clicked() {
-                                                disasm_target = Some((
-                                                    m.va,
-                                                    format!("{}::{} (RVA 0x{:X})", cls.name, m.name, m.rva),
-                                                ));
+                                    let rva_txt = if m.rva > 0 {
+                                        format!("0x{:X}", m.rva)
+                                    } else {
+                                        "0x0".to_owned()
+                                    };
+                                    let sig = format!("{}({} args)", m.name, m.param_count);
+                                    let name_rt = if highlight {
+                                        RichText::new(&sig).strong().color(Color32::from_rgb(255, 220, 100))
+                                    } else {
+                                        RichText::new(&sig)
+                                    };
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(row_w, 20.0),
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if m.va > 0 {
+                                                if ui.small_button("Copy RVA").clicked() {
+                                                    copy_text_req = Some(rva_txt.clone());
+                                                }
+                                                if ui.small_button("Disasm").clicked() {
+                                                    disasm_target = Some((
+                                                        m.va,
+                                                        format!("{}::{} (RVA 0x{:X})", cls.name, m.name, m.rva),
+                                                    ));
+                                                }
                                             }
-                                            if ui.small_button("Copy RVA").clicked() {
-                                                copy_text_req = Some(rva_txt);
-                                            }
-                                        }
-                                    });
+                                            ui.with_layout(
+                                                egui::Layout::left_to_right(egui::Align::Center),
+                                                |ui| {
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(88.0, 18.0),
+                                                        egui::Layout::left_to_right(egui::Align::Center),
+                                                        |ui| {
+                                                            ui.label(
+                                                                RichText::new(&rva_txt)
+                                                                    .monospace()
+                                                                    .color(Color32::from_rgb(100, 210, 255)),
+                                                            );
+                                                        },
+                                                    );
+                                                    ui.add(egui::Label::new(name_rt).truncate())
+                                                        .on_hover_text(&sig);
+                                                },
+                                            );
+                                        },
+                                    );
                                 }
                                 ui.add_space(6.0);
                             }
