@@ -1448,29 +1448,26 @@ impl CrosshairApp {
 
     fn advance_compact_preview_index(
         next_compact_preview_index: &mut usize,
-        total_len: usize,
         pointer_y: Option<f32>,
+        rect_top: f32,
         rect_bottom: f32,
         is_being_dragged: bool,
         compact_cursor: &mut usize,
         active_current_compact_index: Option<usize>,
+        dragged_height: f32,
     ) {
-        if *next_compact_preview_index == total_len
-            && pointer_y.is_some_and(|y| y < rect_bottom)
-        {
-            *next_compact_preview_index = if is_being_dragged {
-                *compact_cursor
-            } else {
-                let moving_up = active_current_compact_index
-                    .is_some_and(|current| *compact_cursor < current);
-                if moving_up {
-                    *compact_cursor
-                } else {
-                    *compact_cursor + 1
-                }
-            };
-        }
         if !is_being_dragged {
+            if let (Some(y), Some(current)) = (pointer_y, active_current_compact_index) {
+                let item_height = (rect_bottom - rect_top).max(0.0);
+                let edge = dragged_height.max(24.0).min(item_height * 0.5);
+                if *compact_cursor < current {
+                    if *next_compact_preview_index == current && y < rect_top + edge {
+                        *next_compact_preview_index = *compact_cursor;
+                    }
+                } else if y > rect_bottom - edge {
+                    *next_compact_preview_index = *compact_cursor + 1;
+                }
+            }
             *compact_cursor += 1;
         }
     }
@@ -6555,6 +6552,7 @@ impl CrosshairApp {
             origin: egui::Pos2,
             active: bool,
             preview_compact_index: Option<usize>,
+            dragged_height: f32,
         }
 
         const RIGHT_DRAG_THRESHOLD_PX: f32 = 6.0;
@@ -6580,6 +6578,7 @@ impl CrosshairApp {
             state.active = true;
         }
         let right_drag_active = right_drag_state.as_ref().is_some_and(|s| s.active);
+        let right_drag_height = right_drag_state.as_ref().map_or(0.0, |s| s.dragged_height);
         if right_drag_active {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             ui.ctx().request_repaint();
@@ -7107,7 +7106,7 @@ impl CrosshairApp {
                     slot += 1;
                 }
             }
-            (Some(cur_compact), total_vis, 0usize, drop_vis_pos)
+            (Some(cur_compact), cur_compact, 0usize, drop_vis_pos)
         } else {
             (None, 0usize, 0usize, 0usize)
         };
@@ -7152,7 +7151,7 @@ impl CrosshairApp {
                     slot += 1;
                 }
             }
-            (Some(cur_compact), total_vis, 0usize, drop_vis_pos)
+            (Some(cur_compact), cur_compact, 0usize, drop_vis_pos)
         } else {
             (None, 0usize, 0usize, 0usize)
         };
@@ -7356,15 +7355,21 @@ impl CrosshairApp {
                     if ((card_clicked && !pointer_in_widgets && !delete_clicked && !name_response.has_focus() && !right_drag_active) || icon_btn.clicked()) && !self.confirm_delete_folder_id.is_some() {
                         enter_folder_id = Some(folder_id);
                     }
+                    if folder_is_being_dragged {
+                        if let Some(state) = right_drag_state.as_mut() {
+                            state.dragged_height = frame_response.rect.height();
+                        }
+                    }
                     if dragged_visible_folder_pos.is_some() {
                         Self::advance_compact_preview_index(
                             &mut next_folder_compact_preview,
-                            visible_folder_ids.len(),
                             right_drag_pointer_y,
+                            frame_response.rect.top(),
                             frame_response.rect.bottom(),
                             folder_is_being_dragged,
                             &mut folder_compact_cursor,
                             folder_active_current_compact,
+                            right_drag_height,
                         );
                     }
                     if sec_pressed
@@ -7408,12 +7413,13 @@ impl CrosshairApp {
                             if dragged_visible_group_pos.is_some() {
                                 Self::advance_compact_preview_index(
                                     &mut next_group_compact_preview,
-                                    visible_group_indices.len(),
                                     right_drag_pointer_y,
+                                    group_top,
                                     group_top + cached_height,
                                     false,
                                     &mut group_compact_cursor,
                                     group_active_current_compact,
+                                    right_drag_height,
                                 );
                             }
                             continue;
@@ -8014,7 +8020,7 @@ impl CrosshairApp {
                                 &[drag_vis_pos],
                                 stored,
                             );
-                            (order, Some(cur_compact), total_visible_presets, 0usize, drop_pos)
+                            (order, Some(cur_compact), cur_compact, 0usize, drop_pos)
                         } else {
                             ((0..total_visible_presets).collect(), None, 0usize, 0usize, 0usize)
                         };
@@ -13823,7 +13829,7 @@ if supports_move_mouse || show_detection_tuning {
                                 }
                             }
                             let mut step_rects = vec![Rect::ZERO; steps_len];
-                            let mut next_compact_preview_index = steps_len;
+                            let mut next_compact_preview_index = active_current_compact_index.unwrap_or(0);
                             let mut compact_cursor = 0usize;
                             let mut hovered_region = None;
                             let mut sync_delay_to_selected: Option<(String, u64, String)> = None;
@@ -13955,12 +13961,17 @@ if supports_move_mouse || show_detection_tuning {
                                     if step_drag_active {
                                         Self::advance_compact_preview_index(
                                             &mut next_compact_preview_index,
-                                            steps_len,
                                             pointer_y,
+                                            allocated_rect.top(),
                                             allocated_rect.bottom(),
                                             step_is_being_dragged,
                                             &mut compact_cursor,
                                             active_current_compact_index,
+                                            if step_right_drag_indices_active.is_some() {
+                                                right_drag_height
+                                            } else {
+                                                25.0
+                                            },
                                         );
                                     } else if !step_is_being_dragged {
                                         compact_cursor += 1;
@@ -17790,15 +17801,25 @@ if supports_move_mouse || show_detection_tuning {
                                     }
                                 }
                                 step_rects[step_index] = row_response.rect;
+                                if step_is_being_dragged {
+                                    if let Some(state) = right_drag_state.as_mut() {
+                                        state.dragged_height = row_response.rect.height();
+                                    }
+                                }
                                 if step_drag_active {
                                     Self::advance_compact_preview_index(
                                         &mut next_compact_preview_index,
-                                        steps_len,
                                         pointer_y,
+                                        row_response.rect.top(),
                                         row_response.rect.bottom(),
                                         step_is_being_dragged,
                                         &mut compact_cursor,
                                         active_current_compact_index,
+                                        if step_right_drag_indices_active.is_some() {
+                                            right_drag_height
+                                        } else {
+                                            25.0
+                                        },
                                     );
                                 } else if !step_is_being_dragged {
                                     compact_cursor += 1;
@@ -17926,15 +17947,21 @@ if supports_move_mouse || show_detection_tuning {
                                     ui.add_space(4.0);
                                 }
                             });
+                            if preset_is_being_dragged {
+                                if let Some(state) = right_drag_state.as_mut() {
+                                    state.dragged_height = preset_card_response.rect.height();
+                                }
+                            }
                             if dragged_visible_preset_pos.is_some() {
                                 Self::advance_compact_preview_index(
                                     &mut next_preset_compact_preview,
-                                    total_visible_presets,
                                     right_drag_pointer_y,
+                                    preset_card_response.rect.top(),
                                     preset_card_response.rect.bottom(),
                                     preset_is_being_dragged,
                                     &mut preset_compact_cursor,
                                     preset_active_current_compact,
+                                    right_drag_height,
                                 );
                             }
                             if sec_pressed
@@ -18060,15 +18087,21 @@ if supports_move_mouse || show_detection_tuning {
                             });
                         });
                     });
+                    if group_is_being_dragged {
+                        if let Some(state) = right_drag_state.as_mut() {
+                            state.dragged_height = group_card_response.rect.height();
+                        }
+                    }
                     if dragged_visible_group_pos.is_some() {
                         Self::advance_compact_preview_index(
                             &mut next_group_compact_preview,
-                            visible_group_indices.len(),
                             right_drag_pointer_y,
+                            group_card_response.rect.top(),
                             group_card_response.rect.bottom(),
                             group_is_being_dragged,
                             &mut group_compact_cursor,
                             group_active_current_compact,
+                            right_drag_height,
                         );
                     }
                     if sec_pressed
@@ -18599,6 +18632,7 @@ if supports_move_mouse || show_detection_tuning {
                         origin,
                         active: false,
                         preview_compact_index: None,
+                        dragged_height: 0.0,
                     },
                 );
             });
