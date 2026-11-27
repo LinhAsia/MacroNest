@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 base64 = "0.22"
 frida = { version = "0.17.2", features = ["auto-download"] }
+xz = "0.1"

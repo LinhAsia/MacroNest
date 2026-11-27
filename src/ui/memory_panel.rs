@@ -864,6 +864,34 @@ struct LuaInspectorState {
     show_symbols_view: bool,
 }
 
+struct FridaConsoleState {
+    is_open: bool,
+    use_android_remote: bool,
+    remote_host: String,
+    script: String,
+    status: String,
+    logs: Vec<String>,
+    setup_loading: bool,
+    setup_rx: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    setup_progress: std::sync::Arc<parking_lot::Mutex<String>>,
+}
+
+impl Default for FridaConsoleState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            use_android_remote: true,
+            remote_host: "127.0.0.1:27042".to_owned(),
+            script: "console.log('Frida attached: arch=' + Process.arch + ', modules=' + Process.enumerateModules().length);\n".to_owned(),
+            status: String::new(),
+            logs: Vec::new(),
+            setup_loading: false,
+            setup_rx: None,
+            setup_progress: std::sync::Arc::new(parking_lot::Mutex::new(String::new())),
+        }
+    }
+}
+
 #[cfg(windows)]
 struct CodeAccessDialog {
     code_index: usize,
@@ -1308,6 +1336,7 @@ pub(crate) struct MemoryPanelState {
     pub(crate) android_bridge: crate::android_bridge::AndroidBridgeState,
     il2cpp_inspector: Il2CppInspectorState,
     lua_inspector: LuaInspectorState,
+    frida_console: FridaConsoleState,
     pub(crate) hex_calc_open: bool,
     pub(crate) hex_calc_expr: String,
     pub(crate) hex_calc_val_a: String,
@@ -1467,6 +1496,7 @@ impl Default for MemoryPanelState {
             android_bridge: crate::android_bridge::AndroidBridgeState::new(),
             il2cpp_inspector: Il2CppInspectorState::default(),
             lua_inspector: LuaInspectorState::default(),
+            frida_console: FridaConsoleState::default(),
             hex_calc_open: false,
             hex_calc_expr: String::new(),
             hex_calc_val_a: String::new(),
@@ -1913,6 +1943,13 @@ impl CrosshairApp {
                         self.memory_panel.lua_inspector.is_open = true;
                         ui.close();
                     }
+                    if ui
+                        .button(self.tr("Frida Bridge (Android / Local)", "Frida Bridge (Android / Local)"))
+                        .clicked()
+                    {
+                        self.memory_panel.frida_console.is_open = true;
+                        ui.close();
+                    }
                     #[cfg(windows)]
                     {
                         ui.separator();
@@ -2073,6 +2110,7 @@ impl CrosshairApp {
         self.render_android_bridge_popup(ui.ctx());
         self.render_il2cpp_inspector_popup(ui.ctx());
         self.render_lua_inspector_popup(ui.ctx());
+        self.render_frida_console_popup(ui.ctx());
         let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
         if !self.render_detached_memory_popup(
             ui.ctx(),
@@ -2243,7 +2281,10 @@ impl CrosshairApp {
                 (vec2(600.0, 420.0), vec2(460.0, 260.0))
             } else if id == "memory-auto-assemble-host" {
                 (vec2(680.0, 520.0), vec2(400.0, 260.0))
-            } else if id == "memory-il2cpp-inspector-host" || id == "memory-lua-inspector-host" {
+            } else if id == "memory-il2cpp-inspector-host"
+                || id == "memory-lua-inspector-host"
+                || id == "memory-frida-console-host"
+            {
                 (vec2(860.0, 560.0), vec2(520.0, 320.0))
             } else {
                 (vec2(640.0, 440.0), vec2(380.0, 240.0))
@@ -2375,6 +2416,7 @@ impl CrosshairApp {
         self.render_android_bridge_popup(ctx);
         self.render_il2cpp_inspector_popup(ctx);
         self.render_lua_inspector_popup(ctx);
+        self.render_frida_console_popup(ctx);
         let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
         if !self.render_detached_memory_popup(
             ctx,
@@ -7197,6 +7239,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             }
         };
 
+        let pkg_name = self.memory_panel.android_bridge.selected_process_name.clone();
         let (tx, rx) = crossbeam_channel::bounded(1);
         let progress = std::sync::Arc::new(parking_lot::Mutex::new("Starting Android Lua RAM scan...".to_owned()));
         let progress_bg = std::sync::Arc::clone(&progress);
@@ -7206,7 +7249,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         self.memory_panel.lua_inspector.status = format!("Scanning Android PID {pid}...");
 
         std::thread::spawn(move || {
-            let res = crate::android_lua_dumper::dump_live_android_lua(&adb, &target, pid, |msg| {
+            let res = crate::android_lua_dumper::dump_live_android_lua(&adb, &target, pid, &pkg_name, |msg| {
                 *progress_bg.lock() = msg.to_owned();
             });
             let _ = tx.send(res);
@@ -7228,12 +7271,21 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             self.memory_panel.lua_inspector.rx = None;
             match result {
                 Ok(dump) => {
-                    self.memory_panel.lua_inspector.selected_chunk_idx = None;
-                    self.memory_panel.lua_inspector.show_symbols_view = !dump.symbols.is_empty();
+                    if !dump.symbols.is_empty() {
+                        self.memory_panel.lua_inspector.show_symbols_view = true;
+                        self.memory_panel.lua_inspector.selected_chunk_idx = None;
+                    } else if !dump.chunks.is_empty() {
+                        self.memory_panel.lua_inspector.show_symbols_view = false;
+                        self.memory_panel.lua_inspector.selected_chunk_idx = Some(0);
+                    } else {
+                        self.memory_panel.lua_inspector.show_symbols_view = true;
+                        self.memory_panel.lua_inspector.selected_chunk_idx = None;
+                    }
                     self.memory_panel.lua_inspector.status = format!(
-                        "Found {} ELF Lua symbols & {} RAM chunks across {} regions ({:.1} MB)",
+                        "Found {} ELF Lua symbols, {} RAM chunks, {} disk files across {} regions ({:.1} MB)",
                         dump.symbols.len(),
                         dump.chunks.len(),
+                        dump.disk_lua_files.len(),
                         dump.scanned_regions,
                         dump.scanned_bytes as f64 / (1024.0 * 1024.0)
                     );
@@ -7294,6 +7346,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             crate::android_lua_dumper::LuaChunkKind::LuaJit => "ljbc",
                             crate::android_lua_dumper::LuaChunkKind::Lua5x => "luac",
                             crate::android_lua_dumper::LuaChunkKind::Plaintext => "lua",
+                            crate::android_lua_dumper::LuaChunkKind::ScriptRef => "txt",
                         };
                         let safe: String = c
                             .name
@@ -7456,6 +7509,22 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                             if !any {
                                 ui.label(RichText::new("No matching ELF Lua exports found.").weak());
                             }
+                            if !dump.diagnostics.is_empty() {
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.label(RichText::new("Scan Diagnostics").strong().small());
+                                for line in &dump.diagnostics {
+                                    ui.label(RichText::new(line).small().weak());
+                                }
+                            }
+                            if !dump.disk_lua_files.is_empty() {
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.label(RichText::new(format!("App Storage Lua Files ({})", dump.disk_lua_files.len())).strong().small());
+                                for f in &dump.disk_lua_files {
+                                    ui.label(RichText::new(f).monospace().small());
+                                }
+                            }
                         });
                 } else if let Some(c_idx) = self.memory_panel.lua_inspector.selected_chunk_idx
                     && let Some(c) = dump.chunks.get(c_idx)
@@ -7513,6 +7582,251 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if let Some((va, label)) = disasm_target {
             self.open_arm64_disassembler_at_guest_va(va, &label);
         }
+    }
+
+    fn render_frida_console_popup(&mut self, ctx: &egui::Context) {
+        self.poll_frida_console(ctx);
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-frida-console-host",
+            "Frida Bridge (Android / Local)",
+            self.memory_panel.frida_console.is_open,
+            Self::render_frida_console_dialog,
+        ) {
+            self.memory_panel.frida_console.is_open = false;
+        }
+    }
+
+    fn start_frida_server_setup(&mut self) {
+        if self.memory_panel.frida_console.setup_loading {
+            return;
+        }
+        let adb = self
+            .memory_panel
+            .android_bridge
+            .adb_path
+            .clone()
+            .or_else(crate::android_bridge::find_adb_executable);
+        let Some(adb) = adb else {
+            self.memory_panel.frida_console.status =
+                "ADB executable not found. Open Android Bridge first.".to_owned();
+            return;
+        };
+        let target = if self.memory_panel.android_bridge.selected_target.is_empty() {
+            self.memory_panel.android_bridge.custom_target.clone()
+        } else {
+            self.memory_panel.android_bridge.selected_target.clone()
+        };
+        let helper = self.paths.frida_helper_exe.clone();
+        let bin_dir = self.paths.bin_dir.clone();
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let progress = std::sync::Arc::new(parking_lot::Mutex::new(
+            "Checking Android frida-server...".to_owned(),
+        ));
+        let progress_bg = std::sync::Arc::clone(&progress);
+        self.memory_panel.frida_console.setup_loading = true;
+        self.memory_panel.frida_console.setup_rx = Some(rx);
+        self.memory_panel.frida_console.setup_progress = progress;
+        self.memory_panel.frida_console.status = "Setting up frida-server...".to_owned();
+
+        std::thread::spawn(move || {
+            let res = crate::frida_injector::setup_android_frida_server(
+                &adb,
+                &target,
+                &helper,
+                &bin_dir,
+                |msg| *progress_bg.lock() = msg.to_owned(),
+            );
+            let _ = tx.send(res);
+        });
+    }
+
+    fn poll_frida_console(&mut self, ctx: &egui::Context) {
+        if self.memory_panel.frida_console.setup_loading {
+            let msg = self.memory_panel.frida_console.setup_progress.lock().clone();
+            self.memory_panel.frida_console.status = msg;
+            ctx.request_repaint();
+            if let Some(rx) = self.memory_panel.frida_console.setup_rx.as_ref()
+                && let Ok(res) = rx.try_recv()
+            {
+                self.memory_panel.frida_console.setup_loading = false;
+                self.memory_panel.frida_console.setup_rx = None;
+                match res {
+                    Ok(ok_msg) => {
+                        self.memory_panel.frida_console.status = ok_msg.clone();
+                        self.memory_panel.frida_console.logs.push(format!("[SETUP] {ok_msg}"));
+                    }
+                    Err(err) => {
+                        self.memory_panel.frida_console.status = format!("Setup failed: {err}");
+                        self.memory_panel.frida_console.logs.push(format!("[ERROR] {err}"));
+                    }
+                }
+            }
+        }
+        if let Some(sess) = self.memory_panel.frida_session.as_ref() {
+            let mut got_any = false;
+            while let Ok(ev) = sess.events.try_recv() {
+                got_any = true;
+                match ev {
+                    crate::frida_injector::Event::Status(s) => {
+                        self.memory_panel.frida_console.status = s.clone();
+                        self.memory_panel.frida_console.logs.push(format!("[STATUS] {s}"));
+                    }
+                    crate::frida_injector::Event::Log(l) => {
+                        self.memory_panel.frida_console.logs.push(l);
+                    }
+                }
+            }
+            if self.memory_panel.frida_console.logs.len() > 1000 {
+                let drop_n = self.memory_panel.frida_console.logs.len() - 1000;
+                self.memory_panel.frida_console.logs.drain(0..drop_n);
+            }
+            if got_any || self.memory_panel.frida_console.is_open {
+                ctx.request_repaint_after(Duration::from_millis(120));
+            }
+        }
+    }
+
+    fn render_frida_console_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.memory_panel.frida_console.is_open {
+            return;
+        }
+        let setup_loading = self.memory_panel.frida_console.setup_loading;
+        let attached = self.memory_panel.frida_session.is_some();
+        let remote_lbl = self
+            .tr(
+                "Android Remote (ADB frida-server)",
+                "Android Remote (ADB frida-server)",
+            )
+            .to_owned();
+
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut self.memory_panel.frida_console.use_android_remote,
+                &remote_lbl,
+            );
+            if self.memory_panel.frida_console.use_android_remote {
+                ui.label("Host:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.memory_panel.frida_console.remote_host)
+                        .desired_width(130.0),
+                );
+                let android_pid = self
+                    .memory_panel
+                    .android_bridge
+                    .selected_pid
+                    .map_or_else(|| "None".to_owned(), |p| format!("{p} ({})", self.memory_panel.android_bridge.selected_process_name));
+                ui.label(RichText::new(format!("PID: {android_pid}")).strong());
+            } else {
+                let local_pid = self
+                    .memory_panel
+                    .process_pid
+                    .map_or_else(|| "None".to_owned(), |p| p.to_string());
+                ui.label(RichText::new(format!("Local PID: {local_pid}")).strong());
+            }
+        });
+
+        ui.horizontal(|ui| {
+            if self.memory_panel.frida_console.use_android_remote
+                && ui
+                    .add_enabled(
+                        !setup_loading,
+                        Button::new(self.tr("Setup & Start frida-server", "Cài & Chạy frida-server")),
+                    )
+                    .clicked()
+            {
+                self.start_frida_server_setup();
+            }
+            if !attached {
+                if ui.button(self.tr("Attach & Run Script", "Attach & Chạy Script")).clicked() {
+                    let target = if self.memory_panel.frida_console.use_android_remote {
+                        self.memory_panel.android_bridge.selected_pid.map(|pid| {
+                            crate::frida_injector::FridaTarget::RemoteAndroid {
+                                host: self.memory_panel.frida_console.remote_host.trim().to_owned(),
+                                pid,
+                            }
+                        })
+                    } else {
+                        self.memory_panel
+                            .process_pid
+                            .map(crate::frida_injector::FridaTarget::LocalPid)
+                    };
+                    match target {
+                        Some(tgt) => {
+                            let helper = self.paths.frida_helper_exe.clone();
+                            let src = self.memory_panel.frida_console.script.clone();
+                            self.memory_panel.frida_console.status = "Attaching Frida...".to_owned();
+                            self.memory_panel.frida_session =
+                                Some(crate::frida_injector::Session::attach(helper, tgt, src));
+                        }
+                        None => {
+                            self.memory_panel.frida_console.status =
+                                "Select a target PID first.".to_owned();
+                        }
+                    }
+                }
+            } else if ui
+                .button(RichText::new(self.tr("Detach", "Ngắt Attach")).color(Color32::from_rgb(230, 100, 90)))
+                .clicked()
+            {
+                self.memory_panel.frida_session = None;
+                self.memory_panel.frida_console.status = "Detached Frida session".to_owned();
+            }
+            if ui.small_button(self.tr("Clear Log", "Xóa Log")).clicked() {
+                self.memory_panel.frida_console.logs.clear();
+            }
+        });
+
+        let status_txt = self.memory_panel.frida_console.status.clone();
+        if !status_txt.is_empty() {
+            let color = if status_txt.contains("error") || status_txt.contains("failed") {
+                Color32::from_rgb(255, 120, 90)
+            } else if setup_loading {
+                Color32::from_rgb(230, 180, 70)
+            } else {
+                Color32::from_rgb(100, 215, 145)
+            };
+            ui.label(RichText::new(status_txt).color(color).small());
+        }
+        ui.separator();
+
+        ui.columns(2, |cols| {
+            cols[0].push_id("frida_script_col", |ui| {
+                ui.label(RichText::new("Frida JS Script").strong());
+                let h = ui.available_height().max(180.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("frida_script_scroll")
+                    .max_height(h)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.memory_panel.frida_console.script)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(20),
+                        );
+                    });
+            });
+            cols[1].push_id("frida_log_col", |ui| {
+                ui.label(RichText::new(format!("Frida Output ({})", self.memory_panel.frida_console.logs.len())).strong());
+                let h = ui.available_height().max(180.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("frida_log_scroll")
+                    .max_height(h)
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let mut joined = self.memory_panel.frida_console.logs.join("\n");
+                        ui.add(
+                            egui::TextEdit::multiline(&mut joined)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(20),
+                        );
+                    });
+            });
+        });
     }
 
     fn render_android_bridge_dialog(&mut self, ui: &mut egui::Ui) {
@@ -7692,6 +8006,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                     }
                     if ui.button(self.tr("Lua Inspector", "Lua Inspector")).clicked() {
                         self.memory_panel.lua_inspector.is_open = true;
+                    }
+                    if ui.button(self.tr("Frida Bridge", "Frida Bridge")).clicked() {
+                        self.memory_panel.frida_console.is_open = true;
                     }
                 }
             });
