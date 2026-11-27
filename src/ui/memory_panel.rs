@@ -872,6 +872,7 @@ struct FridaConsoleState {
     status: String,
     logs: Vec<String>,
     setup_loading: bool,
+    auto_attach_after_setup: bool,
     setup_rx: Option<crossbeam_channel::Receiver<Result<String, String>>>,
     setup_progress: std::sync::Arc<parking_lot::Mutex<String>>,
 }
@@ -886,6 +887,7 @@ impl Default for FridaConsoleState {
             status: String::new(),
             logs: Vec::new(),
             setup_loading: false,
+            auto_attach_after_setup: false,
             setup_rx: None,
             setup_progress: std::sync::Arc::new(parking_lot::Mutex::new(String::new())),
         }
@@ -7597,6 +7599,44 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         }
     }
 
+    fn attach_frida_now(&mut self) {
+        let target = if self.memory_panel.frida_console.use_android_remote {
+            self.memory_panel.android_bridge.selected_pid.map(|pid| {
+                crate::frida_injector::FridaTarget::RemoteAndroid {
+                    host: self.memory_panel.frida_console.remote_host.trim().to_owned(),
+                    pid,
+                }
+            })
+        } else {
+            self.memory_panel
+                .process_pid
+                .map(crate::frida_injector::FridaTarget::LocalPid)
+        };
+        match target {
+            Some(tgt) => {
+                let helper = self.paths.frida_helper_exe.clone();
+                let src = self.memory_panel.frida_console.script.clone();
+                self.memory_panel.frida_console.status = "Attaching Frida...".to_owned();
+                self.memory_panel.frida_session =
+                    Some(crate::frida_injector::Session::attach(helper, tgt, src));
+            }
+            None => {
+                self.memory_panel.frida_console.status = "Select a target PID first.".to_owned();
+            }
+        }
+    }
+
+    fn one_click_frida_attach(&mut self) {
+        self.memory_panel.frida_console.is_open = true;
+        if self.memory_panel.frida_console.use_android_remote {
+            self.memory_panel.frida_session = None;
+            self.memory_panel.frida_console.auto_attach_after_setup = true;
+            self.start_frida_server_setup();
+        } else {
+            self.attach_frida_now();
+        }
+    }
+
     fn start_frida_server_setup(&mut self) {
         if self.memory_panel.frida_console.setup_loading {
             return;
@@ -7608,6 +7648,7 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             .clone()
             .or_else(crate::android_bridge::find_adb_executable);
         let Some(adb) = adb else {
+            self.memory_panel.frida_console.auto_attach_after_setup = false;
             self.memory_panel.frida_console.status =
                 "ADB executable not found. Open Android Bridge first.".to_owned();
             return;
@@ -7652,10 +7693,15 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
             {
                 self.memory_panel.frida_console.setup_loading = false;
                 self.memory_panel.frida_console.setup_rx = None;
+                let auto_attach = self.memory_panel.frida_console.auto_attach_after_setup;
+                self.memory_panel.frida_console.auto_attach_after_setup = false;
                 match res {
                     Ok(ok_msg) => {
                         self.memory_panel.frida_console.status = ok_msg.clone();
                         self.memory_panel.frida_console.logs.push(format!("[SETUP] {ok_msg}"));
+                        if auto_attach {
+                            self.attach_frida_now();
+                        }
                     }
                     Err(err) => {
                         self.memory_panel.frida_console.status = format!("Setup failed: {err}");
@@ -7694,87 +7740,56 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         }
         let setup_loading = self.memory_panel.frida_console.setup_loading;
         let attached = self.memory_panel.frida_session.is_some();
-        let remote_lbl = self
-            .tr(
-                "Android Remote (ADB frida-server)",
-                "Android Remote (ADB frida-server)",
-            )
-            .to_owned();
+        let remote_lbl = self.tr("Android", "Android").to_owned();
 
         ui.horizontal(|ui| {
+            let pid_txt = if self.memory_panel.frida_console.use_android_remote {
+                self.memory_panel
+                    .android_bridge
+                    .selected_pid
+                    .map_or_else(|| "None".to_owned(), |p| format!("{p} ({})", self.memory_panel.android_bridge.selected_process_name))
+            } else {
+                self.memory_panel
+                    .process_pid
+                    .map_or_else(|| "None".to_owned(), |p| p.to_string())
+            };
+            ui.label(RichText::new(format!("PID: {pid_txt}")).strong());
+
+            if !attached {
+                if ui
+                    .add_enabled(
+                        !setup_loading,
+                        Button::new(self.tr("Attach & Run", "Attach & Chạy")),
+                    )
+                    .clicked()
+                {
+                    self.one_click_frida_attach();
+                }
+            } else {
+                if ui.button(self.tr("Re-run", "Chạy lại")).clicked() {
+                    self.attach_frida_now();
+                }
+                if ui
+                    .button(RichText::new(self.tr("Detach", "Ngắt")).color(Color32::from_rgb(230, 100, 90)))
+                    .clicked()
+                {
+                    self.memory_panel.frida_session = None;
+                    self.memory_panel.frida_console.status = "Detached Frida session".to_owned();
+                }
+            }
+
+            if ui.small_button(self.tr("Clear Log", "Xóa Log")).clicked() {
+                self.memory_panel.frida_console.logs.clear();
+            }
             ui.checkbox(
                 &mut self.memory_panel.frida_console.use_android_remote,
                 &remote_lbl,
             );
             if self.memory_panel.frida_console.use_android_remote {
-                ui.label("Host:");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.memory_panel.frida_console.remote_host)
-                        .desired_width(130.0),
+                        .desired_width(115.0),
                 );
-                let android_pid = self
-                    .memory_panel
-                    .android_bridge
-                    .selected_pid
-                    .map_or_else(|| "None".to_owned(), |p| format!("{p} ({})", self.memory_panel.android_bridge.selected_process_name));
-                ui.label(RichText::new(format!("PID: {android_pid}")).strong());
-            } else {
-                let local_pid = self
-                    .memory_panel
-                    .process_pid
-                    .map_or_else(|| "None".to_owned(), |p| p.to_string());
-                ui.label(RichText::new(format!("Local PID: {local_pid}")).strong());
-            }
-        });
-
-        ui.horizontal(|ui| {
-            if self.memory_panel.frida_console.use_android_remote
-                && ui
-                    .add_enabled(
-                        !setup_loading,
-                        Button::new(self.tr("Setup & Start frida-server", "Cài & Chạy frida-server")),
-                    )
-                    .clicked()
-            {
-                self.start_frida_server_setup();
-            }
-            if !attached {
-                if ui.button(self.tr("Attach & Run Script", "Attach & Chạy Script")).clicked() {
-                    let target = if self.memory_panel.frida_console.use_android_remote {
-                        self.memory_panel.android_bridge.selected_pid.map(|pid| {
-                            crate::frida_injector::FridaTarget::RemoteAndroid {
-                                host: self.memory_panel.frida_console.remote_host.trim().to_owned(),
-                                pid,
-                            }
-                        })
-                    } else {
-                        self.memory_panel
-                            .process_pid
-                            .map(crate::frida_injector::FridaTarget::LocalPid)
-                    };
-                    match target {
-                        Some(tgt) => {
-                            let helper = self.paths.frida_helper_exe.clone();
-                            let src = self.memory_panel.frida_console.script.clone();
-                            self.memory_panel.frida_console.status = "Attaching Frida...".to_owned();
-                            self.memory_panel.frida_session =
-                                Some(crate::frida_injector::Session::attach(helper, tgt, src));
-                        }
-                        None => {
-                            self.memory_panel.frida_console.status =
-                                "Select a target PID first.".to_owned();
-                        }
-                    }
-                }
-            } else if ui
-                .button(RichText::new(self.tr("Detach", "Ngắt Attach")).color(Color32::from_rgb(230, 100, 90)))
-                .clicked()
-            {
-                self.memory_panel.frida_session = None;
-                self.memory_panel.frida_console.status = "Detached Frida session".to_owned();
-            }
-            if ui.small_button(self.tr("Clear Log", "Xóa Log")).clicked() {
-                self.memory_panel.frida_console.logs.clear();
             }
         });
 
@@ -8008,7 +8023,8 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                         self.memory_panel.lua_inspector.is_open = true;
                     }
                     if ui.button(self.tr("Frida Bridge", "Frida Bridge")).clicked() {
-                        self.memory_panel.frida_console.is_open = true;
+                        self.memory_panel.frida_console.use_android_remote = true;
+                        self.one_click_frida_attach();
                     }
                 }
             });
