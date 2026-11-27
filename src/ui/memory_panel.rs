@@ -851,6 +851,19 @@ struct Il2CppInspectorState {
     include_compiler_generated: bool,
 }
 
+#[derive(Default)]
+struct LuaInspectorState {
+    is_open: bool,
+    dump: Option<std::sync::Arc<crate::android_lua_dumper::AndroidLuaDumpResult>>,
+    loading: bool,
+    status: String,
+    rx: Option<crossbeam_channel::Receiver<Result<crate::android_lua_dumper::AndroidLuaDumpResult, String>>>,
+    progress: std::sync::Arc<parking_lot::Mutex<String>>,
+    search: String,
+    selected_chunk_idx: Option<usize>,
+    show_symbols_view: bool,
+}
+
 #[cfg(windows)]
 struct CodeAccessDialog {
     code_index: usize,
@@ -1294,6 +1307,7 @@ pub(crate) struct MemoryPanelState {
     pub(crate) batch_replace_filter: String,
     pub(crate) android_bridge: crate::android_bridge::AndroidBridgeState,
     il2cpp_inspector: Il2CppInspectorState,
+    lua_inspector: LuaInspectorState,
     pub(crate) hex_calc_open: bool,
     pub(crate) hex_calc_expr: String,
     pub(crate) hex_calc_val_a: String,
@@ -1452,6 +1466,7 @@ impl Default for MemoryPanelState {
             batch_replace_filter: String::new(),
             android_bridge: crate::android_bridge::AndroidBridgeState::new(),
             il2cpp_inspector: Il2CppInspectorState::default(),
+            lua_inspector: LuaInspectorState::default(),
             hex_calc_open: false,
             hex_calc_expr: String::new(),
             hex_calc_val_a: String::new(),
@@ -1891,6 +1906,13 @@ impl CrosshairApp {
                         self.memory_panel.il2cpp_inspector.is_open = true;
                         ui.close();
                     }
+                    if ui
+                        .button(self.tr("Lua Inspector (Android)", "Lua Inspector (Android)"))
+                        .clicked()
+                    {
+                        self.memory_panel.lua_inspector.is_open = true;
+                        ui.close();
+                    }
                     #[cfg(windows)]
                     {
                         ui.separator();
@@ -2050,6 +2072,7 @@ impl CrosshairApp {
         self.render_deep_pointer_dialog(ui.ctx());
         self.render_android_bridge_popup(ui.ctx());
         self.render_il2cpp_inspector_popup(ui.ctx());
+        self.render_lua_inspector_popup(ui.ctx());
         let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
         if !self.render_detached_memory_popup(
             ui.ctx(),
@@ -2220,7 +2243,7 @@ impl CrosshairApp {
                 (vec2(600.0, 420.0), vec2(460.0, 260.0))
             } else if id == "memory-auto-assemble-host" {
                 (vec2(680.0, 520.0), vec2(400.0, 260.0))
-            } else if id == "memory-il2cpp-inspector-host" {
+            } else if id == "memory-il2cpp-inspector-host" || id == "memory-lua-inspector-host" {
                 (vec2(860.0, 560.0), vec2(520.0, 320.0))
             } else {
                 (vec2(640.0, 440.0), vec2(380.0, 240.0))
@@ -2351,6 +2374,7 @@ impl CrosshairApp {
         self.render_deep_pointer_dialog(ctx);
         self.render_android_bridge_popup(ctx);
         self.render_il2cpp_inspector_popup(ctx);
+        self.render_lua_inspector_popup(ctx);
         let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
         if !self.render_detached_memory_popup(
             ctx,
@@ -6752,30 +6776,92 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         }
     }
 
-    fn start_il2cpp_ram_dump(&mut self) {
-        if self.memory_panel.il2cpp_inspector.loading {
-            return;
-        }
-        let Some(adb) = self
+    fn resolve_android_inspector_target(&self) -> Result<(std::path::PathBuf, String, u32), &'static str> {
+        let adb = self
             .memory_panel
             .android_bridge
             .adb_path
             .clone()
             .or_else(crate::android_bridge::find_adb_executable)
-        else {
-            self.memory_panel.il2cpp_inspector.status =
-                "ADB executable not found. Open Android Bridge first.".to_owned();
-            return;
-        };
+            .ok_or("ADB executable not found. Open Android Bridge first.")?;
         let target = if self.memory_panel.android_bridge.selected_target.is_empty() {
             self.memory_panel.android_bridge.custom_target.clone()
         } else {
             self.memory_panel.android_bridge.selected_target.clone()
         };
-        let Some(pid) = self.memory_panel.android_bridge.selected_pid else {
-            self.memory_panel.il2cpp_inspector.status =
-                "Select the Android game process in Android Emulator Bridge first.".to_owned();
+        let pid = self
+            .memory_panel
+            .android_bridge
+            .selected_pid
+            .ok_or("Select the Android game process in Android Emulator Bridge first.")?;
+        Ok((adb, target, pid))
+    }
+
+    fn render_guest_rva_row(
+        ui: &mut egui::Ui,
+        row_w: f32,
+        rva: usize,
+        va: usize,
+        label_text: &str,
+        hover_text: &str,
+        disasm_label: String,
+        highlight: bool,
+        disasm_target: &mut Option<(usize, String)>,
+        copy_text_req: &mut Option<String>,
+    ) {
+        let rva_txt = if rva > 0 {
+            format!("0x{rva:X}")
+        } else {
+            "0x0".to_owned()
+        };
+        let name_rt = if highlight {
+            RichText::new(label_text)
+                .strong()
+                .color(Color32::from_rgb(255, 220, 100))
+        } else {
+            RichText::new(label_text)
+        };
+        ui.allocate_ui_with_layout(
+            egui::vec2(row_w, 20.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if va > 0 {
+                    if ui.small_button("Copy RVA").clicked() {
+                        *copy_text_req = Some(rva_txt.clone());
+                    }
+                    if ui.small_button("Disasm").clicked() {
+                        *disasm_target = Some((va, disasm_label));
+                    }
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(88.0, 18.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new(&rva_txt)
+                                    .monospace()
+                                    .color(Color32::from_rgb(100, 210, 255)),
+                            );
+                        },
+                    );
+                    ui.add(egui::Label::new(name_rt).truncate())
+                        .on_hover_text(hover_text);
+                });
+            },
+        );
+    }
+
+    fn start_il2cpp_ram_dump(&mut self) {
+        if self.memory_panel.il2cpp_inspector.loading {
             return;
+        }
+        let (adb, target, pid) = match self.resolve_android_inspector_target() {
+            Ok(v) => v,
+            Err(msg) => {
+                self.memory_panel.il2cpp_inspector.status = msg.to_owned();
+                return;
+            }
         };
 
         let (tx, rx) = crossbeam_channel::bounded(1);
@@ -7044,51 +7130,18 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                                 let row_w = (ui.available_width() - 6.0).max(240.0);
                                 for m in &cls.methods {
                                     let highlight = !query.is_empty() && m.name.to_lowercase().contains(&query);
-                                    let rva_txt = if m.rva > 0 {
-                                        format!("0x{:X}", m.rva)
-                                    } else {
-                                        "0x0".to_owned()
-                                    };
                                     let sig = format!("{}({} args)", m.name, m.param_count);
-                                    let name_rt = if highlight {
-                                        RichText::new(&sig).strong().color(Color32::from_rgb(255, 220, 100))
-                                    } else {
-                                        RichText::new(&sig)
-                                    };
-                                    ui.allocate_ui_with_layout(
-                                        egui::vec2(row_w, 20.0),
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if m.va > 0 {
-                                                if ui.small_button("Copy RVA").clicked() {
-                                                    copy_text_req = Some(rva_txt.clone());
-                                                }
-                                                if ui.small_button("Disasm").clicked() {
-                                                    disasm_target = Some((
-                                                        m.va,
-                                                        format!("{}::{} (RVA 0x{:X})", cls.name, m.name, m.rva),
-                                                    ));
-                                                }
-                                            }
-                                            ui.with_layout(
-                                                egui::Layout::left_to_right(egui::Align::Center),
-                                                |ui| {
-                                                    ui.allocate_ui_with_layout(
-                                                        egui::vec2(88.0, 18.0),
-                                                        egui::Layout::left_to_right(egui::Align::Center),
-                                                        |ui| {
-                                                            ui.label(
-                                                                RichText::new(&rva_txt)
-                                                                    .monospace()
-                                                                    .color(Color32::from_rgb(100, 210, 255)),
-                                                            );
-                                                        },
-                                                    );
-                                                    ui.add(egui::Label::new(name_rt).truncate())
-                                                        .on_hover_text(&sig);
-                                                },
-                                            );
-                                        },
+                                    Self::render_guest_rva_row(
+                                        ui,
+                                        row_w,
+                                        m.rva,
+                                        m.va,
+                                        &sig,
+                                        &sig,
+                                        format!("{}::{} (RVA 0x{:X})", cls.name, m.name, m.rva),
+                                        highlight,
+                                        &mut disasm_target,
+                                        &mut copy_text_req,
                                     );
                                 }
                                 ui.add_space(6.0);
@@ -7113,6 +7166,349 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
         if let Some(txt) = copy_text_req {
             ui.ctx().copy_text(txt.clone());
             self.memory_panel.il2cpp_inspector.status = format!("Copied {txt}");
+        }
+        if let Some((va, label)) = disasm_target {
+            self.open_arm64_disassembler_at_guest_va(va, &label);
+        }
+    }
+
+    fn render_lua_inspector_popup(&mut self, ctx: &egui::Context) {
+        self.poll_lua_ram_dump(ctx);
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-lua-inspector-host",
+            "Lua Inspector (Android RAM)",
+            self.memory_panel.lua_inspector.is_open,
+            Self::render_lua_inspector_dialog,
+        ) {
+            self.memory_panel.lua_inspector.is_open = false;
+        }
+    }
+
+    fn start_lua_ram_dump(&mut self) {
+        if self.memory_panel.lua_inspector.loading {
+            return;
+        }
+        let (adb, target, pid) = match self.resolve_android_inspector_target() {
+            Ok(v) => v,
+            Err(msg) => {
+                self.memory_panel.lua_inspector.status = msg.to_owned();
+                return;
+            }
+        };
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let progress = std::sync::Arc::new(parking_lot::Mutex::new("Starting Android Lua RAM scan...".to_owned()));
+        let progress_bg = std::sync::Arc::clone(&progress);
+        self.memory_panel.lua_inspector.loading = true;
+        self.memory_panel.lua_inspector.rx = Some(rx);
+        self.memory_panel.lua_inspector.progress = progress;
+        self.memory_panel.lua_inspector.status = format!("Scanning Android PID {pid}...");
+
+        std::thread::spawn(move || {
+            let res = crate::android_lua_dumper::dump_live_android_lua(&adb, &target, pid, |msg| {
+                *progress_bg.lock() = msg.to_owned();
+            });
+            let _ = tx.send(res);
+        });
+    }
+
+    fn poll_lua_ram_dump(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.lua_inspector.loading {
+            return;
+        }
+        let progress_msg = self.memory_panel.lua_inspector.progress.lock().clone();
+        self.memory_panel.lua_inspector.status = progress_msg;
+        ctx.request_repaint();
+
+        if let Some(rx) = self.memory_panel.lua_inspector.rx.as_ref()
+            && let Ok(result) = rx.try_recv()
+        {
+            self.memory_panel.lua_inspector.loading = false;
+            self.memory_panel.lua_inspector.rx = None;
+            match result {
+                Ok(dump) => {
+                    self.memory_panel.lua_inspector.selected_chunk_idx = None;
+                    self.memory_panel.lua_inspector.show_symbols_view = !dump.symbols.is_empty();
+                    self.memory_panel.lua_inspector.status = format!(
+                        "Found {} ELF Lua symbols & {} RAM chunks across {} regions ({:.1} MB)",
+                        dump.symbols.len(),
+                        dump.chunks.len(),
+                        dump.scanned_regions,
+                        dump.scanned_bytes as f64 / (1024.0 * 1024.0)
+                    );
+                    self.memory_panel.lua_inspector.dump = Some(std::sync::Arc::new(dump));
+                }
+                Err(err) => {
+                    self.memory_panel.lua_inspector.status = format!("Lua dump failed: {err}");
+                }
+            }
+        }
+    }
+
+    fn render_lua_inspector_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.memory_panel.lua_inspector.is_open {
+            return;
+        }
+
+        let loading = self.memory_panel.lua_inspector.loading;
+        let pid_label = self
+            .memory_panel
+            .android_bridge
+            .selected_pid
+            .map_or_else(|| "None".to_owned(), |p| format!("{p} ({})", self.memory_panel.android_bridge.selected_process_name));
+
+        let dump_btn_lbl = self.tr("Dump Lua from RAM", "Dump Lua từ RAM").to_owned();
+        let export_json_lbl = self.tr("Export JSON (MCP)", "Xuất JSON (MCP)").to_owned();
+        let export_chunks_lbl = self.tr("Export All Chunks", "Xuất toàn bộ Chunks").to_owned();
+        let dump_snapshot = self.memory_panel.lua_inspector.dump.as_ref().cloned();
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("Android PID: {pid_label}")).strong());
+            if ui.add_enabled(!loading, Button::new(&dump_btn_lbl)).clicked() {
+                self.start_lua_ram_dump();
+            }
+            if let Some(dump) = dump_snapshot.as_ref() {
+                if ui.button(&export_json_lbl).clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("lua_dump.json")
+                        .add_filter("JSON", &["json"])
+                        .save_file()
+                {
+                    match serde_json::to_string_pretty(dump.as_ref()) {
+                        Ok(json) => match std::fs::write(&path, json) {
+                            Ok(_) => self.memory_panel.lua_inspector.status = format!("Saved {}", path.display()),
+                            Err(e) => self.memory_panel.lua_inspector.status = format!("Save failed: {e}"),
+                        },
+                        Err(e) => self.memory_panel.lua_inspector.status = format!("JSON error: {e}"),
+                    }
+                }
+                if !dump.chunks.is_empty()
+                    && ui.button(&export_chunks_lbl).clicked()
+                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                {
+                    let mut saved = 0usize;
+                    let mut index_lines = Vec::with_capacity(dump.chunks.len());
+                    for c in &dump.chunks {
+                        let ext = match c.kind {
+                            crate::android_lua_dumper::LuaChunkKind::LuaJit => "ljbc",
+                            crate::android_lua_dumper::LuaChunkKind::Lua5x => "luac",
+                            crate::android_lua_dumper::LuaChunkKind::Plaintext => "lua",
+                        };
+                        let safe: String = c
+                            .name
+                            .chars()
+                            .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' { ch } else { '_' })
+                            .take(64)
+                            .collect();
+                        let fname = format!("{:04}_{safe}.{ext}", c.index);
+                        if std::fs::write(dir.join(&fname), &c.raw_bytes).is_ok() {
+                            saved += 1;
+                            index_lines.push(format!("{fname}\t{}\t0x{:X}\t{} bytes\t{}", c.format, c.guest_va, c.byte_len, c.name));
+                        }
+                    }
+                    let _ = std::fs::write(dir.join("index.txt"), index_lines.join("\n"));
+                    self.memory_panel.lua_inspector.status = format!("Exported {saved} chunks to {}", dir.display());
+                }
+            }
+        });
+
+        let status_text = self.memory_panel.lua_inspector.status.clone();
+        if !status_text.is_empty() {
+            let color = if status_text.starts_with("Lua dump failed") || status_text.contains("error") {
+                Color32::from_rgb(255, 120, 90)
+            } else if loading {
+                Color32::from_rgb(230, 180, 70)
+            } else {
+                Color32::from_rgb(100, 215, 145)
+            };
+            ui.label(RichText::new(status_text).color(color).small());
+        }
+        ui.separator();
+
+        let empty_hint = self.tr(
+            "Connect Android Bridge, select the game PID, then click 'Dump Lua from RAM' to resolve ELF Lua exports and scan LuaJIT / Lua 5.x / plaintext chunks.",
+            "Kết nối Android Bridge, chọn PID game rồi bấm 'Dump Lua từ RAM' để tra symbol ELF Lua và quét bytecode LuaJIT / Lua 5.x / script trong RAM.",
+        ).to_owned();
+        let Some(dump) = self.memory_panel.lua_inspector.dump.as_ref().cloned() else {
+            ui.label(RichText::new(empty_hint).weak());
+            return;
+        };
+
+        let search_lbl = self.tr("Search:", "Tìm:").to_owned();
+        let search_hint = self.tr("Chunk, symbol, string...", "Chunk, symbol, chuỗi...").to_owned();
+        ui.horizontal(|ui| {
+            ui.label(&search_lbl);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.memory_panel.lua_inspector.search)
+                    .hint_text(&search_hint)
+                    .desired_width(240.0),
+            );
+            if !self.memory_panel.lua_inspector.search.is_empty() && ui.small_button("Clear").clicked() {
+                self.memory_panel.lua_inspector.search.clear();
+            }
+            ui.label(
+                RichText::new(format!(
+                    "Modules: {} | ELF Symbols: {} | RAM Chunks: {}",
+                    dump.lua_modules.len(),
+                    dump.symbols.len(),
+                    dump.chunks.len()
+                ))
+                .small()
+                .weak(),
+            );
+        });
+        ui.separator();
+
+        let query = self.memory_panel.lua_inspector.search.trim().to_lowercase();
+        let filtered_chunks: Vec<usize> = dump
+            .chunks
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                if query.is_empty() {
+                    return true;
+                }
+                c.name.to_lowercase().contains(&query)
+                    || c.format.to_lowercase().contains(&query)
+                    || c.strings.iter().any(|s| s.to_lowercase().contains(&query))
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        let mut disasm_target: Option<(usize, String)> = None;
+        let mut copy_text_req: Option<String> = None;
+
+        ui.columns(2, |cols| {
+            cols[0].push_id("lua_left_col", |ui| {
+                let sym_selected = self.memory_panel.lua_inspector.show_symbols_view
+                    && self.memory_panel.lua_inspector.selected_chunk_idx.is_none();
+                let sym_label = format!("[ELF] Native Lua Symbols ({})", dump.symbols.len());
+                if ui.selectable_label(sym_selected, sym_label).clicked() {
+                    self.memory_panel.lua_inspector.show_symbols_view = true;
+                    self.memory_panel.lua_inspector.selected_chunk_idx = None;
+                }
+                ui.separator();
+                ui.label(RichText::new(format!("RAM Chunks ({})", filtered_chunks.len())).strong());
+                let list_h = ui.available_height().max(180.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("lua_chunks_scroll")
+                    .max_height(list_h)
+                    .auto_shrink([false, false])
+                    .show_rows(ui, 20.0, filtered_chunks.len(), |ui, range| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                        for row in range {
+                            let c_idx = filtered_chunks[row];
+                            let c = &dump.chunks[c_idx];
+                            let selected = !self.memory_panel.lua_inspector.show_symbols_view
+                                && self.memory_panel.lua_inspector.selected_chunk_idx == Some(c_idx);
+                            let label = format!(
+                                "[{}] {} ({} B, {} str)",
+                                c.kind.badge(),
+                                c.name,
+                                c.byte_len,
+                                c.strings.len()
+                            );
+                            if ui.selectable_label(selected, &label).on_hover_text(&c.name).clicked() {
+                                self.memory_panel.lua_inspector.show_symbols_view = false;
+                                self.memory_panel.lua_inspector.selected_chunk_idx = Some(c_idx);
+                            }
+                        }
+                    });
+            });
+
+            cols[1].push_id("lua_right_col", |ui| {
+                if self.memory_panel.lua_inspector.show_symbols_view
+                    || self.memory_panel.lua_inspector.selected_chunk_idx.is_none()
+                {
+                    ui.label(RichText::new("Native Lua C-API Exports (ELF64)").strong());
+                    ui.separator();
+                    let detail_h = ui.available_height().max(180.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("lua_symbols_scroll")
+                        .max_height(detail_h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let row_w = (ui.available_width() - 6.0).max(240.0);
+                            let mut any = false;
+                            for sym in &dump.symbols {
+                                if !query.is_empty()
+                                    && !sym.name.to_lowercase().contains(&query)
+                                    && !sym.module.to_lowercase().contains(&query)
+                                {
+                                    continue;
+                                }
+                                any = true;
+                                let display = format!("{}::{}", sym.module, sym.name);
+                                Self::render_guest_rva_row(
+                                    ui,
+                                    row_w,
+                                    sym.rva,
+                                    sym.va,
+                                    &display,
+                                    &display,
+                                    format!("{} (RVA 0x{:X})", display, sym.rva),
+                                    !query.is_empty(),
+                                    &mut disasm_target,
+                                    &mut copy_text_req,
+                                );
+                            }
+                            if !any {
+                                ui.label(RichText::new("No matching ELF Lua exports found.").weak());
+                            }
+                        });
+                } else if let Some(c_idx) = self.memory_panel.lua_inspector.selected_chunk_idx
+                    && let Some(c) = dump.chunks.get(c_idx)
+                {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&c.name).strong());
+                        if ui.small_button("Save Chunk").clicked()
+                            && let Some(path) = rfd::FileDialog::new()
+                                .set_file_name("chunk.lua")
+                                .save_file()
+                        {
+                            match std::fs::write(&path, &c.raw_bytes) {
+                                Ok(_) => self.memory_panel.lua_inspector.status = format!("Saved {}", path.display()),
+                                Err(e) => self.memory_panel.lua_inspector.status = format!("Save failed: {e}"),
+                            }
+                        }
+                        if ui.small_button("Copy VA").clicked() {
+                            copy_text_req = Some(format!("0x{:X}", c.guest_va));
+                        }
+                    });
+                    ui.label(
+                        RichText::new(format!(
+                            "{} | VA: 0x{:X} | Size: {} bytes | Region: {}",
+                            c.format,
+                            c.guest_va,
+                            c.byte_len,
+                            if c.region_pathname.is_empty() { "[anon]" } else { &c.region_pathname }
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                    ui.separator();
+                    let detail_h = ui.available_height().max(180.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("lua_chunk_detail_scroll")
+                        .max_height(detail_h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let mut preview = c.preview.clone();
+                            ui.add(
+                                egui::TextEdit::multiline(&mut preview)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(16),
+                            );
+                        });
+                }
+            });
+        });
+
+        if let Some(txt) = copy_text_req {
+            ui.ctx().copy_text(txt.clone());
+            self.memory_panel.lua_inspector.status = format!("Copied {txt}");
         }
         if let Some((va, label)) = disasm_target {
             self.open_arm64_disassembler_at_guest_va(va, &label);
@@ -7293,6 +7689,9 @@ fn eval_hex_calc_expression(expr: &str) -> Result<u64, ()> {
                 if self.memory_panel.android_bridge.selected_pid.is_some() {
                     if ui.button(self.tr("IL2CPP Inspector", "IL2CPP Inspector")).clicked() {
                         self.memory_panel.il2cpp_inspector.is_open = true;
+                    }
+                    if ui.button(self.tr("Lua Inspector", "Lua Inspector")).clicked() {
+                        self.memory_panel.lua_inspector.is_open = true;
                     }
                 }
             });
